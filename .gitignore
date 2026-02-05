@@ -9,3 +9,6 @@ marking_framework/server/data/
 marking_framework/outputs/
 marking_framework/inputs/*.pdf
 marking_framework/inputs/*.docx
+**/__pycache__/
+*.pyc
+.coverage
