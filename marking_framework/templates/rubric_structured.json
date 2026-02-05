@@ -1,0 +1,55 @@
+{
+  "title": "Rubric Title",
+  "scale": {
+    "min_level": 1,
+    "max_level": 4
+  },
+  "criteria": [
+    {
+      "name": "Content and Ideas",
+      "max_points": 8,
+      "levels": {
+        "4": "Descriptor for Level 4",
+        "3": "Descriptor for Level 3",
+        "2": "Descriptor for Level 2",
+        "1": "Descriptor for Level 1"
+      }
+    },
+    {
+      "name": "Organization and Structure",
+      "max_points": 8,
+      "levels": {
+        "4": "Descriptor for Level 4",
+        "3": "Descriptor for Level 3",
+        "2": "Descriptor for Level 2",
+        "1": "Descriptor for Level 1"
+      }
+    },
+    {
+      "name": "Language Use",
+      "max_points": 8,
+      "levels": {
+        "4": "Descriptor for Level 4",
+        "3": "Descriptor for Level 3",
+        "2": "Descriptor for Level 2",
+        "1": "Descriptor for Level 1"
+      }
+    },
+    {
+      "name": "Formatting and Requirements",
+      "max_points": 4,
+      "levels": {
+        "4": "Descriptor for Level 4",
+        "3": "Descriptor for Level 3",
+        "2": "Descriptor for Level 2",
+        "1": "Descriptor for Level 1"
+      }
+    }
+  ],
+  "requirements": [
+    "5 paragraphs",
+    "size 12 font",
+    "double-spaced",
+    "RACES/HADET structure"
+  ]
+}

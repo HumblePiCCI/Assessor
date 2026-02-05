@@ -1,0 +1,109 @@
+{
+  "description": "Gold set for assessor calibration and bias correction",
+  "source": "Built-in grade-banded exemplars with known target levels",
+  "usage": "Run calibrate_assessors.py to compute per-assessor bias from exemplar scoring",
+  
+  "gold_samples": {
+    "grade_6_7": {
+      "literary_analysis": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "argumentative": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "informational_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "news_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ]
+    },
+    "grade_8_10": {
+      "literary_analysis": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "argumentative": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "informational_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "news_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ]
+    },
+    "grade_11_12": {
+      "literary_analysis": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "argumentative": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "informational_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ],
+      "news_report": [
+        { "file": "level_4_plus.md", "target_level": "4+", "target_pct": 95 },
+        { "file": "level_4.md", "target_level": "4", "target_pct": 84 },
+        { "file": "level_3.md", "target_level": "3", "target_pct": 75 },
+        { "file": "level_2.md", "target_level": "2", "target_pct": 64 },
+        { "file": "level_1.md", "target_level": "1", "target_pct": 54 }
+      ]
+    }
+  },
+
+  "bias_correction": {
+    "method": "linear_offset",
+    "description": "Compute mean error per assessor on gold set, apply as correction",
+    "formula": "corrected_score = raw_score - assessor_bias",
+    "thresholds": {
+      "acceptable_bias": 5,
+      "warning_bias": 10,
+      "reject_bias": 15
+    }
+  }
+}

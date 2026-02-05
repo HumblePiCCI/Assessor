@@ -1,0 +1,11 @@
+.DS_Store
+*.docx
+marking_framework/inputs/submissions/
+marking_framework/processing/
+marking_framework/assessments/
+marking_framework/outputs/
+marking_framework/logs/
+marking_framework/server/data/
+marking_framework/outputs/
+marking_framework/inputs/*.pdf
+marking_framework/inputs/*.docx

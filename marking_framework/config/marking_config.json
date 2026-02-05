@@ -1,0 +1,39 @@
+{
+  "weights": {
+    "rubric": 0.70,
+    "conventions": 0.15,
+    "comparative": 0.15
+  },
+  "consensus": {
+    "rank_disagreement_threshold": 3,
+    "rubric_sd_threshold": 0.8
+  },
+  "curve": {
+    "top": 92,
+    "bottom": 58,
+    "rounding": "nearest"
+  },
+  "rubric": {
+    "points_possible": null
+  },
+  "conventions": {
+    "mistake_rate_threshold": 0.07,
+    "max_level_drop": 1,
+    "missing_data_mistake_rate_percent": 100.0,
+    "modifier_bands": [
+      { "max_mistake_rate_percent": 2.0, "modifier": "+" },
+      { "max_mistake_rate_percent": 4.0, "modifier": "" },
+      { "max_mistake_rate_percent": 6.0, "modifier": "-" },
+      { "max_mistake_rate_percent": 100.0, "modifier": "--" }
+    ]
+  },
+  "levels": {
+    "bands": [
+      { "level": "1", "min": 50, "max": 59, "letter": "D" },
+      { "level": "2", "min": 60, "max": 69, "letter": "C" },
+      { "level": "3", "min": 70, "max": 79, "letter": "B" },
+      { "level": "4", "min": 80, "max": 89, "letter": "A" },
+      { "level": "4+", "min": 90, "max": 100, "letter": "A+" }
+    ]
+  }
+}

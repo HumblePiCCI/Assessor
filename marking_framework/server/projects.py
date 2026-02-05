@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+import json
+import shutil
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECTS_DIR = BASE_DIR.parent / "projects"
+PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+CURRENT_PROJECT_PATH = PROJECTS_DIR / "current.json"
+
+router = APIRouter()
+
+
+class ProjectPayload(BaseModel):
+    name: str | None = None
+    project_id: str | None = None
+
+
+def workspace_root() -> Path:
+    return BASE_DIR.parent
+
+
+def clear_workspace(root: Path):
+    for name in ["inputs", "processing", "assessments", "outputs"]:
+        path = root / name
+        if path.exists():
+            shutil.rmtree(path)
+    (root / "inputs" / "submissions").mkdir(parents=True, exist_ok=True)
+
+
+def project_id_from_name(name: str) -> str:
+    slug = "".join(ch if ch.isalnum() else "-" for ch in name.strip().lower())
+    slug = "-".join([part for part in slug.split("-") if part])
+    suffix = uuid.uuid4().hex[:6]
+    return f"{slug}-{suffix}" if slug else suffix
+
+
+def get_current_project() -> dict | None:
+    if not CURRENT_PROJECT_PATH.exists():
+        return None
+    return json.loads(CURRENT_PROJECT_PATH.read_text(encoding="utf-8"))
+
+
+def set_current_project(project: dict | None):
+    if project is None:
+        if CURRENT_PROJECT_PATH.exists():
+            CURRENT_PROJECT_PATH.unlink()
+        return
+    CURRENT_PROJECT_PATH.write_text(json.dumps(project, indent=2), encoding="utf-8")
+
+
+def list_projects() -> list:
+    projects = []
+    for path in PROJECTS_DIR.iterdir():
+        if not path.is_dir():
+            continue
+        meta_path = path / "project.json"
+        if not meta_path.exists():
+            continue
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        projects.append(meta)
+    projects.sort(key=lambda p: p.get("updated_at", ""), reverse=True)
+    return projects
+
+
+def copy_tree(src: Path, dst: Path):
+    if not src.exists():
+        return
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def save_project_snapshot(root: Path, project_id: str, name: str, include_logs: bool = True) -> dict:
+    project_dir = PROJECTS_DIR / project_id
+    project_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = project_dir / "project.json"
+    now = datetime.now(timezone.utc).isoformat()
+    created = now
+    if meta_path.exists():
+        existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        created = existing.get("created_at", now)
+    meta = {"id": project_id, "name": name, "created_at": created, "updated_at": now}
+    folders = ["inputs", "processing", "assessments", "outputs"]
+    if include_logs:
+        folders.append("logs")
+    for folder in folders:
+        copy_tree(root / folder, project_dir / folder)
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
+
+
+@router.get("/projects")
+async def projects_list():
+    return {"current": get_current_project(), "projects": list_projects()}
+
+
+@router.post("/projects/save")
+async def projects_save(payload: ProjectPayload):
+    root = workspace_root()
+    current = get_current_project()
+    name = payload.name or (current.get("name") if current else None) or f"Project {datetime.now(timezone.utc).date()}"
+    project_id = payload.project_id or (current.get("id") if current else None) or project_id_from_name(name)
+    meta = save_project_snapshot(root, project_id, name)
+    set_current_project(meta)
+    return meta
+
+
+@router.post("/projects/new")
+async def projects_new(payload: ProjectPayload):
+    root = workspace_root()
+    clear_workspace(root)
+    name = payload.name or f"Project {datetime.now(timezone.utc).date()}"
+    project_id = payload.project_id or project_id_from_name(name)
+    meta = save_project_snapshot(root, project_id, name, include_logs=False)
+    set_current_project(meta)
+    return meta
+
+
+@router.post("/projects/clear")
+async def projects_clear():
+    root = workspace_root()
+    clear_workspace(root)
+    return {"status": "cleared"}
+
+
+@router.post("/projects/load")
+async def projects_load(payload: ProjectPayload):
+    if not payload.project_id:
+        raise HTTPException(status_code=400, detail="Project id required")
+    project_dir = PROJECTS_DIR / payload.project_id
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    root = workspace_root()
+    clear_workspace(root)
+    for folder in ["inputs", "processing", "assessments", "outputs"]:
+        copy_tree(project_dir / folder, root / folder)
+    meta_path = project_dir / "project.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {"id": payload.project_id}
+    set_current_project(meta)
+    return {"status": "ok", "project": meta}
+
+
+@router.delete("/projects/{project_id}")
+async def projects_delete(project_id: str):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    shutil.rmtree(project_dir)
+    current = get_current_project()
+    if current and current.get("id") == project_id:
+        set_current_project(None)
+    return {"status": "deleted"}

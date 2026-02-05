@@ -1,0 +1,59 @@
+import csv
+from pathlib import Path
+
+import scripts.apply_curve as ac
+
+
+def test_round_grade_modes():
+    assert ac.round_grade(89.9, "floor") == 89
+    assert ac.round_grade(89.1, "ceil") == 90
+    assert ac.round_grade(89.5, "nearest") == 90
+
+
+def test_apply_curve_main(tmp_path, monkeypatch):
+    input_csv = tmp_path / "in.csv"
+    with input_csv.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["student_id", "consensus_rank"])
+        writer.writeheader()
+        writer.writerow({"student_id": "s1", "consensus_rank": "1"})
+        writer.writerow({"student_id": "s2", "consensus_rank": "2"})
+
+    config = tmp_path / "cfg.json"
+    config.write_text('{"curve": {"top": 90, "bottom": 80, "rounding": "nearest"}}', encoding="utf-8")
+    out_csv = tmp_path / "out.csv"
+
+    monkeypatch.setattr("sys.argv", ["ac", "--config", str(config), "--input", str(input_csv), "--output", str(out_csv)])
+    assert ac.main() == 0
+    assert out_csv.exists()
+
+    # Single row case
+    input_csv2 = tmp_path / "in2.csv"
+    with input_csv2.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["student_id", "consensus_rank"])
+        writer.writeheader()
+        writer.writerow({"student_id": "s1", "consensus_rank": "1"})
+
+    out_csv2 = tmp_path / "out2.csv"
+    monkeypatch.setattr("sys.argv", ["ac", "--config", str(config), "--input", str(input_csv2), "--output", str(out_csv2)])
+    assert ac.main() == 0
+
+    input_csv3 = tmp_path / "in3.csv"
+    with input_csv3.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["student_id"])
+        writer.writeheader()
+        writer.writerow({"student_id": "s1"})
+        writer.writerow({"student_id": "s2"})
+    out_csv3 = tmp_path / "out3.csv"
+    monkeypatch.setattr("sys.argv", ["ac", "--config", str(config), "--input", str(input_csv3), "--output", str(out_csv3)])
+    assert ac.main() == 0
+
+
+def test_apply_curve_empty(tmp_path, monkeypatch):
+    input_csv = tmp_path / "in.csv"
+    with input_csv.open("w", encoding="utf-8", newline="") as f:
+        f.write("student_id,consensus_rank\n")
+    config = tmp_path / "cfg.json"
+    config.write_text("{}", encoding="utf-8")
+    out_csv = tmp_path / "out.csv"
+    monkeypatch.setattr("sys.argv", ["ac", "--config", str(config), "--input", str(input_csv), "--output", str(out_csv)])
+    assert ac.main() == 0

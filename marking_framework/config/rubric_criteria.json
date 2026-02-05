@@ -1,0 +1,262 @@
+{
+  "description": "Ontario Achievement Chart-aligned rubric criteria for criterion-level scoring",
+  "source": "Ontario Curriculum Achievement Chart (Grades 1-12)",
+  "usage": "Used by LLM assessors to provide per-criterion scores and evidence quotes",
+
+  "categories": {
+    "knowledge_understanding": {
+      "name": "Knowledge and Understanding",
+      "weight": 0.25,
+      "max_points": 25,
+      "criteria": [
+        {
+          "id": "K1",
+          "name": "Subject-specific content",
+          "description": "Knowledge of content (facts, terms, definitions, concepts)",
+          "indicators": {
+            "4+": "Thorough and insightful knowledge of content with original connections",
+            "4": "Thorough knowledge of content",
+            "3": "Considerable knowledge of content",
+            "2": "Some knowledge of content",
+            "1": "Limited knowledge of content"
+          }
+        },
+        {
+          "id": "K2", 
+          "name": "Understanding of content",
+          "description": "Understanding of content (concepts, ideas, theories, relationships)",
+          "indicators": {
+            "4+": "Thorough and insightful understanding with sophisticated interpretation",
+            "4": "Thorough understanding of content",
+            "3": "Considerable understanding of content",
+            "2": "Some understanding of content",
+            "1": "Limited understanding of content"
+          }
+        }
+      ]
+    },
+
+    "thinking_inquiry": {
+      "name": "Thinking and Inquiry",
+      "weight": 0.25,
+      "max_points": 25,
+      "criteria": [
+        {
+          "id": "T1",
+          "name": "Critical thinking",
+          "description": "Use of critical/creative thinking processes (analysis, synthesis, evaluation)",
+          "indicators": {
+            "4+": "Highly effective use with original insight and sophisticated reasoning",
+            "4": "Highly effective use of critical thinking processes",
+            "3": "Considerable effectiveness in use of critical thinking",
+            "2": "Some effectiveness in use of critical thinking",
+            "1": "Limited effectiveness in use of critical thinking"
+          }
+        },
+        {
+          "id": "T2",
+          "name": "Inquiry/research skills",
+          "description": "Use of inquiry/research skills (formulating questions, gathering information)",
+          "indicators": {
+            "4+": "Highly effective with exceptional depth and original investigation",
+            "4": "Highly effective use of inquiry skills",
+            "3": "Considerable effectiveness in use of inquiry skills",
+            "2": "Some effectiveness in use of inquiry skills",
+            "1": "Limited effectiveness in use of inquiry skills"
+          }
+        }
+      ]
+    },
+
+    "communication": {
+      "name": "Communication",
+      "weight": 0.25,
+      "max_points": 25,
+      "criteria": [
+        {
+          "id": "C1",
+          "name": "Expression and organization",
+          "description": "Expression and organization of ideas and information",
+          "indicators": {
+            "4+": "Highly effective with compelling voice and sophisticated structure",
+            "4": "Highly effective expression and organization",
+            "3": "Considerable effectiveness in expression and organization",
+            "2": "Some effectiveness in expression and organization",
+            "1": "Limited effectiveness in expression and organization"
+          }
+        },
+        {
+          "id": "C2",
+          "name": "Conventions",
+          "description": "Use of conventions (spelling, grammar, punctuation)",
+          "indicators": {
+            "4+": "Highly effective with virtually no errors and stylistic sophistication",
+            "4": "Highly effective use with very few errors",
+            "3": "Considerable effectiveness with some errors",
+            "2": "Some effectiveness with noticeable errors",
+            "1": "Limited effectiveness with frequent errors"
+          }
+        },
+        {
+          "id": "C3",
+          "name": "Vocabulary and terminology",
+          "description": "Use of vocabulary and terminology appropriate to subject and audience",
+          "indicators": {
+            "4+": "Highly effective with precise, sophisticated vocabulary choices",
+            "4": "Highly effective use of vocabulary",
+            "3": "Considerable effectiveness in vocabulary use",
+            "2": "Some effectiveness in vocabulary use",
+            "1": "Limited effectiveness in vocabulary use"
+          }
+        }
+      ]
+    },
+
+    "application": {
+      "name": "Application",
+      "weight": 0.25,
+      "max_points": 25,
+      "criteria": [
+        {
+          "id": "A1",
+          "name": "Application of knowledge",
+          "description": "Application of knowledge and skills in familiar contexts",
+          "indicators": {
+            "4+": "Highly effective with sophisticated transfer to new contexts",
+            "4": "Highly effective application of knowledge and skills",
+            "3": "Considerable effectiveness in application",
+            "2": "Some effectiveness in application",
+            "1": "Limited effectiveness in application"
+          }
+        },
+        {
+          "id": "A2",
+          "name": "Making connections",
+          "description": "Making connections within and between contexts (text-to-text, text-to-self, text-to-world)",
+          "indicators": {
+            "4+": "Highly effective with original, insightful connections",
+            "4": "Highly effective connections",
+            "3": "Considerable effectiveness in making connections",
+            "2": "Some effectiveness in making connections",
+            "1": "Limited effectiveness in making connections"
+          }
+        }
+      ]
+    }
+  },
+
+  "genre_specific_criteria": {
+    "literary_analysis": {
+      "additional_criteria": [
+        {
+          "id": "LA1",
+          "name": "Thesis quality",
+          "description": "Clarity, arguability, and insight of thesis statement",
+          "weight_override": null
+        },
+        {
+          "id": "LA2",
+          "name": "Textual evidence",
+          "description": "Quality and integration of quotations from the text",
+          "weight_override": null
+        },
+        {
+          "id": "LA3",
+          "name": "Literary analysis depth",
+          "description": "Analysis of literary elements (theme, character, symbolism, author's craft)",
+          "weight_override": null
+        }
+      ]
+    },
+    "argumentative": {
+      "additional_criteria": [
+        {
+          "id": "AR1",
+          "name": "Claim strength",
+          "description": "Clarity and arguability of central claim",
+          "weight_override": null
+        },
+        {
+          "id": "AR2",
+          "name": "Evidence quality",
+          "description": "Relevance, credibility, and variety of supporting evidence",
+          "weight_override": null
+        },
+        {
+          "id": "AR3",
+          "name": "Counterargument engagement",
+          "description": "Acknowledgment and refutation of opposing viewpoints",
+          "weight_override": null
+        }
+      ]
+    },
+    "informational_report": {
+      "additional_criteria": [
+        {
+          "id": "IR1",
+          "name": "Accuracy",
+          "description": "Factual accuracy and reliability of information",
+          "weight_override": null
+        },
+        {
+          "id": "IR2",
+          "name": "Organization/structure",
+          "description": "Use of headings, sections, and logical flow",
+          "weight_override": null
+        },
+        {
+          "id": "IR3",
+          "name": "Source integration",
+          "description": "Attribution and integration of sources",
+          "weight_override": null
+        }
+      ]
+    },
+    "news_report": {
+      "additional_criteria": [
+        {
+          "id": "NR1",
+          "name": "Lead quality",
+          "description": "Lead paragraph answers who, what, when, where, why",
+          "weight_override": null
+        },
+        {
+          "id": "NR2",
+          "name": "Objectivity",
+          "description": "Neutral, unbiased reporting tone",
+          "weight_override": null
+        },
+        {
+          "id": "NR3",
+          "name": "Source attribution",
+          "description": "Named sources with direct quotes",
+          "weight_override": null
+        }
+      ]
+    }
+  },
+
+  "evidence_requirements": {
+    "quote_validation": true,
+    "min_quotes_per_criterion": 1,
+    "quote_format": "Exact text from student essay with page/line reference if available",
+    "rationale_required": true,
+    "rationale_min_words": 20
+  },
+
+  "output_schema": {
+    "per_criterion": {
+      "criterion_id": "string",
+      "level": "1|2|3|4|4+",
+      "score": "number (0-100 scale)",
+      "evidence_quote": "string",
+      "rationale": "string"
+    },
+    "summary": {
+      "overall_level": "1|2|3|4|4+",
+      "overall_score": "number (0-100)",
+      "strengths": ["string"],
+      "areas_for_growth": ["string"]
+    }
+  }
+}

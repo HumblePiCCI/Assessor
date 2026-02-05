@@ -1,0 +1,110 @@
+{
+  "grade_1": {
+    "vocabulary_expectations": "High-frequency words with some descriptive language.",
+    "sentence_complexity": "Mostly simple sentences; attempts at capitalization and end punctuation.",
+    "thesis_expectations": "States a topic or preference in a simple way.",
+    "evidence_expectations": "One or two relevant details or examples.",
+    "conventions_tolerance": 0.12,
+    "length_expectations": "1-2 short paragraphs (50-120 words)",
+    "notes": "Drawings or labels may support meaning."
+  },
+  "grade_2": {
+    "vocabulary_expectations": "Simple, clear word choice with some variety.",
+    "sentence_complexity": "Simple and compound sentences; emerging paragraphing.",
+    "thesis_expectations": "Main idea is stated but may be broad.",
+    "evidence_expectations": "Two or more details that relate to the topic.",
+    "conventions_tolerance": 0.10,
+    "length_expectations": "1-2 paragraphs (80-180 words)",
+    "notes": "Focus on clarity and basic organization."
+  },
+  "grade_3": {
+    "vocabulary_expectations": "Age-appropriate vocabulary with some precision.",
+    "sentence_complexity": "Mostly complete sentences; some variety.",
+    "thesis_expectations": "Main idea is clear; purpose is evident.",
+    "evidence_expectations": "Relevant details or examples; limited explanation.",
+    "conventions_tolerance": 0.09,
+    "length_expectations": "1-3 paragraphs (120-220 words)",
+    "notes": "Introductions and conclusions are emerging."
+  },
+  "grade_4": {
+    "vocabulary_expectations": "Varied vocabulary with some domain-specific terms.",
+    "sentence_complexity": "Simple, compound, and some complex sentences.",
+    "thesis_expectations": "Clear main idea with basic focus.",
+    "evidence_expectations": "Relevant evidence with some explanation.",
+    "conventions_tolerance": 0.08,
+    "length_expectations": "2-3 paragraphs (180-280 words)",
+    "notes": "Organization should show a clear beginning, middle, end."
+  },
+  "grade_5": {
+    "vocabulary_expectations": "More precise word choice; emerging academic language.",
+    "sentence_complexity": "Varied sentence structures with growing control.",
+    "thesis_expectations": "Focused main idea or claim.",
+    "evidence_expectations": "Multiple relevant details; basic analysis.",
+    "conventions_tolerance": 0.07,
+    "length_expectations": "3-4 paragraphs (220-320 words)",
+    "notes": "Paragraphing and transitions should be consistent."
+  },
+  "grade_6": {
+    "vocabulary_expectations": "Clear, specific language with some sophistication.",
+    "sentence_complexity": "Consistent control of simple and complex sentences.",
+    "thesis_expectations": "Clear, focused thesis.",
+    "evidence_expectations": "Relevant evidence with explanation and some elaboration.",
+    "conventions_tolerance": 0.06,
+    "length_expectations": "3-4 paragraphs (250-350 words)",
+    "notes": "Evidence should connect to the thesis."
+  },
+  "grade_7": {
+    "vocabulary_expectations": "Grade-appropriate vocabulary with some variety and accurate word choice.",
+    "sentence_complexity": "Mostly simple and compound sentences; some complex sentences.",
+    "thesis_expectations": "Clear position or main idea; may be broad but identifiable.",
+    "evidence_expectations": "Relevant examples or details; limited depth of analysis.",
+    "conventions_tolerance": 0.06,
+    "length_expectations": "4-5 paragraphs (300-450 words)",
+    "notes": "Analysis should move beyond summary."
+  },
+  "grade_8": {
+    "vocabulary_expectations": "More precise vocabulary with growing sophistication and clarity.",
+    "sentence_complexity": "Varied sentence structures with controlled complexity.",
+    "thesis_expectations": "Clear, focused thesis with some nuance.",
+    "evidence_expectations": "Relevant evidence with some explanation and connection to thesis.",
+    "conventions_tolerance": 0.05,
+    "length_expectations": "4-5 paragraphs (350-500 words)",
+    "notes": "Organization should be deliberate and cohesive."
+  },
+  "grade_9": {
+    "vocabulary_expectations": "Appropriate academic vocabulary with increasing precision.",
+    "sentence_complexity": "Controlled variety including complex sentences.",
+    "thesis_expectations": "Clear arguable thesis with scope.",
+    "evidence_expectations": "Relevant evidence with explanation and some analysis.",
+    "conventions_tolerance": 0.05,
+    "length_expectations": "4-5 paragraphs (400-600 words)",
+    "notes": "Evidence should be integrated and cited where required."
+  },
+  "grade_10": {
+    "vocabulary_expectations": "Purposeful academic vocabulary and tone.",
+    "sentence_complexity": "Consistent control of complex structures.",
+    "thesis_expectations": "Focused, arguable thesis with clear line of reasoning.",
+    "evidence_expectations": "Specific evidence with analysis and commentary.",
+    "conventions_tolerance": 0.04,
+    "length_expectations": "4-6 paragraphs (450-650 words)",
+    "notes": "Voice and coherence should be sustained."
+  },
+  "grade_11": {
+    "vocabulary_expectations": "Sophisticated word choice matched to audience and purpose.",
+    "sentence_complexity": "Flexible, varied syntax used intentionally.",
+    "thesis_expectations": "Nuanced thesis with clear argument structure.",
+    "evidence_expectations": "Strong evidence with layered analysis.",
+    "conventions_tolerance": 0.04,
+    "length_expectations": "5-6 paragraphs (550-750 words)",
+    "notes": "Reasoning should be sustained and logical."
+  },
+  "grade_12": {
+    "vocabulary_expectations": "Precise, sophisticated language with stylistic control.",
+    "sentence_complexity": "Varied and controlled sentence structures.",
+    "thesis_expectations": "Insightful thesis with complexity and nuance.",
+    "evidence_expectations": "Well-chosen evidence with deep analysis and synthesis.",
+    "conventions_tolerance": 0.03,
+    "length_expectations": "5-7 paragraphs (650-900 words)",
+    "notes": "Argument should anticipate counterpoints."
+  }
+}
