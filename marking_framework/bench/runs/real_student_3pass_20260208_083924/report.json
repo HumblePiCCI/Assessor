@@ -1,0 +1,225 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "anchor_count": 3,
+      "anchor_hit_rate": 0.6667,
+      "anchor_level_mae": 0.5
+    },
+    {
+      "run": 2,
+      "anchor_count": 3,
+      "anchor_hit_rate": 0.6667,
+      "anchor_level_mae": 0.3333
+    },
+    {
+      "run": 3,
+      "anchor_count": 3,
+      "anchor_hit_rate": 0.6667,
+      "anchor_level_mae": 0.3333
+    }
+  ],
+  "overall": {
+    "dataset_root": "bench/runs/real_student_3pass_20260208_083924",
+    "students_total": 9,
+    "students_real": 6,
+    "students_anchor": 3,
+    "anchor_hit_rate_mean": 0.6667,
+    "anchor_level_mae_mean": 0.3889,
+    "real_level_consistency_rate": 0.8333,
+    "real_rank_std_mean": 0.5221,
+    "real_score_std_mean": 1.0537,
+    "real_pairwise_order_agreement_mean": 0.9333
+  },
+  "students": {
+    "s001": {
+      "display_name": "anchor_level_1",
+      "rank_values": [
+        8,
+        8,
+        8
+      ],
+      "rank_std": 0.0,
+      "score_values": [
+        58.04,
+        58.04,
+        58.04
+      ],
+      "score_std": 0.0,
+      "levels": [
+        "1",
+        "1",
+        "1"
+      ],
+      "level_consistent": true
+    },
+    "s002": {
+      "display_name": "anchor_level_3",
+      "rank_values": [
+        4,
+        3,
+        2
+      ],
+      "rank_std": 0.8165,
+      "score_values": [
+        90.59,
+        89.83,
+        89.83
+      ],
+      "score_std": 0.3583,
+      "levels": [
+        "4+",
+        "4",
+        "4"
+      ],
+      "level_consistent": false
+    },
+    "s003": {
+      "display_name": "anchor_level_4_plus",
+      "rank_values": [
+        2,
+        2,
+        1
+      ],
+      "rank_std": 0.4714,
+      "score_values": [
+        90.96,
+        90.96,
+        90.96
+      ],
+      "score_std": 0.0,
+      "levels": [
+        "4+",
+        "4+",
+        "4+"
+      ],
+      "level_consistent": true
+    },
+    "s004": {
+      "display_name": "real_01_cheating-america",
+      "rank_values": [
+        5,
+        4,
+        4
+      ],
+      "rank_std": 0.4714,
+      "score_values": [
+        84.56,
+        84.56,
+        84.56
+      ],
+      "score_std": 0.0,
+      "levels": [
+        "4",
+        "4",
+        "4"
+      ],
+      "level_consistent": true
+    },
+    "s005": {
+      "display_name": "real_02_hang-and-drive",
+      "rank_values": [
+        1,
+        1,
+        3
+      ],
+      "rank_std": 0.9428,
+      "score_values": [
+        83.3,
+        83.5,
+        83.5
+      ],
+      "score_std": 0.0943,
+      "levels": [
+        "4",
+        "4",
+        "4"
+      ],
+      "level_consistent": true
+    },
+    "s006": {
+      "display_name": "real_04_internet-plagiarism",
+      "rank_values": [
+        3,
+        5,
+        6
+      ],
+      "rank_std": 1.2472,
+      "score_values": [
+        84.09,
+        78.97,
+        73.6
+      ],
+      "score_std": 4.2829,
+      "levels": [
+        "4",
+        "3",
+        "3"
+      ],
+      "level_consistent": false
+    },
+    "s007": {
+      "display_name": "real_05_adopting-pet-pound",
+      "rank_values": [
+        6,
+        6,
+        5
+      ],
+      "rank_std": 0.4714,
+      "score_values": [
+        83.4,
+        86.13,
+        83.4
+      ],
+      "score_std": 1.2869,
+      "levels": [
+        "4",
+        "4",
+        "4"
+      ],
+      "level_consistent": true
+    },
+    "s008": {
+      "display_name": "real_06_letter-editor",
+      "rank_values": [
+        9,
+        9,
+        9
+      ],
+      "rank_std": 0.0,
+      "score_values": [
+        5.33,
+        5.33,
+        5.33
+      ],
+      "score_std": 0.0,
+      "levels": [
+        "1",
+        "1",
+        "1"
+      ],
+      "level_consistent": true
+    },
+    "s009": {
+      "display_name": "real_07_my-favorite-place-go",
+      "rank_values": [
+        7,
+        7,
+        7
+      ],
+      "rank_std": 0.0,
+      "score_values": [
+        80.46,
+        80.39,
+        81.82
+      ],
+      "score_std": 0.6582,
+      "levels": [
+        "4",
+        "4",
+        "4"
+      ],
+      "level_consistent": true
+    }
+  }
+}

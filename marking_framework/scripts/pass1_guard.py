@@ -23,11 +23,14 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, float(value)))
 
 
-def stabilize_pass1_item(item: dict, fallback_item: dict, max_score_delta: float, max_level_gap: int) -> dict:
+def stabilize_pass1_item(item: dict, fallback_item: dict, max_score_delta: float, max_level_gap: int, anchor_blend: float = 0.0) -> dict:
     result = copy.deepcopy(item)
     raw = float(result.get("rubric_total_points", 0.0) or 0.0)
     anchor = float(fallback_item.get("rubric_total_points", 0.0) or 0.0)
     original = raw
+    blend = _clamp(anchor_blend, 0.0, 1.0)
+    if blend > 0.0:
+        raw = ((1.0 - blend) * raw) + (blend * anchor)
     if max_score_delta >= 0 and abs(raw - anchor) > max_score_delta:
         raw = anchor + (max_score_delta if raw > anchor else -max_score_delta)
     r_raw = _rank(raw)

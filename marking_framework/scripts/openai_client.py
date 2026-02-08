@@ -282,8 +282,15 @@ def _codex_response(model: str, messages: list, text_format: dict | None = None)
     return resp
 
 
-def _openai_response(model: str, messages: list, temperature: float, reasoning: str, routing: dict,
-                     text_format: dict | None = None) -> dict:
+def _openai_response(
+    model: str,
+    messages: list,
+    temperature: float,
+    reasoning: str,
+    routing: dict,
+    text_format: dict | None = None,
+    max_output_tokens: int | None = None,
+) -> dict:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
@@ -297,6 +304,8 @@ def _openai_response(model: str, messages: list, temperature: float, reasoning: 
         "temperature": temperature,
         "reasoning": {"effort": reasoning},
     }
+    if isinstance(max_output_tokens, int) and max_output_tokens > 0:
+        payload["max_output_tokens"] = max_output_tokens
     if normalized_format:
         payload["text"] = {"format": normalized_format}
     cache_key = None
@@ -311,13 +320,28 @@ def _openai_response(model: str, messages: list, temperature: float, reasoning: 
     return resp
 
 
-def responses_create(model: str, messages: list, temperature: float = 0.2, reasoning: str = "medium",
-                     routing_path: str = "config/llm_routing.json", text_format: dict | None = None) -> dict:
+def responses_create(
+    model: str,
+    messages: list,
+    temperature: float = 0.2,
+    reasoning: str = "medium",
+    routing_path: str = "config/llm_routing.json",
+    text_format: dict | None = None,
+    max_output_tokens: int | None = None,
+) -> dict:
     routing = load_routing(Path(routing_path))
     mode = os.environ.get("LLM_MODE") or routing.get("mode", "openai")
     if mode == "codex_local":
         return _codex_response(model, messages, text_format=text_format)
-    return _openai_response(model, messages, temperature, reasoning, routing, text_format=text_format)
+    return _openai_response(
+        model,
+        messages,
+        temperature,
+        reasoning,
+        routing,
+        text_format=text_format,
+        max_output_tokens=max_output_tokens,
+    )
 
 
 def extract_text(response: dict) -> str:

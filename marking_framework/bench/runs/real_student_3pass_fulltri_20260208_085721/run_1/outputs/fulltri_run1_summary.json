@@ -1,0 +1,75 @@
+{
+  "anchor_count": 3,
+  "anchor_hit_rate": 0.6667,
+  "anchor_level_mae": 0.5,
+  "reals": [
+    {
+      "student_id": "s005",
+      "display_name": "real_02_hang-and-drive",
+      "level": "4",
+      "rank": 3,
+      "rubric_after": 83.47
+    },
+    {
+      "student_id": "s004",
+      "display_name": "real_01_cheating-america",
+      "level": "4",
+      "rank": 4,
+      "rubric_after": 84.94
+    },
+    {
+      "student_id": "s006",
+      "display_name": "real_04_internet-plagiarism",
+      "level": "4",
+      "rank": 5,
+      "rubric_after": 82.35
+    },
+    {
+      "student_id": "s007",
+      "display_name": "real_05_adopting-pet-pound",
+      "level": "4",
+      "rank": 6,
+      "rubric_after": 83.75
+    },
+    {
+      "student_id": "s009",
+      "display_name": "real_07_my-favorite-place-go",
+      "level": "4",
+      "rank": 7,
+      "rubric_after": 81.79
+    },
+    {
+      "student_id": "s008",
+      "display_name": "real_06_letter-editor",
+      "level": "1",
+      "rank": 9,
+      "rubric_after": 5.33
+    }
+  ],
+  "anchors": [
+    {
+      "student_id": "s003",
+      "display_name": "anchor_level_4_plus",
+      "level": "4+",
+      "rank": 1,
+      "rubric_after": 90.92,
+      "expected": "4+"
+    },
+    {
+      "student_id": "s002",
+      "display_name": "anchor_level_3",
+      "level": "4+",
+      "rank": 2,
+      "rubric_after": 90.26,
+      "expected": "3"
+    },
+    {
+      "student_id": "s001",
+      "display_name": "anchor_level_1",
+      "level": "1",
+      "rank": 8,
+      "rubric_after": 58.02,
+      "expected": "1"
+    }
+  ]
+}

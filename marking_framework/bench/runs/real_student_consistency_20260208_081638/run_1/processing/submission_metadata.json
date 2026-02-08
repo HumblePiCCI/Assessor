@@ -1,0 +1,90 @@
+[
+  {
+    "student_id": "s001",
+    "display_name": "anchor_level_1",
+    "source_file": "anchor_level_1.txt",
+    "word_count": 51,
+    "paragraph_count": 2,
+    "char_count": 263
+  },
+  {
+    "student_id": "s002",
+    "display_name": "anchor_level_2",
+    "source_file": "anchor_level_2.txt",
+    "word_count": 166,
+    "paragraph_count": 4,
+    "char_count": 1032
+  },
+  {
+    "student_id": "s003",
+    "display_name": "anchor_level_3",
+    "source_file": "anchor_level_3.txt",
+    "word_count": 236,
+    "paragraph_count": 5,
+    "char_count": 1459
+  },
+  {
+    "student_id": "s004",
+    "display_name": "anchor_level_4",
+    "source_file": "anchor_level_4.txt",
+    "word_count": 230,
+    "paragraph_count": 5,
+    "char_count": 1549
+  },
+  {
+    "student_id": "s005",
+    "display_name": "anchor_level_4_plus",
+    "source_file": "anchor_level_4_plus.txt",
+    "word_count": 251,
+    "paragraph_count": 5,
+    "char_count": 1707
+  },
+  {
+    "student_id": "s006",
+    "display_name": "real_01_cheating-america",
+    "source_file": "real_01_cheating-america.txt",
+    "word_count": 289,
+    "paragraph_count": 1,
+    "char_count": 1716
+  },
+  {
+    "student_id": "s007",
+    "display_name": "real_02_hang-and-drive",
+    "source_file": "real_02_hang-and-drive.txt",
+    "word_count": 359,
+    "paragraph_count": 1,
+    "char_count": 2068
+  },
+  {
+    "student_id": "s008",
+    "display_name": "real_03_save-elephants",
+    "source_file": "real_03_save-elephants.txt",
+    "word_count": 1257,
+    "paragraph_count": 1,
+    "char_count": 7872
+  },
+  {
+    "student_id": "s009",
+    "display_name": "real_04_internet-plagiarism",
+    "source_file": "real_04_internet-plagiarism.txt",
+    "word_count": 668,
+    "paragraph_count": 1,
+    "char_count": 4121
+  },
+  {
+    "student_id": "s010",
+    "display_name": "real_05_adopting-pet-pound",
+    "source_file": "real_05_adopting-pet-pound.txt",
+    "word_count": 244,
+    "paragraph_count": 1,
+    "char_count": 1274
+  },
+  {
+    "student_id": "s011",
+    "display_name": "real_06_letter-editor",
+    "source_file": "real_06_letter-editor.txt",
+    "word_count": 607,
+    "paragraph_count": 1,
+    "char_count": 3548
+  }
+]

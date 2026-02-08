@@ -671,7 +671,7 @@ def test_run_llm_assessors_pass2_uses_structured_contract(tmp_path, monkeypatch)
     )
     assert rla.main() == 0
     assert seen["pass1"] and seen["pass2"]
-    assert seen["pass1"][0]["schema"]["required"] == ["student_id", "rubric_total_points", "criteria_points", "notes"]
+    assert seen["pass1"][0]["schema"]["required"] == ["student_id", "rubric_total_points", "criteria_points", "criteria_evidence", "notes"]
     assert seen["pass2"][0]["schema"]["required"] == ["ranking"]
 
 
@@ -706,6 +706,85 @@ def test_run_llm_assessors_require_model_usage_fails_on_full_fallback(tmp_path, 
             "--assessors", "A",
             "--ignore-cost-limits",
             "--require-model-usage",
+        ],
+    )
+    assert rla.main() == 1
+
+
+def test_run_llm_assessors_min_coverage_gate_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {
+            "mode": "openai",
+            "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}},
+            "quality_gates": {"min_model_coverage": 0.95},
+        },
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Score this student" in prompt:
+            return {"output": [{"type": "output_text", "text": "not json"}], "usage": {}}
+        return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s1"]})}], "usage": {}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(tmp_path / "pass1"),
+            "--pass2-out", str(tmp_path / "pass2"),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 1
+
+
+def test_run_llm_assessors_calibration_gate_missing_bias_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {
+            "mode": "openai",
+            "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}},
+            "calibration_gate": {"enabled": True, "bias_path": "outputs/calibration_bias.json"},
+        },
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(json.dumps({"grade_level": 8, "genre": "literary_analysis"}), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(tmp_path / "pass1"),
+            "--pass2-out", str(tmp_path / "pass2"),
+            "--assessors", "A",
+            "--ignore-cost-limits",
         ],
     )
     assert rla.main() == 1

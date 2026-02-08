@@ -1,0 +1,28 @@
+{
+  "criteria": [
+    {
+      "id": "C1",
+      "label": "Claim and Position",
+      "description": "Clarity and focus of central claim",
+      "weight": 25
+    },
+    {
+      "id": "C2",
+      "label": "Reasons and Evidence",
+      "description": "Relevance and sufficiency of support",
+      "weight": 25
+    },
+    {
+      "id": "C3",
+      "label": "Organization and Coherence",
+      "description": "Logical flow, paragraphing, transitions",
+      "weight": 25
+    },
+    {
+      "id": "C4",
+      "label": "Language and Conventions",
+      "description": "Sentence control, grammar, punctuation, spelling",
+      "weight": 25
+    }
+  ]
+}

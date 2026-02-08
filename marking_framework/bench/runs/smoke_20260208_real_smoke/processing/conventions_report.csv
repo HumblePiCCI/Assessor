@@ -1,0 +1,5 @@
+student_id,word_count,spelling_errors,sentence_start_lowercase,missing_end_punct,repeated_spaces,total_errors,mistake_rate_percent,wordlist_used
+s001,28,1,0,0,0,1,3.57,yes
+s002,37,3,0,0,0,3,8.11,yes
+s003,51,6,0,0,0,6,11.76,yes
+s004,78,10,0,0,0,10,12.82,yes

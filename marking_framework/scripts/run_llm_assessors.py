@@ -8,44 +8,17 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.assessor_context import (
-    build_grade_context,
-    format_exemplars,
-    infer_genre_from_text,
-    load_class_metadata,
-    load_exemplars,
-    load_grade_profiles,
-    normalize_genre,
-    resolve_exemplars_dir,
-    select_grade_level,
+    build_grade_context, format_exemplars, grade_band_for_level, infer_genre_from_text, load_class_metadata,
+    load_exemplars, load_grade_profiles, normalize_genre, resolve_exemplars_dir, select_grade_level,
 )
-from scripts.rubric_criteria import (
-    criteria_ids,
-    criteria_prompt,
-    evidence_requirements,
-    load_rubric_criteria,
-)
-from scripts.assessor_utils import (
-    extract_docx_text,
-    load_file_text,
-    normalize_ranking_ids,
-    resolve_input_path,
-    summarize_text,
-)
+from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria
+from scripts.assessor_utils import extract_docx_text, load_file_text, normalize_ranking_ids, resolve_input_path, summarize_text
 from scripts.llm_assessors_core import (
-    build_pass1_prompt,
-    build_pass1_repair_prompt,
-    build_pass2_prompt,
-    ensure_dir,
-    json_from_text,
-    load_json,
-    load_routing,
-    load_texts,
-    looks_like_prompt_echo,
-    parse_pass1_item,
-    pass1_text_format,
-    preflight_costs,
+    build_pass1_prompt, build_pass1_repair_prompt, build_pass2_prompt, ensure_dir, json_from_text, load_json, load_routing,
+    load_texts, looks_like_prompt_echo, parse_pass1_item, pass1_text_format, preflight_costs,
 )
 from scripts.fallback_assessor import deterministic_pass1_item
+from scripts.calibration_gate import calibration_gate_error
 from scripts.pass1_guard import stabilize_pass1_item
 from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ranking, pass2_text_format
 try:
@@ -57,13 +30,9 @@ def reset_assessor_outputs(path: Path):
         if file.is_file():
             file.unlink()
 def write_text_atomic(path: Path, content: str):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(content, encoding="utf-8"); tmp.replace(path)
 def ranking_from_scores(scores: dict, known_ids: list) -> list:
-    ranked = []
-    for sid in known_ids:
-        ranked.append((sid, float(scores.get(sid, 0.0) or 0.0)))
+    ranked = [(sid, float(scores.get(sid, 0.0) or 0.0)) for sid in known_ids]
     ranked.sort(key=lambda item: (-item[1], item[0].lower()))
     return [sid for sid, _ in ranked]
 def main() -> int:
@@ -96,13 +65,17 @@ def main() -> int:
     pass1_model = routing["tasks"]["pass1_assessor"]["model"]
     pass1_reasoning = routing["tasks"]["pass1_assessor"].get("reasoning", "medium")
     pass1_temp = routing["tasks"]["pass1_assessor"].get("temperature", 0.2)
+    pass1_max_tokens = routing["tasks"]["pass1_assessor"].get("max_output_tokens")
     pass2_model = routing["tasks"]["pass2_ranker"]["model"]
     pass2_reasoning = routing["tasks"]["pass2_ranker"].get("reasoning", "medium")
     pass2_temp = routing["tasks"]["pass2_ranker"].get("temperature", 0.2)
+    pass2_max_tokens = routing["tasks"]["pass2_ranker"].get("max_output_tokens")
     guard_cfg = routing.get("pass1_guard", {})
-    guard_enabled = bool(guard_cfg.get("enabled", False)) and args.fallback == "deterministic"
+    guard_enabled = bool(guard_cfg.get("enabled", False))
     guard_max_score_delta = float(guard_cfg.get("max_score_delta", 8.0) or 8.0)
     guard_max_level_gap = int(guard_cfg.get("max_level_gap", 1) or 1)
+    guard_anchor_blend = float(guard_cfg.get("anchor_blend", 0.0) or 0.0)
+    min_model_coverage = float(routing.get("quality_gates", {}).get("min_model_coverage", 0.0) or 0.0)
     texts = load_texts(Path(args.texts))
     rubric_path = resolve_input_path(Path(args.rubric), "rubric")
     outline_path = resolve_input_path(Path(args.outline), "assignment_outline")
@@ -126,17 +99,19 @@ def main() -> int:
     exemplars = load_exemplars(exemplars_dir)
     exemplar_block = format_exemplars(exemplars)
     criteria_cfg = load_rubric_criteria(Path(args.rubric_criteria))
-    # Use a stable, standards-aligned base criteria set for consistency.
-    # Genre-specific criteria can be added later as optional signals.
     criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
     required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
     reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
     if reqs:
         reqs = dict(reqs)
-        # Keep scoring resilient: evidence quality checks are handled later in feedback phase.
         reqs["quote_validation"] = False
         reqs["rationale_min_words"] = 0
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
+    scope = f"{grade_band_for_level(grade_level)}|{genre}" if grade_band_for_level(grade_level) and genre else ""
+    gate_error = calibration_gate_error(routing, assessors, scope)
+    if gate_error:
+        print(gate_error)
+        return 1
     ensure_dir(Path(args.pass1_out))
     ensure_dir(Path(args.pass2_out))
     reset_assessor_outputs(Path(args.pass1_out))
@@ -145,15 +120,7 @@ def main() -> int:
     usage_log.parent.mkdir(parents=True, exist_ok=True)
     failure_log = Path("logs/llm_failures.jsonl")
     failure_log.parent.mkdir(parents=True, exist_ok=True)
-    # Preflight cost checks
-    summaries = []
-    for student_id, text in texts.items():
-        summaries.append(
-            {
-                "student_id": student_id,
-                "summary": summarize_text(text, args.max_summary_chars),
-            }
-        )
+    summaries = [{"student_id": sid, "summary": summarize_text(text, args.max_summary_chars)} for sid, text in texts.items()]
     if mode != "codex_local" and not args.ignore_cost_limits:
         pricing = load_json(Path(args.pricing))
         limits = load_json(Path(args.cost_limits))
@@ -184,7 +151,6 @@ def main() -> int:
     pass1_scores_by_assessor = {}
     model_successes = 0
     model_attempts = 0
-    # Pass 1
     for assessor in assessors:
         scores = []
         for student_id, text in texts.items():
@@ -211,6 +177,7 @@ def main() -> int:
                         reasoning=pass1_reasoning,
                         routing_path=args.routing,
                         text_format=pass1_text_format(),
+                        max_output_tokens=pass1_max_tokens,
                     )
                     content = extract_text(response)
                     usage = extract_usage(response)
@@ -221,9 +188,14 @@ def main() -> int:
                 try:
                     if mode == "codex_local" and looks_like_prompt_echo(content, student_id):
                         raise ValueError("Model returned prompt echo instead of scored JSON.")
-                    item = parse_pass1_item(content, student_id, required_ids, reqs, text, strict=True)
+                    item = parse_pass1_item(content, student_id, required_ids, reqs, text, strict=False)
+                    if str(item.get("student_id", "")).strip() != student_id:
+                        raise ValueError("Pass1 response student_id mismatch.")
+                    score = item.get("rubric_total_points")
+                    if not isinstance(score, (int, float)):
+                        raise ValueError("Pass1 response missing numeric rubric_total_points.")
                     if guard_enabled:
-                        item = stabilize_pass1_item(item, anchor_item, guard_max_score_delta, guard_max_level_gap)
+                        item = stabilize_pass1_item(item, anchor_item, guard_max_score_delta, guard_max_level_gap, guard_anchor_blend)
                     model_successes += 1
                     break
                 except ValueError as exc:
@@ -257,7 +229,6 @@ def main() -> int:
         }
         out_path = Path(args.pass1_out) / f"assessor_{assessor}.json"
         write_text_atomic(out_path, json.dumps(pass1_payload, indent=2))
-    # Pass 2
     student_summaries = summaries
     known_ids = list(texts.keys())
     for assessor in assessors:
@@ -273,6 +244,7 @@ def main() -> int:
                 reasoning=pass2_reasoning,
                 routing_path=args.routing,
                 text_format=pass2_text_format(),
+                max_output_tokens=pass2_max_tokens,
             )
             content = extract_text(response)
             usage = extract_usage(response)
@@ -301,6 +273,7 @@ def main() -> int:
                     reasoning=pass2_reasoning,
                     routing_path=args.routing,
                     text_format=pass2_text_format(),
+                    max_output_tokens=pass2_max_tokens,
                 )
                 repair_content = extract_text(response)
                 try:
@@ -340,6 +313,10 @@ def main() -> int:
         write_text_atomic(out_path, "\n".join(lines))
     if mode == "openai":
         print(f"Model coverage: {model_successes}/{model_attempts} successful structured outputs.")
+        coverage = (model_successes / model_attempts) if model_attempts else 0.0
+        if min_model_coverage > 0 and coverage < min_model_coverage:
+            print(f"Model coverage {coverage:.2%} below gate {min_model_coverage:.2%}. Failing run.")
+            return 1
         if args.require_model_usage and model_successes == 0:
             print("No model outputs were accepted; failing because --require-model-usage is set.")
             return 1
