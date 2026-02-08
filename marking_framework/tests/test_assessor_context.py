@@ -4,6 +4,7 @@ from pathlib import Path
 from scripts.assessor_context import (
     build_grade_context,
     format_exemplars,
+    infer_genre_from_text,
     load_class_metadata,
     load_exemplars,
     load_grade_profiles,
@@ -47,8 +48,18 @@ def test_build_grade_context():
 def test_normalize_genre():
     assert normalize_genre("Literary Analysis") == "literary_analysis"
     assert normalize_genre("news report") == "news_report"
+    assert normalize_genre("opinion letter") == "argumentative"
+    assert normalize_genre("summary report") == "informational_report"
     assert normalize_genre("custom genre") == "custom_genre"
     assert normalize_genre(None) is None
+
+
+def test_infer_genre_from_text():
+    assert infer_genre_from_text("Write a persuasive letter", "convince your principal") == "argumentative"
+    assert infer_genre_from_text("Write a news report headline", "") == "news_report"
+    assert infer_genre_from_text("Explain facts and details", "") == "informational_report"
+    assert infer_genre_from_text("Analyze theme and character", "") == "literary_analysis"
+    assert infer_genre_from_text("Free writing", "journal entry") is None
 
 
 def test_grade_band_for_level():
@@ -60,12 +71,40 @@ def test_grade_band_for_level():
 
 def test_resolve_exemplars_dir(tmp_path):
     base = tmp_path / "exemplars"
-    (base / "grade_6_7" / "literary_analysis").mkdir(parents=True)
-    (base / "genres" / "argumentative").mkdir(parents=True)
+    grade_dir = base / "grade_6_7" / "literary_analysis"
+    grade_dir.mkdir(parents=True)
+    (grade_dir / "level_3.md").write_text("Level 3 sample", encoding="utf-8")
+    genre_dir = base / "genres" / "argumentative"
+    genre_dir.mkdir(parents=True)
+    (genre_dir / "level_2.md").write_text("Level 2 sample", encoding="utf-8")
     assert resolve_exemplars_dir(base, 6, "literary_analysis") == base / "grade_6_7" / "literary_analysis"
     assert resolve_exemplars_dir(base, 9, "argumentative") == base / "genres" / "argumentative"
-    assert resolve_exemplars_dir(base, 6, "missing") == base
-    assert resolve_exemplars_dir(base, None, None) == base
+    assert resolve_exemplars_dir(base, 6, "missing") == grade_dir
+    assert resolve_exemplars_dir(base, None, None) == grade_dir
+
+
+def test_resolve_exemplars_dir_fallback_with_levels(tmp_path):
+    base = tmp_path / "exemplars"
+    band_dir = base / "grade_6_7" / "argumentative"
+    band_dir.mkdir(parents=True)
+    (band_dir / "level_2.md").write_text("Level 2 exemplar", encoding="utf-8")
+    global_dir = base / "grade_8_10" / "literary_analysis"
+    global_dir.mkdir(parents=True)
+    (global_dir / "level_3.md").write_text("Level 3 exemplar", encoding="utf-8")
+
+    # Genre not available in band should fall back to a genre in the same band with exemplars.
+    assert resolve_exemplars_dir(base, 7, "news_report") == band_dir
+    # Unknown grade should still find a stable default band/genre with exemplars.
+    assert resolve_exemplars_dir(base, None, None) == global_dir
+
+
+def test_resolve_exemplars_dir_prefers_root_when_root_has_levels(tmp_path):
+    base = tmp_path / "exemplars"
+    base.mkdir(parents=True)
+    (base / "level_2.md").write_text("Root level 2 exemplar", encoding="utf-8")
+    # Genre folder exists but has no level files, so function should fall back to root exemplars.
+    (base / "genres" / "argumentative").mkdir(parents=True)
+    assert resolve_exemplars_dir(base, None, "argumentative") == base
 
 
 def test_load_exemplars_and_format(tmp_path):

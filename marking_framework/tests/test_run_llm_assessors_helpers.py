@@ -33,6 +33,20 @@ def test_run_llm_assessors_helpers():
     assert "criteria_evidence" in repair
     pass2_repair = rla.build_pass2_repair_prompt(["s1", "s2"], "raw", [])
     assert "Missing IDs:" not in pass2_repair
+    assert rla.ranking_from_scores({"s1": 70, "s2": 90}, ["s1", "s2"]) == ["s2", "s1"]
+
+
+def test_run_llm_assessors_file_helpers(tmp_path):
+    path = tmp_path / "out.txt"
+    rla.write_text_atomic(path, "x")
+    assert path.read_text(encoding="utf-8") == "x"
+    (tmp_path / "assessor_A.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "assessor_folder").mkdir()
+    (tmp_path / "other.txt").write_text("x", encoding="utf-8")
+    rla.reset_assessor_outputs(tmp_path)
+    assert not (tmp_path / "assessor_A.txt").exists()
+    assert (tmp_path / "assessor_folder").exists()
+    assert (tmp_path / "other.txt").exists()
 
 
 def test_run_llm_assessors_preflight_context():
@@ -116,7 +130,7 @@ def test_parse_pass1_item_with_evidence_validation():
         "notes": "ok"
     })
     item = rla.parse_pass1_item(raw, "s1", ["K1"], {"quote_validation": True, "rationale_min_words": 1}, "hello world")
-    assert item["criteria_points"]["K1"] == 80
+    assert item["criteria_points"]["K1"] == 75.0
 
 
 def test_parse_pass1_item_invalid_quote():
@@ -158,7 +172,7 @@ def test_parse_pass1_item_alt_evidence_keys():
         "notes": "ok"
     })
     item = rla.parse_pass1_item(raw, "s1", ["K1"], {"quote_validation": True, "rationale_min_words": 1}, "hello world")
-    assert item["criteria_points"]["K1"] == 3
+    assert item["criteria_points"]["K1"] == 75.0
 
 
 def test_parse_pass1_item_alt_criterion_key_and_rationale_fill():
@@ -172,7 +186,7 @@ def test_parse_pass1_item_alt_criterion_key_and_rationale_fill():
         ],
     })
     item = rla.parse_pass1_item(raw, "s1", ["K1"], {"quote_validation": False, "rationale_min_words": 2}, "hello world")
-    assert item["criteria_points"]["K1"] == 3
+    assert item["criteria_points"]["K1"] == 75.0
     assert item["criteria_evidence"][0]["rationale"] == "fallback rationale"
 
 

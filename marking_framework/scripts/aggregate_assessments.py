@@ -5,8 +5,10 @@ import logging
 from pathlib import Path
 try:
     from scripts.aggregate_helpers import (
+        apply_bias_correction,
         apply_level_drop_penalty,
         calculate_irr_metrics,
+        consensus_central,
         get_level_band,
         get_level_bands,
         level_modifier_from_mistake_rate,
@@ -15,7 +17,9 @@ try:
         read_conventions_report,
         read_pass1,
         read_pass2,
+        resolve_bias_entry,
         stdev,
+        weighted_central,
     )
     from scripts.rubric_criteria import load_rubric_criteria, total_points
     from scripts.aggregate_output import (
@@ -26,8 +30,10 @@ try:
     )
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import (  # pragma: no cover
+        apply_bias_correction,  # pragma: no cover
         apply_level_drop_penalty,  # pragma: no cover
         calculate_irr_metrics,  # pragma: no cover
+        consensus_central,  # pragma: no cover
         get_level_band,  # pragma: no cover
         get_level_bands,  # pragma: no cover
         level_modifier_from_mistake_rate,  # pragma: no cover
@@ -36,7 +42,9 @@ except ImportError:  # pragma: no cover - Running as a script
         read_conventions_report,  # pragma: no cover
         read_pass1,  # pragma: no cover
         read_pass2,  # pragma: no cover
+        resolve_bias_entry,  # pragma: no cover
         stdev,  # pragma: no cover
+        weighted_central,  # pragma: no cover
     )
     from rubric_criteria import load_rubric_criteria, total_points  # pragma: no cover
     from aggregate_output import (  # pragma: no cover
@@ -45,10 +53,7 @@ except ImportError:  # pragma: no cover - Running as a script
         write_irr_metrics,  # pragma: no cover
         write_ranked_list,  # pragma: no cover
     )
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -60,6 +65,7 @@ def main() -> int:
     parser.add_argument("--allow-missing-data", action="store_true", help="Allow missing data (not recommended)")
     parser.add_argument("--calibration-bias", default="outputs/calibration_bias.json", help="Calibration bias JSON")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
+    parser.add_argument("--scope-key", default="", help="Optional calibration scope key (e.g. grade_6_7|literary_analysis)")
     args = parser.parse_args()
     config = load_config(Path(args.config), logger)
     pass1 = read_pass1(Path(args.pass1), logger)
@@ -116,26 +122,31 @@ def main() -> int:
     if bias_path.exists():
         bias_data = json.loads(bias_path.read_text(encoding="utf-8"))
     bias_map = bias_data.get("assessors", {}) if isinstance(bias_data, dict) else {}
+    scope_key = args.scope_key or config.get("calibration", {}).get("scope_key")
     rubric_by_student = {sid: [] for sid in student_ids}
+    rubric_weights_by_student = {sid: [] for sid in student_ids}
+    assessor_weights = {}
 
     for assessor in pass1:
         points_possible = assessor.get("rubric_points_possible") or rubric_points_possible
         if rubric_points_possible is None and points_possible is not None:
             rubric_points_possible = points_possible
         assessor_id = assessor.get("assessor_id", "")
-        bias_entry = bias_map.get(assessor_id, 0.0)
-        bias = bias_entry.get("bias") if isinstance(bias_entry, dict) else bias_entry
-        bias = float(bias or 0.0)
+        bias_entry = resolve_bias_entry(bias_map, assessor_id, scope_key)
+        assessor_weight = 1.0
+        if isinstance(bias_entry, dict):
+            assessor_weight = max(0.2, float(bias_entry.get("weight", 1.0) or 1.0))
+        assessor_weights[assessor_id] = assessor_weight
         for score in assessor.get("scores", []):
             total = score.get("rubric_total_points")
             if total is None:
                 criteria = score.get("criteria_points", {})
                 total = sum(v for v in criteria.values() if isinstance(v, (int, float)))
-            if bias:
-                total = float(total) - bias
-                cap = rubric_points_possible or 100.0
-                total = max(0.0, min(float(total), cap))
-            rubric_by_student[score["student_id"]].append(float(total))
+            cap = rubric_points_possible or 100.0
+            total = apply_bias_correction(float(total), bias_entry, cap)
+            sid = score["student_id"]
+            rubric_by_student[sid].append(float(total))
+            rubric_weights_by_student[sid].append(assessor_weight)
 
     if rubric_points_possible is None:
         all_scores = [v for values in rubric_by_student.values() for v in values]
@@ -144,19 +155,25 @@ def main() -> int:
     rankings_by_student = {sid: [] for sid in student_ids}
     borda_points = {sid: 0 for sid in student_ids}
     num_students = len(student_ids)
-    num_rankings = len(pass2)
+    ranking_weight_sum = 0.0
 
     for ranking in pass2:
         order = ranking["ranking"]
+        rid = ranking.get("assessor_id", "")
+        bias_entry = resolve_bias_entry(bias_map, rid, scope_key)
+        rank_weight = 1.0
+        if isinstance(bias_entry, dict):
+            rank_weight = max(0.2, float(bias_entry.get("weight", assessor_weights.get(rid, 1.0)) or 1.0))
+        ranking_weight_sum += rank_weight
         for idx, sid in enumerate(order):
             if sid not in borda_points:  # pragma: no cover - defensive, should not occur
                 logger.warning(f"Student '{sid}' in ranking but not in master list")
                 continue
-            points = (num_students - idx - 1)
+            points = (num_students - idx - 1) * rank_weight
             borda_points[sid] += points
             rankings_by_student[sid].append(idx + 1)
 
-    max_borda = (num_students - 1) * num_rankings if num_rankings else 1
+    max_borda = (num_students - 1) * (ranking_weight_sum or 1.0) if num_students > 1 else 1
     irr = calculate_irr_metrics(rubric_by_student, rankings_by_student, num_assessors_pass1, num_assessors_pass2)
     logger.info(f"Inter-rater reliability metrics:")
     logger.info(f"  Rubric ICC (approx): {irr['rubric_icc']:.3f} (>0.7 = good, >0.9 = excellent)")
@@ -167,6 +184,7 @@ def main() -> int:
     rubric_w = weights.get("rubric", 0.70)
     conv_w = weights.get("conventions", 0.15)
     comp_w = weights.get("comparative", 0.15)
+    rubric_center = config.get("consensus", {}).get("rubric_central_tendency", "median")
     conventions_config = config.get("conventions", {})
     mistake_rate_threshold = conventions_config.get("mistake_rate_threshold", 0.07)
     max_level_drop = conventions_config.get("max_level_drop", 1)
@@ -189,7 +207,8 @@ def main() -> int:
     conventions_penalties_applied = 0
     for sid in student_ids:
         rubric_scores = rubric_by_student.get(sid, [])
-        rubric_mean_points = mean(rubric_scores)
+        rubric_weights = rubric_weights_by_student.get(sid, [])
+        rubric_mean_points = weighted_central(rubric_scores, rubric_weights, rubric_center)
         rubric_sd_points = stdev(rubric_scores)
         rubric_mean_percent = (rubric_mean_points / rubric_points_possible) * 100 if rubric_points_possible else 0.0
 
@@ -211,11 +230,18 @@ def main() -> int:
         conv_component = max(0.0, 1.0 - (mistake_rate / 100.0))
         conventions_penalty_applied = False
         rubric_after_penalty = rubric_mean_percent
-        if mistake_rate > (mistake_rate_threshold * 100):  # Convert threshold to percentage
-            rubric_after_penalty = apply_level_drop_penalty(rubric_mean_percent, level_bands, max_level_drop)
+        threshold_percent = mistake_rate_threshold * 100.0
+        if mistake_rate > threshold_percent:
+            excess = max(0.0, mistake_rate - threshold_percent)
+            scaled_drop = float(max_level_drop) * min(1.0, excess / max(threshold_percent, 1.0))
+            rubric_after_penalty = apply_level_drop_penalty(rubric_mean_percent, level_bands, scaled_drop)
             conventions_penalty_applied = True
             conventions_penalties_applied += 1
-            logger.info(f"Student '{sid}': conventions penalty applied (mistake_rate={mistake_rate:.1f}% > threshold={mistake_rate_threshold*100:.1f}%), rubric reduced from {rubric_mean_percent:.1f}% to {rubric_after_penalty:.1f}%")
+            logger.info(
+                f"Student '{sid}': conventions penalty applied "
+                f"(mistake_rate={mistake_rate:.1f}% > threshold={threshold_percent:.1f}%, "
+                f"level_drop={scaled_drop:.2f}), rubric reduced from {rubric_mean_percent:.1f}% to {rubric_after_penalty:.1f}%"
+            )
         composite = (rubric_w * (rubric_after_penalty / 100.0)) + (conv_w * conv_component) + (comp_w * borda_percent)
 
         rank_sd = stdev(rankings_by_student.get(sid, []))
@@ -252,7 +278,7 @@ def main() -> int:
                 "rubric_after_penalty_percent": round(rubric_after_penalty, 2),
                 "rubric_sd_points": round(rubric_sd_points, 2),
                 "conventions_mistake_rate_percent": round(mistake_rate, 2),
-                "borda_points": borda,
+                "borda_points": round(borda, 4),
                 "borda_percent": round(borda_percent, 4),
                 "composite_score": round(composite, 4),
                 "rank_sd": round(rank_sd, 2),

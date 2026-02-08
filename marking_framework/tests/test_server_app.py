@@ -119,6 +119,32 @@ def test_auth_status_and_set(monkeypatch):
     assert resp2.json()["connected"] is True
 
 
+def test_reset_workspace_preserves_exemplars_and_clears_inputs(tmp_path):
+    root = tmp_path
+    exemplars = root / "inputs" / "exemplars"
+    exemplars.mkdir(parents=True)
+    (exemplars / "level_3.md").write_text("X", encoding="utf-8")
+    (root / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
+    extra_dir = root / "inputs" / "tmpdir"
+    extra_dir.mkdir(parents=True)
+    (extra_dir / "x.txt").write_text("x", encoding="utf-8")
+    subs = root / "inputs" / "submissions"
+    subs.mkdir(parents=True)
+    (subs / "keep.docx").write_text("y", encoding="utf-8")
+    out_dir = root / "outputs"
+    out_dir.mkdir()
+    (out_dir / "o.txt").write_text("o", encoding="utf-8")
+
+    appmod.reset_workspace(root)
+
+    assert (exemplars / "level_3.md").exists()
+    assert not (root / "inputs" / "rubric.md").exists()
+    assert not extra_dir.exists()
+    assert subs.exists()
+    assert not any(subs.iterdir())
+    assert not out_dir.exists()
+
+
 def test_create_job_missing_key(tmp_path, monkeypatch):
     appmod.DATA_DIR = tmp_path / "data"
     appmod.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -249,10 +275,13 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     resp = client.get("/projects")
     assert resp.json() == {"current": None, "projects": []}
     (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "exemplars").mkdir()
+    (tmp_path / "inputs" / "exemplars" / "level_3.md").write_text("X", encoding="utf-8")
     (tmp_path / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
     save_resp = client.post("/projects/save", json={"name": "Class A"})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
+    assert not (projects_dir / project_id / "inputs" / "exemplars").exists()
     save_resp2 = client.post("/projects/save", json={"project_id": project_id, "name": "Class A"})
     assert save_resp2.status_code == 200
     list_resp = client.get("/projects")
@@ -260,12 +289,14 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     new_resp = client.post("/projects/new", json={"name": "New Project"})
     assert new_resp.status_code == 200
     assert not (tmp_path / "inputs" / "rubric.md").exists()
+    assert (tmp_path / "inputs" / "exemplars" / "level_3.md").exists()
     clear_file = tmp_path / "outputs"
     clear_file.mkdir()
     (clear_file / "x.txt").write_text("x", encoding="utf-8")
     clear_resp = client.post("/projects/clear")
     assert clear_resp.json()["status"] == "cleared"
     assert not (tmp_path / "outputs").exists()
+    assert (tmp_path / "inputs" / "exemplars" / "level_3.md").exists()
     proj_dir = projects_dir / project_id
     (proj_dir / "outputs").mkdir(parents=True)
     (proj_dir / "outputs" / "y.txt").write_text("y", encoding="utf-8")
@@ -324,3 +355,25 @@ def test_projects_delete_clears_current(tmp_path, monkeypatch):
     assert current_path.exists()
     asyncio.run(projmod.projects_delete(other_id))
     assert not current_path.exists()
+
+
+def test_clear_workspace_inputs_missing(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    projmod.clear_workspace(root)
+    assert (root / "inputs" / "submissions").exists()
+
+
+def test_save_project_snapshot_skips_inputs_when_missing(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    current_path = projects_dir / "current.json"
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
+    root = tmp_path / "workspace"
+    root.mkdir()
+    meta = projmod.save_project_snapshot(root, "pid", "Name", include_logs=False)
+    assert meta["id"] == "pid"

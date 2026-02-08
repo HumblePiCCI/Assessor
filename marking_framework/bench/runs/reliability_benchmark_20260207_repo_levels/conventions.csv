@@ -1,0 +1,16 @@
+student_id,word_count,spelling_errors,sentence_start_lowercase,missing_end_punct,repeated_spaces,total_errors,mistake_rate_percent,wordlist_used
+grade_11_12_news_report_level_1,49,0,0,1,0,1,2.04,yes
+grade_11_12_news_report_level_2,126,4,0,1,0,5,3.97,yes
+grade_11_12_news_report_level_3,168,3,0,1,0,4,2.38,yes
+grade_11_12_news_report_level_4,205,5,0,1,0,6,2.93,yes
+grade_11_12_news_report_level_4_plus,233,9,0,1,0,10,4.29,yes
+grade_6_7_argumentative_level_1,67,3,0,1,0,4,5.97,yes
+grade_6_7_argumentative_level_2,169,5,0,1,0,6,3.55,yes
+grade_6_7_argumentative_level_3,227,8,0,1,0,9,3.96,yes
+grade_6_7_argumentative_level_4,225,13,0,1,0,14,6.22,yes
+grade_6_7_argumentative_level_4_plus,228,8,0,1,0,9,3.95,yes
+grade_8_10_literary_analysis_level_1,107,3,0,1,0,4,3.74,yes
+grade_8_10_literary_analysis_level_2,187,5,0,1,0,6,3.21,yes
+grade_8_10_literary_analysis_level_3,251,8,0,1,0,9,3.59,yes
+grade_8_10_literary_analysis_level_4,256,16,0,1,0,17,6.64,yes
+grade_8_10_literary_analysis_level_4_plus,287,14,0,1,0,15,5.23,yes

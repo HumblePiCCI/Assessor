@@ -59,6 +59,10 @@ def test_read_pass2_and_conventions(tmp_path):
     empty_file.write_text("# only comments\n\n", encoding="utf-8")
     rankings = ah.read_pass2(pass2_dir, logger)
     assert rankings[0]["ranking"] == ["s1", "s2"]
+    dup = pass2_dir / "dup.txt"
+    dup.write_text("s1\ns1\ns2\n", encoding="utf-8")
+    rankings = ah.read_pass2(pass2_dir, logger)
+    assert any(r["ranking"] == ["s1", "s2"] for r in rankings)
 
     missing = ah.read_conventions_report(tmp_path / "missing.csv", logger)
     assert missing == {}
@@ -77,6 +81,8 @@ def test_stats_and_levels():
     bands = ah.get_level_bands({})
     assert ah.get_level_band(None, bands) is None
     assert ah.get_level_band(55, bands)["level"] == "1"
+    assert ah.get_level_band(59.19, bands)["level"] == "1"
+    assert ah.get_level_band(69.9, bands)["level"] == "2"
     assert ah.get_level_band(10, bands)["level"] == "1"
     assert ah.get_level_band(95, bands)["level"] == "4+"
     assert ah.get_level_band(150, bands)["level"] == "4+"
@@ -84,6 +90,75 @@ def test_stats_and_levels():
     assert ah.level_modifier_from_mistake_rate(10.0, [{"max_mistake_rate_percent": 2, "modifier": "+"}]) == ""
     assert ah.apply_level_drop_penalty(80, bands, 1) == 70
     assert ah.apply_level_drop_penalty(None, bands, 1) is None
+    assert ah.consensus_central([], "median") == 0.0
+    assert ah.consensus_central([1, 9, 3], "median") == 3.0
+    assert ah.consensus_central([1, 9], "median") == 5.0
+    assert ah.consensus_central([1, 2, 3], "mean") == 2.0
+    assert ah.weighted_central([1, 3], [0, 1], "median") == 3.0
+    assert ah.weighted_central([1, 3], [0.4, 0.6], "median") == 3.0
+    assert ah.weighted_central([1, 3], [1, 3], "mean") == 2.5
+    assert ah.weighted_central([1, 3], [], "mean") == 2.0
+    assert ah.weighted_central([1, 3], [0, 0], "median") == 2.0
+    assert ah.weighted_central([1, 3], [0, 0], "mean") == 2.0
+    assert ah.apply_bias_correction(80, {"slope": 1.1, "intercept": -5}, 100) == 83.0
+    assert ah.apply_bias_correction(80, {"bias": 10}, 100) == 70.0
+    assert ah.apply_bias_correction(80, 10, 100) == 70.0
+    weak = {"bias": 10, "level_hit_rate": 0.2, "pairwise_order_agreement": 0.4, "mae": 12.0}
+    assert ah.apply_bias_correction(80, weak, 100) == 80.0
+    strong = {"bias": 10, "level_hit_rate": 0.9, "pairwise_order_agreement": 0.9, "mae": 2.0}
+    assert ah.apply_bias_correction(80, strong, 100) == 70.0
+    mapped = ah.apply_bias_correction(65, {"map_points": [{"x": 60, "y": 62}, {"x": 70, "y": 74}]}, 100)
+    assert round(mapped, 2) == 68.0
+
+    scoped = {
+        "assessor_a": {
+            "global": {"bias": 2},
+            "scopes": {"grade_6_7|literary_analysis": {"bias": 5}},
+        }
+    }
+    assert ah.resolve_bias_entry(scoped, "assessor_a", "grade_6_7|literary_analysis")["bias"] == 5
+    assert ah.resolve_bias_entry(scoped, "assessor_a", "grade_8_10|news_report")["bias"] == 2
+    assert ah.resolve_bias_entry({"assessor_a": 3}, "assessor_a", None) == 3
+    assert ah.resolve_bias_entry({"assessor_a": {"custom": 1}}, "assessor_a", None) == {"custom": 1}
+    no_global = {"assessor_a": {"scopes": {"grade_6_7|literary_analysis": {"bias": 7}}}}
+    assert ah.resolve_bias_entry(no_global, "assessor_a", "grade_6_7|literary_analysis")["bias"] == 7
+
+    blended = {
+        "assessor_a": {
+            "global": {"bias": 2, "weight": 0.8, "samples": 60},
+            "scopes": {
+                "grade_6_7|literary_analysis": {
+                    "bias": 6,
+                    "weight": 0.9,
+                    "samples": 20,
+                    "scope_prior": 8,
+                    "map_points": [{"x": 60, "y": 66}],
+                }
+            },
+        }
+    }
+    entry = ah.resolve_bias_entry(blended, "assessor_a", "grade_6_7|literary_analysis")
+    assert 2.0 < entry["bias"] < 6.0
+    assert "blend_alpha" in entry
+    assert entry["map_points"] == [{"x": 60, "y": 66}]
+
+    blended_with_global_points = {
+        "assessor_a": {
+            "global": {"weight": 1.0, "map_points": [{"x": 50, "y": 52}]},
+            "scopes": {"grade_6_7|literary_analysis": {"mae": 1.5, "samples": 1, "scope_prior": 50, "map_points": [{"x": 60, "y": 66}]}}
+        }
+    }
+    entry2 = ah.resolve_bias_entry(blended_with_global_points, "assessor_a", "grade_6_7|literary_analysis")
+    assert entry2["mae"] == 1.5
+    assert entry2["map_points"] == [{"x": 50, "y": 52}]
+
+    unsorted_cfg = {"levels": {"bands": [
+        {"level": "4+", "min": 90, "max": 100, "letter": "A+"},
+        {"level": "1", "min": 50, "max": 59, "letter": "D"},
+        {"level": "2", "min": 60, "max": 69, "letter": "C"},
+    ]}}
+    unsorted_bands = ah.get_level_bands(unsorted_cfg)
+    assert [b["level"] for b in unsorted_bands] == ["1", "2", "4+"]
 
 
 def test_calculate_irr_metrics():
@@ -96,6 +171,18 @@ def test_calculate_irr_metrics():
     irr2 = ah.calculate_irr_metrics({}, {}, 0, 0)
     assert irr2["rubric_icc"] == 0.0
     assert irr2["rank_kendall_w"] == 0.0
+
+
+def test_piecewise_bias_edge_cases():
+    assert ah._piecewise_interpolate(33, []) == 33.0
+    points = [{"x": 60, "y": 62}, {"x": 60, "y": 63}, {"x": 80, "y": 90}]
+    # Below and above range clamp to edge points.
+    assert ah.apply_bias_correction(40, {"map_points": points}, 100) == 63.0
+    assert ah.apply_bias_correction(90, {"map_points": points}, 100) == 90.0
+    # Duplicate x value keeps the latest anchor.
+    assert ah.apply_bias_correction(60, {"map_points": points}, 100) == 63.0
+    # Malformed points list falls back to identity.
+    assert ah.apply_bias_correction(70, {"map_points": ["bad"]}, 100) == 70.0
 
 
 def test_write_json_helper(tmp_path):

@@ -26,11 +26,20 @@ def workspace_root() -> Path:
 
 
 def clear_workspace(root: Path):
-    for name in ["inputs", "processing", "assessments", "outputs"]:
+    inputs = root / "inputs"
+    if inputs.exists():
+        for item in inputs.iterdir():
+            if item.name == "exemplars":
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+    (inputs / "submissions").mkdir(parents=True, exist_ok=True)
+    for name in ["processing", "assessments", "outputs"]:
         path = root / name
         if path.exists():
             shutil.rmtree(path)
-    (root / "inputs" / "submissions").mkdir(parents=True, exist_ok=True)
 
 
 def project_id_from_name(name: str) -> str:
@@ -88,7 +97,21 @@ def save_project_snapshot(root: Path, project_id: str, name: str, include_logs: 
     if include_logs:
         folders.append("logs")
     for folder in folders:
-        copy_tree(root / folder, project_dir / folder)
+        src = root / folder
+        dst = project_dir / folder
+        if folder != "inputs":
+            copy_tree(src, dst)
+            continue
+        # Inputs contain built-in exemplars; don't duplicate them into every project.
+        dst.mkdir(parents=True, exist_ok=True)
+        if src.exists():
+            for item in src.iterdir():
+                if item.name == "exemplars":
+                    continue
+                if item.is_dir():
+                    copy_tree(item, dst / item.name)
+                else:
+                    shutil.copy2(item, dst / item.name)
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
 

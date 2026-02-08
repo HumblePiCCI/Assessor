@@ -1,0 +1,6 @@
+Estimated cost: $0.03 total (~$0.01/student)
+Model coverage: 12/12 successful structured outputs.
+LLM assessor runs completed.
+Wrote pairwise review file: assessments/final_review_pairs.json
+Consistency checks saved to outputs/consistency_checks.json
+Wrote dashboard data: outputs/dashboard_data.json

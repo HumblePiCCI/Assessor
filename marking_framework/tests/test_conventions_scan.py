@@ -4,22 +4,32 @@ import scripts.conventions_scan as cs
 
 
 def test_spelling_errors_count_branches():
-    assert cs.spelling_errors_count("Test", None) == 0
+    assert cs.spelling_errors_count("Test", None, set()) == 0
 
     wordlist = {"test", "student", "run"}
     text = "Test 123 a I student's can't"
     # tokens: Test (capitalized -> ignored), 123 (ignored), a (len<3), I (len<3), student's -> student, can't -> can, t
-    errors = cs.spelling_errors_count(text, wordlist)
+    errors = cs.spelling_errors_count(text, wordlist, set())
     assert errors == 0
 
-    errors2 = cs.spelling_errors_count("Wrongword", wordlist)
-    assert errors2 == 1
+    errors2 = cs.spelling_errors_count("Wrongword", wordlist, set())
+    assert errors2 == 0
 
-    errors3 = cs.spelling_errors_count("abc123", wordlist)
+    errors3 = cs.spelling_errors_count("abc123", wordlist, set())
     assert errors3 == 0
 
-    errors4 = cs.spelling_errors_count("'''", wordlist)
+    errors4 = cs.spelling_errors_count("'''", wordlist, set())
     assert errors4 == 0
+
+
+def test_spelling_errors_whitelist_and_unknown_detection():
+    wordlist = {"hello"}
+    assert cs.spelling_errors_count("hello blorb", wordlist, set()) == 1
+    assert cs.spelling_errors_count("hello blorb", wordlist, {"blorb"}) == 0
+    wl = cs.build_unknown_whitelist(["blorb one", "blorb two", "other"], wordlist)
+    assert "blorb" in wl
+    assert cs.build_unknown_whitelist(["anything"], None) == set()
+    assert cs._unknown_tokens("123 A Hi Name", {"name"}) == []
 
 
 def test_load_wordlist_reads_file(tmp_path, monkeypatch):

@@ -11,6 +11,9 @@ Model Components
   - missing end punctuation
   - repeated spaces
   - spelling outliers (wordlist-based; heuristic)
+- Stability guards for spelling:
+  - title-case proper nouns are excluded
+  - class-wide repeated unknown terms are auto-whitelisted (e.g., character names, domain words)
 - Metric: `mistake_rate = total_errors / total_words` (reported as %)
 - Conventions modifiers (e.g., 3+, 4-) are derived from mistake-rate bands in config.
 
@@ -37,13 +40,18 @@ Model Components
   - Holistic
 - Consensus algorithm:
   - Composite score = weighted combination (default: 70% rubric + 15% conventions + 15% comparative)
-  - Rubric scores averaged across assessors
-  - Conventions penalty applied if mistake rate exceeds threshold (reduces rubric score by one level, based on band width)
+  - Rubric central tendency defaults to median across assessors (more robust to outliers)
+  - Calibration bias correction supports affine moderation (`corrected = slope * raw + intercept`)
+  - Conventions penalty is progressive once threshold is exceeded (fractional level drop up to configured max)
   - Borda aggregation of comparative rankings
   - Disagreement flags if rubric SD or rank SD exceed thresholds
 - Data completeness validation: all assessors must score all students (hard requirement)
 - Inter-rater reliability metrics calculated (ICC, Kendall's W)
 - Any flagged essays require targeted re-reads before final ordering.
+- OpenAI main-path contract hardening:
+  - Pass 1 and Pass 2 use strict JSON schema outputs.
+  - Pass 1 can be anchor-guarded against deterministic drift (`pass1_guard` in routing config).
+  - Optional `--require-model-usage` fails the run if zero model outputs are accepted (prevents silent full fallback).
 
 5) Curve-Based Grades
 - After consensus order, grades are assigned along a fixed curve.
@@ -77,3 +85,8 @@ Outputs
 - Curve-based grades (with interactive review)
 - Disagreement list for review
 - Two stars and a wish feedback per student (post-curve, with quote validation)
+
+Validation Harness
+- Run `python3 scripts/benchmark_main_vs_fallback.py --dataset <dataset> --runs 3`.
+- The benchmark compares OpenAI main-path vs deterministic fallback and exits non-zero if main-path accuracy is lower.
+- Report includes model usage ratio so you can confirm the model actually ran (and not silent fallback).

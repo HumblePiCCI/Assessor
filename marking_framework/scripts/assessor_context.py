@@ -26,6 +26,15 @@ GENRE_ALIASES = {
     "letter": {"letter", "reader response", "response letter"},
 }
 
+CANONICAL_GENRE_MAP = {
+    "opinion_letter": "argumentative",
+    "advertisement": "argumentative",
+    "letter": "argumentative",
+    "summary_report": "informational_report",
+    "descriptive": "literary_analysis",
+    "narrative": "literary_analysis",
+}
+
 
 def load_grade_profiles(path: Path) -> dict:
     if not path.exists():
@@ -116,8 +125,23 @@ def normalize_genre(value: str | None) -> str | None:
     lowered = value.strip().lower()
     for key, aliases in GENRE_ALIASES.items():
         if lowered == key or lowered in aliases:
-            return key
-    return lowered.replace(" ", "_")
+            return CANONICAL_GENRE_MAP.get(key, key)
+    normalized = lowered.replace(" ", "_")
+    return CANONICAL_GENRE_MAP.get(normalized, normalized)
+
+
+def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
+    merged = f"{rubric_text}\n{outline_text}".lower()
+    rules = [
+        ("news_report", ("headline", "news report", "who what when where", "objective tone")),
+        ("argumentative", ("persuasive", "convince", "opinion", "letter to the editor", "argument")),
+        ("informational_report", ("informational", "report", "explain", "facts and details")),
+        ("literary_analysis", ("theme", "character", "novel", "textual evidence", "analysis")),
+    ]
+    for genre, markers in rules:
+        if any(marker in merged for marker in markers):
+            return genre
+    return None
 
 
 def grade_band_for_level(grade_level: int | None) -> str | None:
@@ -133,14 +157,37 @@ def grade_band_for_level(grade_level: int | None) -> str | None:
 
 
 def resolve_exemplars_dir(base_dir: Path, grade_level: int | None, genre: str | None) -> Path:
-    band = grade_band_for_level(grade_level)
+    def _has_levels(path: Path) -> bool:
+        if not path.exists():
+            return False
+        for _, _, aliases in EXEMPLAR_SPECS:
+            if _find_exemplar_file(path, aliases):
+                return True
+        return False
+
+    genre_order = []
     normalized = normalize_genre(genre)
-    if band and normalized:
-        candidate = base_dir / band / normalized
-        if candidate.exists():
-            return candidate
+    if normalized:
+        genre_order.append(normalized)
+    for fallback in ("literary_analysis", "argumentative", "informational_report", "news_report"):
+        if fallback not in genre_order:
+            genre_order.append(fallback)
+
+    band = grade_band_for_level(grade_level)
+    if band:
+        for key in genre_order:
+            candidate = base_dir / band / key
+            if _has_levels(candidate):
+                return candidate
     if normalized:
         candidate = base_dir / "genres" / normalized
-        if candidate.exists():
+        if _has_levels(candidate):
             return candidate
+    if _has_levels(base_dir):
+        return base_dir
+    for fallback_band in ("grade_8_10", "grade_6_7", "grade_11_12"):
+        for key in genre_order:
+            candidate = base_dir / fallback_band / key
+            if _has_levels(candidate):
+                return candidate
     return base_dir

@@ -5,7 +5,12 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.openai_client import extract_text, responses_create
+try:
+    from scripts.assessor_utils import load_file_text, resolve_input_path
+    from scripts.openai_client import extract_text, responses_create
+except ImportError:  # pragma: no cover - Support running as script without package context
+    from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
+    from openai_client import extract_text, responses_create  # pragma: no cover
 
 
 def load_rows(path: Path) -> list:
@@ -100,8 +105,10 @@ def main() -> int:
         return 1
     rows.sort(key=lambda r: int(r.get("consensus_rank", 0) or 0))
     texts = load_texts(Path(args.texts))
-    rubric = Path(args.rubric).read_text(encoding="utf-8", errors="ignore")
-    outline = Path(args.outline).read_text(encoding="utf-8", errors="ignore")
+    rubric_path = resolve_input_path(Path(args.rubric), "rubric")
+    outline_path = resolve_input_path(Path(args.outline), "assignment_outline")
+    rubric = load_file_text(rubric_path)
+    outline = load_file_text(outline_path)
 
     decisions = []
     for idx in range(len(rows) - 1):
@@ -113,7 +120,7 @@ def main() -> int:
         response = responses_create(
             model=args.model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            temperature=0.0,
             reasoning="low",
             routing_path=args.routing,
         )

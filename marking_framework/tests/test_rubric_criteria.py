@@ -78,7 +78,7 @@ def test_validate_criteria_evidence_errors():
     assert any("Missing evidence for K2" in err for err in errors)
     assert any("Missing evidence quote for K1" in err for err in errors)
     assert any("Rationale too short for K1" in err for err in errors)
-    assert any("Missing score for K1" in err for err in errors)
+    assert any("Missing score/level for K1" in err for err in errors)
 
 
 def test_validate_criteria_evidence_alt_id_keys():
@@ -112,3 +112,17 @@ def test_validate_criteria_evidence_no_quote_validation():
     items = [{"criterion_id": "K1", "score": 1, "evidence_quote": "", "rationale": "ok"}]
     errors = validate_criteria_evidence(items, ["K1"], reqs)
     assert not any("Missing evidence quote" in err for err in errors)
+
+
+def test_validate_criteria_evidence_canonical_and_evidence_fallback():
+    reqs = {"quote_validation": True, "rationale_min_words": 0}
+    items = [{"criterion_id": "k1.", "score": 1, "evidence": "quote", "rationale": "ok"}]
+    errors = validate_criteria_evidence(items, ["K1"], reqs)
+    assert errors == []
+
+
+def test_validate_criteria_evidence_unknown_id_ignored():
+    reqs = {"quote_validation": False, "rationale_min_words": 0}
+    items = [{"criterion_id": "ZZ1", "score": 1, "evidence_quote": "q", "rationale": "ok"}]
+    errors = validate_criteria_evidence(items, ["K1"], reqs)
+    assert any("Missing evidence for K1" in err for err in errors)

@@ -1,0 +1,17 @@
+Consensus Ranking
+
+1. grade_8_10_literary_analysis_level_4_plus
+2. grade_8_10_literary_analysis_level_3 (rubric_sd)
+3. grade_6_7_argumentative_level_3 (rubric_sd)
+4. grade_8_10_literary_analysis_level_4
+5. grade_8_10_literary_analysis_level_2
+6. grade_6_7_argumentative_level_4_plus
+7. grade_6_7_argumentative_level_4
+8. grade_11_12_news_report_level_4_plus (rubric_sd)
+9. grade_11_12_news_report_level_4
+10. grade_8_10_literary_analysis_level_1
+11. grade_6_7_argumentative_level_2
+12. grade_11_12_news_report_level_3
+13. grade_11_12_news_report_level_2
+14. grade_11_12_news_report_level_1
+15. grade_6_7_argumentative_level_1

@@ -1,0 +1,9 @@
+Schools should limit phones during lessons, but they should not ban them completely. A balanced rule is better because phones can be useful tools while still being distracting if they are not managed.
+
+First, phones can support learning when they are used on purpose. For example, students can look up a definition, check a fact, or use a timer for reading. If a teacher says, "Take out your phone for this research question," it can actually help students work faster. Phones can also be helpful for accessibility, like listening to text or using speech-to-text.
+
+Second, phones matter for safety and communication. Students sometimes need to contact a parent about pickup changes. Even if this does not happen every day, it is important. A complete ban can make small problems bigger, because students feel stressed when they cannot communicate.
+
+However, phones should not be used during direct instruction. Notifications and games can pull attention away. This is why a clear rule matters, like "Phones in backpacks unless the teacher gives permission." If a student breaks the rule, there should be consequences, such as the phone being held until the end of class.
+
+In conclusion, schools should not pretend phones do not exist. Instead, schools should teach students how to use them responsibly by limiting them during lessons and allowing them when there is a clear purpose.

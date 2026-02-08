@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 52.79,
+      "criteria_points": {
+        "K1": 46.330000000000005,
+        "K2": 46.330000000000005,
+        "T1": 55.97866666666667,
+        "T2": 55.97866666666667,
+        "C1": 50.112,
+        "C2": 69.21600000000001,
+        "C3": 55.97866666666667,
+        "A1": 47.592,
+        "A2": 47.592
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 56.84,
+      "criteria_points": {
+        "K1": 52.667500000000004,
+        "K2": 52.667500000000004,
+        "T1": 57.810181818181825,
+        "T2": 57.810181818181825,
+        "C1": 56.79200000000001,
+        "C2": 70.0935,
+        "C3": 57.810181818181825,
+        "A1": 52.93200000000001,
+        "A2": 52.93200000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 64.74,
+      "criteria_points": {
+        "K1": 59.900000000000006,
+        "K2": 59.900000000000006,
+        "T1": 66.5527212572374,
+        "T2": 66.5527212572374,
+        "C1": 64.96000000000001,
+        "C2": 76.73,
+        "C3": 66.5527212572374,
+        "A1": 60.760000000000005,
+        "A2": 60.760000000000005
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 83.13,
+      "criteria_points": {
+        "K1": 77.11500000000001,
+        "K2": 77.11500000000001,
+        "T1": 86.33468356550765,
+        "T2": 86.33468356550765,
+        "C1": 83.616,
+        "C2": 92.538,
+        "C3": 86.33468356550765,
+        "A1": 79.396,
+        "A2": 79.396
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

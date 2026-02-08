@@ -44,9 +44,49 @@ def repeated_spaces_count(text: str) -> int:
     return text.count("  ")
 
 
-def spelling_errors_count(text: str, wordlist) -> int:
+def _token_parts(token: str) -> list[str]:
+    tok_clean = token.lower().strip("'")
+    if tok_clean.endswith("'s"):
+        tok_clean = tok_clean[:-2]
+    parts = [p for p in tok_clean.split("'") if p]
+    if any(len(part) == 1 for part in parts):
+        return []
+    return parts
+
+
+def _unknown_tokens(text: str, wordlist) -> list[str]:
+    tokens = re.findall(r"[A-Za-z0-9']+", text)
+    out = []
+    for tok in tokens:
+        if any(ch.isdigit() for ch in tok):
+            continue
+        if len(tok) < 3:
+            continue
+        # Treat title-case tokens as likely proper nouns.
+        if tok[0].isupper() and tok[1:].islower():
+            continue
+        for part in _token_parts(tok):
+            if part not in wordlist:
+                out.append(part)
+    return out
+
+
+def build_unknown_whitelist(texts: list[str], wordlist) -> set[str]:
+    if wordlist is None:
+        return set()
+    counts = {}
+    for text in texts:
+        seen = set(_unknown_tokens(text, wordlist))
+        for token in seen:
+            counts[token] = counts.get(token, 0) + 1
+    # Unknown words repeated across multiple submissions are often names or domain terms.
+    return {token for token, count in counts.items() if count >= 2}
+
+
+def spelling_errors_count(text: str, wordlist, unknown_whitelist=None) -> int:
     if wordlist is None:
         return 0
+    unknown_whitelist = unknown_whitelist or set()
     tokens = re.findall(r"[A-Za-z0-9']+", text)
     errors = 0
     for tok in tokens:
@@ -54,17 +94,12 @@ def spelling_errors_count(text: str, wordlist) -> int:
             continue
         if len(tok) < 3:
             continue
-        tok_clean = tok.lower().strip("'")
-        # Handle common possessives and contractions
-        if tok_clean.endswith("'s"):
-            tok_clean = tok_clean[:-2]
-        parts = [p for p in tok_clean.split("'") if p]
-        if not parts:
+        # Treat title-case tokens as likely proper nouns.
+        if tok[0].isupper() and tok[1:].islower():
             continue
-        if any(len(part) == 1 for part in parts):
-            # Ignore contractions that leave single-letter fragments
-            continue
-        for part in parts:
+        for part in _token_parts(tok):
+            if part in unknown_whitelist:
+                continue
             if part not in wordlist:
                 errors += 1
     return errors
@@ -83,13 +118,18 @@ def main() -> int:
         return 1
     in_dir = Path(args.inputs)
     rows = []
+    texts_by_path = {
+        path: path.read_text(encoding="utf-8", errors="ignore")
+        for path in sorted(in_dir.glob("*.txt"))
+    }
+    unknown_whitelist = build_unknown_whitelist(list(texts_by_path.values()), wordlist)
 
-    for path in sorted(in_dir.glob("*.txt")):
-        text = path.read_text(encoding="utf-8", errors="ignore")
+    for path in sorted(texts_by_path):
+        text = texts_by_path[path]
         words = re.findall(r"[A-Za-z']+", text)
         word_count = len(words)
 
-        spelling_errors = spelling_errors_count(text, wordlist)
+        spelling_errors = spelling_errors_count(text, wordlist, unknown_whitelist=unknown_whitelist)
         lower_starts = sentence_start_lowercase_count(text)
         missing_end = missing_end_punct_count(text)
         repeated_spaces = repeated_spaces_count(text)

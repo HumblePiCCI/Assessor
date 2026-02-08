@@ -1,0 +1,197 @@
+{
+  "benchmark": "reliability_benchmark_20260207_timeout1",
+  "settings": {
+    "routing_mode": "codex_local",
+    "model": "gpt-5.2",
+    "temperature": 0.0,
+    "runs": 5,
+    "llm_timeout_seconds": 1,
+    "llm_cache": 0,
+    "fallback": "deterministic"
+  },
+  "overall": {
+    "runs_total": 5,
+    "runs_successful": 5,
+    "runs_failed": 0,
+    "expected_level_accuracy_mean": 0.5,
+    "expected_level_accuracy_min": 0.5,
+    "expected_level_accuracy_max": 0.5,
+    "mean_rank_stdev": 0.0,
+    "max_rank_stdev": 0.0
+  },
+  "student_summary": {
+    "sample_level1_internet": {
+      "expected_level": "1",
+      "score_mean": 57.37,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "rank_range": 0,
+      "level_mode": "1",
+      "level_consistency": 1.0
+    },
+    "sample_level2_internet": {
+      "expected_level": "2",
+      "score_mean": 60.93,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "rank_range": 0,
+      "level_mode": "2",
+      "level_consistency": 1.0
+    },
+    "sample_level3_internet": {
+      "expected_level": "3",
+      "score_mean": 62.1,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "rank_range": 0,
+      "level_mode": "2",
+      "level_consistency": 1.0
+    },
+    "sample_level4_internet": {
+      "expected_level": "4",
+      "score_mean": 68.72,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "rank_range": 0,
+      "level_mode": "2",
+      "level_consistency": 1.0
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "run_llm_rc": 0,
+      "aggregate_rc": 0,
+      "students": {
+        "sample_level4_internet": {
+          "rank": 1,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 68.72
+        },
+        "sample_level3_internet": {
+          "rank": 2,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 62.1
+        },
+        "sample_level2_internet": {
+          "rank": 3,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 60.93
+        },
+        "sample_level1_internet": {
+          "rank": 4,
+          "adjusted_level": "1",
+          "rubric_mean_percent": 57.37
+        }
+      }
+    },
+    {
+      "run": 2,
+      "run_llm_rc": 0,
+      "aggregate_rc": 0,
+      "students": {
+        "sample_level4_internet": {
+          "rank": 1,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 68.72
+        },
+        "sample_level3_internet": {
+          "rank": 2,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 62.1
+        },
+        "sample_level2_internet": {
+          "rank": 3,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 60.93
+        },
+        "sample_level1_internet": {
+          "rank": 4,
+          "adjusted_level": "1",
+          "rubric_mean_percent": 57.37
+        }
+      }
+    },
+    {
+      "run": 3,
+      "run_llm_rc": 0,
+      "aggregate_rc": 0,
+      "students": {
+        "sample_level4_internet": {
+          "rank": 1,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 68.72
+        },
+        "sample_level3_internet": {
+          "rank": 2,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 62.1
+        },
+        "sample_level2_internet": {
+          "rank": 3,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 60.93
+        },
+        "sample_level1_internet": {
+          "rank": 4,
+          "adjusted_level": "1",
+          "rubric_mean_percent": 57.37
+        }
+      }
+    },
+    {
+      "run": 4,
+      "run_llm_rc": 0,
+      "aggregate_rc": 0,
+      "students": {
+        "sample_level4_internet": {
+          "rank": 1,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 68.72
+        },
+        "sample_level3_internet": {
+          "rank": 2,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 62.1
+        },
+        "sample_level2_internet": {
+          "rank": 3,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 60.93
+        },
+        "sample_level1_internet": {
+          "rank": 4,
+          "adjusted_level": "1",
+          "rubric_mean_percent": 57.37
+        }
+      }
+    },
+    {
+      "run": 5,
+      "run_llm_rc": 0,
+      "aggregate_rc": 0,
+      "students": {
+        "sample_level4_internet": {
+          "rank": 1,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 68.72
+        },
+        "sample_level3_internet": {
+          "rank": 2,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 62.1
+        },
+        "sample_level2_internet": {
+          "rank": 3,
+          "adjusted_level": "2",
+          "rubric_mean_percent": 60.93
+        },
+        "sample_level1_internet": {
+          "rank": 4,
+          "adjusted_level": "1",
+          "rubric_mean_percent": 57.37
+        }
+      }
+    }
+  ]
+}

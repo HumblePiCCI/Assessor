@@ -1,0 +1,3 @@
+City council approved a new bike lane yesterday and people are talking about it. The lane will be on Maple Street and its supposed to help bikes be safer.
+
+Some people like it and some dont because cars. The city said it will be good. This will change traffic.

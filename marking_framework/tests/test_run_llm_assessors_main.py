@@ -150,6 +150,49 @@ def test_run_llm_assessors_custom_exemplars(tmp_path, monkeypatch):
     assert rla.main() == 0
 
 
+def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(rla, "infer_genre_from_text", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not infer")))
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
+        if "Return ONLY valid JSON" not in prompt:
+            text = "s1"
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A",
+            "--genre", "argumentative",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+
+
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
@@ -258,6 +301,63 @@ def test_run_llm_assessors_pass2_repair_fallback(tmp_path, monkeypatch):
     assert failure_log.exists()
 
 
+def test_run_llm_assessors_pass2_fallback_uses_scores_and_cleans_stale(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    (texts_dir / "s2.txt").write_text("More text", encoding="utf-8")
+    routing = {
+        "mode": "openai",
+        "tasks": {
+            "pass1_assessor": {"model": "gpt-5.2", "reasoning": "low", "temperature": 0.1},
+            "pass2_ranker": {"model": "gpt-5.2", "reasoning": "low", "temperature": 0.1},
+        },
+    }
+    pricing = {"models": {"gpt-5.2": {"input_per_million": 1.0, "output_per_million": 1.0}}}
+    limits = {"per_call_max_tokens": 8000, "abort_on_limit": False, "per_job_max_usd": 999, "per_student_max_usd": 999, "estimates": {"pass1_output_tokens": 10, "pass2_output_tokens": 10}}
+    write_config(tmp_path / "routing.json", routing)
+    write_config(tmp_path / "pricing.json", pricing)
+    write_config(tmp_path / "limits.json", limits)
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    pass1_out.mkdir()
+    pass2_out.mkdir()
+    (pass2_out / "assessor_A.txt").write_text("stale", encoding="utf-8")
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            sid = "s2" if "Student ID: s2" in prompt else "s1"
+            score = 90 if sid == "s2" else 60
+            text = json.dumps({"student_id": sid, "rubric_total_points": score, "criteria_points": {}, "notes": "ok"})
+        else:
+            text = "unknown"
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    monkeypatch.setattr("sys.argv", [
+        "rla",
+        "--texts", str(texts_dir),
+        "--routing", str(tmp_path / "routing.json"),
+        "--pricing", str(tmp_path / "pricing.json"),
+        "--cost-limits", str(tmp_path / "limits.json"),
+        "--rubric", str(tmp_path / "rubric.md"),
+        "--outline", str(tmp_path / "outline.md"),
+        "--rubric-criteria", str(tmp_path / "no_criteria.json"),
+        "--pass1-out", str(pass1_out),
+        "--pass2-out", str(pass2_out),
+        "--assessors", "A",
+    ])
+    assert rla.main() == 0
+    ranking = (pass2_out / "assessor_A.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert ranking == ["s2", "s1"]
+
+
 def test_run_llm_assessors_pass2_repair_missing_append(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
@@ -351,6 +451,7 @@ def test_run_llm_assessors_invalid_after_retry(tmp_path, monkeypatch):
         "--pass1-out", str(pass1_out),
         "--pass2-out", str(pass2_out),
         "--assessors", "A",
+        "--fallback", "none",
     ])
     with pytest.raises(ValueError):
         rla.main()
@@ -358,6 +459,41 @@ def test_run_llm_assessors_invalid_after_retry(tmp_path, monkeypatch):
     assert failure_log.exists()
     lines = failure_log.read_text(encoding="utf-8").strip().splitlines()
     assert lines
+
+
+def test_run_llm_assessors_deterministic_fallback_on_exception(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Dear Principal. First recycle. Sincerely, Student.", encoding="utf-8")
+    routing = {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}}
+    write_config(tmp_path / "routing.json", routing)
+    write_config(tmp_path / "pricing.json", {"models": {"gpt-5.2": {"input_per_million": 1.0, "output_per_million": 1.0}}})
+    write_config(tmp_path / "limits.json", {"per_call_max_tokens": 8000, "abort_on_limit": False, "estimates": {"pass1_output_tokens": 10, "pass2_output_tokens": 10}})
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    monkeypatch.setattr(rla, "responses_create", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr("sys.argv", [
+        "rla",
+        "--texts", str(texts_dir),
+        "--routing", str(tmp_path / "routing.json"),
+        "--pricing", str(tmp_path / "pricing.json"),
+        "--cost-limits", str(tmp_path / "limits.json"),
+        "--rubric", str(tmp_path / "rubric.md"),
+        "--outline", str(tmp_path / "outline.md"),
+        "--rubric-criteria", str(tmp_path / "none.json"),
+        "--pass1-out", str(pass1_out),
+        "--pass2-out", str(pass2_out),
+        "--assessors", "A",
+        "--fallback", "deterministic",
+    ])
+    assert rla.main() == 0
+    assert (pass1_out / "assessor_A.json").exists()
+    ranking = (pass2_out / "assessor_A.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert ranking == ["s1"]
 
 
 def test_run_llm_assessors_codex_local_reqs_override(tmp_path, monkeypatch):
@@ -399,3 +535,177 @@ def test_run_llm_assessors_codex_local_reqs_override(tmp_path, monkeypatch):
         "--assessors", "A",
     ])
     assert rla.main() == 0
+
+
+def test_run_llm_assessors_codex_local_prompt_echo_retries_then_fallback(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    routing = {
+        "mode": "codex_local",
+        "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}},
+    }
+    write_config(tmp_path / "routing.json", routing)
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            text = (
+                'user: you are assessor A\n'
+                'Student ID must be "s1"\n'
+                "Previous output:\n"
+                "rubric total points: 82\n"
+            )
+        else:
+            text = "s1"
+        return {"output": [{"type": "output_text", "text": text}]}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts",
+            str(texts_dir),
+            "--routing",
+            str(tmp_path / "routing.json"),
+            "--rubric",
+            str(tmp_path / "rubric.md"),
+            "--outline",
+            str(tmp_path / "outline.md"),
+            "--rubric-criteria",
+            str(tmp_path / "none.json"),
+            "--pass1-out",
+            str(pass1_out),
+            "--pass2-out",
+            str(pass2_out),
+            "--assessors",
+            "A",
+            "--fallback",
+            "deterministic",
+        ],
+    )
+    assert rla.main() == 0
+    payload = json.loads((pass1_out / "assessor_A.json").read_text(encoding="utf-8"))
+    assert payload["scores"][0]["student_id"] == "s1"
+    failure_log = tmp_path / "logs" / "llm_failures.jsonl"
+    assert "prompt echo" in failure_log.read_text(encoding="utf-8").lower()
+
+
+def test_run_llm_assessors_empty_texts_uses_score_order_branch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    routing = {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}}
+    write_config(tmp_path / "routing.json", routing)
+    write_config(tmp_path / "pricing.json", {"models": {"gpt-5.2": {"input_per_million": 1.0, "output_per_million": 1.0}}})
+    write_config(tmp_path / "limits.json", {"per_call_max_tokens": 8000, "abort_on_limit": False, "estimates": {"pass1_output_tokens": 10, "pass2_output_tokens": 10}})
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    monkeypatch.setattr(rla, "responses_create", lambda **kwargs: {"output": [{"type": "output_text", "text": ""}], "usage": {}})
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr("sys.argv", [
+        "rla",
+        "--texts", str(texts_dir),
+        "--routing", str(tmp_path / "routing.json"),
+        "--pricing", str(tmp_path / "pricing.json"),
+        "--cost-limits", str(tmp_path / "limits.json"),
+        "--rubric", str(tmp_path / "rubric.md"),
+        "--outline", str(tmp_path / "outline.md"),
+        "--rubric-criteria", str(tmp_path / "none.json"),
+        "--pass1-out", str(pass1_out),
+        "--pass2-out", str(pass2_out),
+        "--assessors", "A",
+    ])
+    assert rla.main() == 0
+
+
+def test_run_llm_assessors_pass2_uses_structured_contract(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    seen = {"pass1": [], "pass2": []}
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        text_format = kwargs.get("text_format")
+        if "Score this student" in prompt:
+            seen["pass1"].append(text_format)
+            text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
+        else:
+            seen["pass2"].append(text_format)
+            text = json.dumps({"ranking": ["s1"]})
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(tmp_path / "pass1"),
+            "--pass2-out", str(tmp_path / "pass2"),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    assert seen["pass1"] and seen["pass2"]
+    assert seen["pass1"][0]["schema"]["required"] == ["student_id", "rubric_total_points", "criteria_points", "notes"]
+    assert seen["pass2"][0]["schema"]["required"] == ["ranking"]
+
+
+def test_run_llm_assessors_require_model_usage_fails_on_full_fallback(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Sample essay text", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+
+    def fake_create(*_args, **_kwargs):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(tmp_path / "pass1"),
+            "--pass2-out", str(tmp_path / "pass2"),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+            "--require-model-usage",
+        ],
+    )
+    assert rla.main() == 1

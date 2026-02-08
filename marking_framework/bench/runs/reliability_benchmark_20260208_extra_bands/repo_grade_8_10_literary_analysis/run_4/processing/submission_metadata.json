@@ -1,0 +1,42 @@
+[
+  {
+    "student_id": "s001",
+    "display_name": "grade_8_10_literary_analysis_level_1",
+    "source_file": "grade_8_10_literary_analysis_level_1.txt",
+    "word_count": 107,
+    "paragraph_count": 3,
+    "char_count": 563
+  },
+  {
+    "student_id": "s002",
+    "display_name": "grade_8_10_literary_analysis_level_2",
+    "source_file": "grade_8_10_literary_analysis_level_2.txt",
+    "word_count": 187,
+    "paragraph_count": 4,
+    "char_count": 1101
+  },
+  {
+    "student_id": "s003",
+    "display_name": "grade_8_10_literary_analysis_level_3",
+    "source_file": "grade_8_10_literary_analysis_level_3.txt",
+    "word_count": 251,
+    "paragraph_count": 5,
+    "char_count": 1536
+  },
+  {
+    "student_id": "s004",
+    "display_name": "grade_8_10_literary_analysis_level_4",
+    "source_file": "grade_8_10_literary_analysis_level_4.txt",
+    "word_count": 256,
+    "paragraph_count": 5,
+    "char_count": 1596
+  },
+  {
+    "student_id": "s005",
+    "display_name": "grade_8_10_literary_analysis_level_4_plus",
+    "source_file": "grade_8_10_literary_analysis_level_4_plus.txt",
+    "word_count": 287,
+    "paragraph_count": 5,
+    "char_count": 1751
+  }
+]

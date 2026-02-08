@@ -17,8 +17,8 @@ def test_extract_text_main(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["et", "--inputs", str(in_dir), "--output", str(out_dir), "--metadata", str(meta_path)])
     assert et.main() == 0
 
-    assert (out_dir / "a.txt").exists()
-    assert (out_dir / "b.txt").exists()
+    assert (out_dir / "s001.txt").exists()
+    assert (out_dir / "s002.txt").exists()
     assert meta_path.exists()
 
 
@@ -34,3 +34,17 @@ def test_extract_text_no_metadata(tmp_path, monkeypatch):
 def test_extract_docx_empty(tmp_path):
     path = make_docx(tmp_path / "empty.docx", "")
     assert et.extract_docx_text(path) == ""
+
+
+def test_scrub_personal_headers():
+    raw = "\n".join([
+        "Name: Student Name",
+        "By: Student Name",
+        "Student- 7A",
+        "",
+        "By the end of the story, the character learns a lesson.",
+    ])
+    scrubbed = et.scrub_personal_headers(raw)
+    assert "Name:" not in scrubbed
+    assert "By:" not in scrubbed
+    assert "By the end of the story" in scrubbed

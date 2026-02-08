@@ -1,0 +1,1003 @@
+{
+  "benchmark": "reliability_benchmark_20260208_boundary_fix",
+  "settings": {
+    "mode": "codex_local_forced_deterministic_fallback",
+    "runs_per_dataset": 5,
+    "calibration": "disabled_for_benchmark"
+  },
+  "datasets": {
+    "internet_thoughtful": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s004": {
+          "expected_level": "4",
+          "display_name": "sample_level4_internet_thoughtful",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 82.95,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "display_name": "sample_level3_internet_thoughtful",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 70.25,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "display_name": "sample_level2_internet_thoughtful",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 60.25,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "display_name": "sample_level1_internet_thoughtful",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 53.81,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s004": {
+              "level": "4",
+              "rank": 1,
+              "score": 82.95,
+              "expected": "4",
+              "display_name": "sample_level4_internet_thoughtful"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 2,
+              "score": 70.25,
+              "expected": "3",
+              "display_name": "sample_level3_internet_thoughtful"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 3,
+              "score": 60.25,
+              "expected": "2",
+              "display_name": "sample_level2_internet_thoughtful"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 4,
+              "score": 53.81,
+              "expected": "1",
+              "display_name": "sample_level1_internet_thoughtful"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s004": {
+              "level": "4",
+              "rank": 1,
+              "score": 82.95,
+              "expected": "4",
+              "display_name": "sample_level4_internet_thoughtful"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 2,
+              "score": 70.25,
+              "expected": "3",
+              "display_name": "sample_level3_internet_thoughtful"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 3,
+              "score": 60.25,
+              "expected": "2",
+              "display_name": "sample_level2_internet_thoughtful"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 4,
+              "score": 53.81,
+              "expected": "1",
+              "display_name": "sample_level1_internet_thoughtful"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s004": {
+              "level": "4",
+              "rank": 1,
+              "score": 82.95,
+              "expected": "4",
+              "display_name": "sample_level4_internet_thoughtful"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 2,
+              "score": 70.25,
+              "expected": "3",
+              "display_name": "sample_level3_internet_thoughtful"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 3,
+              "score": 60.25,
+              "expected": "2",
+              "display_name": "sample_level2_internet_thoughtful"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 4,
+              "score": 53.81,
+              "expected": "1",
+              "display_name": "sample_level1_internet_thoughtful"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s004": {
+              "level": "4",
+              "rank": 1,
+              "score": 82.95,
+              "expected": "4",
+              "display_name": "sample_level4_internet_thoughtful"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 2,
+              "score": 70.25,
+              "expected": "3",
+              "display_name": "sample_level3_internet_thoughtful"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 3,
+              "score": 60.25,
+              "expected": "2",
+              "display_name": "sample_level2_internet_thoughtful"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 4,
+              "score": 53.81,
+              "expected": "1",
+              "display_name": "sample_level1_internet_thoughtful"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s004": {
+              "level": "4",
+              "rank": 1,
+              "score": 82.95,
+              "expected": "4",
+              "display_name": "sample_level4_internet_thoughtful"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 2,
+              "score": 70.25,
+              "expected": "3",
+              "display_name": "sample_level3_internet_thoughtful"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 3,
+              "score": 60.25,
+              "expected": "2",
+              "display_name": "sample_level2_internet_thoughtful"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 4,
+              "score": 53.81,
+              "expected": "1",
+              "display_name": "sample_level1_internet_thoughtful"
+            }
+          }
+        }
+      ]
+    },
+    "repo_grade_6_7_argumentative": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s005": {
+          "expected_level": "4+",
+          "display_name": "level_4_plus",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 92.83,
+          "rank_stdev": 0.0
+        },
+        "s004": {
+          "expected_level": "4",
+          "display_name": "level_4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 82.98,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "display_name": "level_3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 75.36,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "display_name": "level_2",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 63.62,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "display_name": "level_1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 53.82,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.83,
+              "expected": "4+",
+              "display_name": "level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 82.98,
+              "expected": "4",
+              "display_name": "level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.36,
+              "expected": "3",
+              "display_name": "level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 63.62,
+              "expected": "2",
+              "display_name": "level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.82,
+              "expected": "1",
+              "display_name": "level_1"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.83,
+              "expected": "4+",
+              "display_name": "level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 82.98,
+              "expected": "4",
+              "display_name": "level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.36,
+              "expected": "3",
+              "display_name": "level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 63.62,
+              "expected": "2",
+              "display_name": "level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.82,
+              "expected": "1",
+              "display_name": "level_1"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.83,
+              "expected": "4+",
+              "display_name": "level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 82.98,
+              "expected": "4",
+              "display_name": "level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.36,
+              "expected": "3",
+              "display_name": "level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 63.62,
+              "expected": "2",
+              "display_name": "level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.82,
+              "expected": "1",
+              "display_name": "level_1"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.83,
+              "expected": "4+",
+              "display_name": "level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 82.98,
+              "expected": "4",
+              "display_name": "level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.36,
+              "expected": "3",
+              "display_name": "level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 63.62,
+              "expected": "2",
+              "display_name": "level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.82,
+              "expected": "1",
+              "display_name": "level_1"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.83,
+              "expected": "4+",
+              "display_name": "level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 82.98,
+              "expected": "4",
+              "display_name": "level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.36,
+              "expected": "3",
+              "display_name": "level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 63.62,
+              "expected": "2",
+              "display_name": "level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.82,
+              "expected": "1",
+              "display_name": "level_1"
+            }
+          }
+        }
+      ]
+    },
+    "repo_grade_8_10_literary_analysis": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s005": {
+          "expected_level": "4+",
+          "display_name": "grade_8_10_literary_analysis_level_4_plus",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 93.39,
+          "rank_stdev": 0.0
+        },
+        "s004": {
+          "expected_level": "4",
+          "display_name": "grade_8_10_literary_analysis_level_4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 83.21,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "display_name": "grade_8_10_literary_analysis_level_3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 75.13,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "display_name": "grade_8_10_literary_analysis_level_2",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 64.25,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "display_name": "grade_8_10_literary_analysis_level_1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.2,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 93.39,
+              "expected": "4+",
+              "display_name": "grade_8_10_literary_analysis_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.21,
+              "expected": "4",
+              "display_name": "grade_8_10_literary_analysis_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.13,
+              "expected": "3",
+              "display_name": "grade_8_10_literary_analysis_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.25,
+              "expected": "2",
+              "display_name": "grade_8_10_literary_analysis_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 54.2,
+              "expected": "1",
+              "display_name": "grade_8_10_literary_analysis_level_1"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 93.39,
+              "expected": "4+",
+              "display_name": "grade_8_10_literary_analysis_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.21,
+              "expected": "4",
+              "display_name": "grade_8_10_literary_analysis_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.13,
+              "expected": "3",
+              "display_name": "grade_8_10_literary_analysis_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.25,
+              "expected": "2",
+              "display_name": "grade_8_10_literary_analysis_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 54.2,
+              "expected": "1",
+              "display_name": "grade_8_10_literary_analysis_level_1"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 93.39,
+              "expected": "4+",
+              "display_name": "grade_8_10_literary_analysis_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.21,
+              "expected": "4",
+              "display_name": "grade_8_10_literary_analysis_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.13,
+              "expected": "3",
+              "display_name": "grade_8_10_literary_analysis_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.25,
+              "expected": "2",
+              "display_name": "grade_8_10_literary_analysis_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 54.2,
+              "expected": "1",
+              "display_name": "grade_8_10_literary_analysis_level_1"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 93.39,
+              "expected": "4+",
+              "display_name": "grade_8_10_literary_analysis_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.21,
+              "expected": "4",
+              "display_name": "grade_8_10_literary_analysis_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.13,
+              "expected": "3",
+              "display_name": "grade_8_10_literary_analysis_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.25,
+              "expected": "2",
+              "display_name": "grade_8_10_literary_analysis_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 54.2,
+              "expected": "1",
+              "display_name": "grade_8_10_literary_analysis_level_1"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 93.39,
+              "expected": "4+",
+              "display_name": "grade_8_10_literary_analysis_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.21,
+              "expected": "4",
+              "display_name": "grade_8_10_literary_analysis_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 75.13,
+              "expected": "3",
+              "display_name": "grade_8_10_literary_analysis_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.25,
+              "expected": "2",
+              "display_name": "grade_8_10_literary_analysis_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 54.2,
+              "expected": "1",
+              "display_name": "grade_8_10_literary_analysis_level_1"
+            }
+          }
+        }
+      ]
+    },
+    "repo_grade_11_12_news_report": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s005": {
+          "expected_level": "4+",
+          "display_name": "grade_11_12_news_report_level_4_plus",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 92.8,
+          "rank_stdev": 0.0
+        },
+        "s004": {
+          "expected_level": "4",
+          "display_name": "grade_11_12_news_report_level_4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 83.01,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "display_name": "grade_11_12_news_report_level_3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 74.06,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "display_name": "grade_11_12_news_report_level_2",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 64.09,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "display_name": "grade_11_12_news_report_level_1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 53.94,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.8,
+              "expected": "4+",
+              "display_name": "grade_11_12_news_report_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.01,
+              "expected": "4",
+              "display_name": "grade_11_12_news_report_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 74.06,
+              "expected": "3",
+              "display_name": "grade_11_12_news_report_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.09,
+              "expected": "2",
+              "display_name": "grade_11_12_news_report_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.94,
+              "expected": "1",
+              "display_name": "grade_11_12_news_report_level_1"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.8,
+              "expected": "4+",
+              "display_name": "grade_11_12_news_report_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.01,
+              "expected": "4",
+              "display_name": "grade_11_12_news_report_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 74.06,
+              "expected": "3",
+              "display_name": "grade_11_12_news_report_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.09,
+              "expected": "2",
+              "display_name": "grade_11_12_news_report_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.94,
+              "expected": "1",
+              "display_name": "grade_11_12_news_report_level_1"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.8,
+              "expected": "4+",
+              "display_name": "grade_11_12_news_report_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.01,
+              "expected": "4",
+              "display_name": "grade_11_12_news_report_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 74.06,
+              "expected": "3",
+              "display_name": "grade_11_12_news_report_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.09,
+              "expected": "2",
+              "display_name": "grade_11_12_news_report_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.94,
+              "expected": "1",
+              "display_name": "grade_11_12_news_report_level_1"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.8,
+              "expected": "4+",
+              "display_name": "grade_11_12_news_report_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.01,
+              "expected": "4",
+              "display_name": "grade_11_12_news_report_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 74.06,
+              "expected": "3",
+              "display_name": "grade_11_12_news_report_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.09,
+              "expected": "2",
+              "display_name": "grade_11_12_news_report_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.94,
+              "expected": "1",
+              "display_name": "grade_11_12_news_report_level_1"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "rank": 1,
+              "score": 92.8,
+              "expected": "4+",
+              "display_name": "grade_11_12_news_report_level_4_plus"
+            },
+            "s004": {
+              "level": "4",
+              "rank": 2,
+              "score": 83.01,
+              "expected": "4",
+              "display_name": "grade_11_12_news_report_level_4"
+            },
+            "s003": {
+              "level": "3",
+              "rank": 3,
+              "score": 74.06,
+              "expected": "3",
+              "display_name": "grade_11_12_news_report_level_3"
+            },
+            "s002": {
+              "level": "2",
+              "rank": 4,
+              "score": 64.09,
+              "expected": "2",
+              "display_name": "grade_11_12_news_report_level_2"
+            },
+            "s001": {
+              "level": "1",
+              "rank": 5,
+              "score": 53.94,
+              "expected": "1",
+              "display_name": "grade_11_12_news_report_level_1"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-02-08T10:06:02.896380+00:00",
+  "checks": [
+    {
+      "pair": [
+        "s003",
+        "s002"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A shows more insightful, nuanced argumentation and stronger language (more precise phrasing and deeper analysis of identity/integrity). Both are well organized with similar evidence, but A\u2019s ideas are more developed and its concluding insight is stronger, so ranking A higher is consistent."
+    },
+    {
+      "pair": [
+        "s002",
+        "s001"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A is better developed and organized with clear topic sentences, multiple pieces of textual evidence, and detailed explanation, while Essay B is brief, repetitive, and has weaker structure and language mechanics."
+    }
+  ]
+}

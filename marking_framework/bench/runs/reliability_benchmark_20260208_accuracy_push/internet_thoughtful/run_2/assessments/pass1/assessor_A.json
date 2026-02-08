@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 56.16,
+      "criteria_points": {
+        "K1": 49.62,
+        "K2": 49.62,
+        "T1": 59.45,
+        "T2": 59.45,
+        "C1": 53.58,
+        "C2": 72.16,
+        "C3": 59.45,
+        "A1": 51.06,
+        "A2": 51.06
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 60.35,
+      "criteria_points": {
+        "K1": 56.04,
+        "K2": 56.04,
+        "T1": 61.5,
+        "T2": 61.5,
+        "C1": 60.48,
+        "C2": 72.83,
+        "C3": 61.5,
+        "A1": 56.62,
+        "A2": 56.62
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 70.35,
+      "criteria_points": {
+        "K1": 65.37,
+        "K2": 65.37,
+        "T1": 72.33,
+        "T2": 72.33,
+        "C1": 70.74,
+        "C2": 81.59,
+        "C3": 72.33,
+        "A1": 66.54,
+        "A2": 66.54
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 74.22,
+      "criteria_points": {
+        "K1": 68.52,
+        "K2": 68.52,
+        "T1": 77.03,
+        "T2": 77.03,
+        "C1": 74.31,
+        "C2": 85.37,
+        "C3": 77.03,
+        "A1": 70.09,
+        "A2": 70.09
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

@@ -1,0 +1,250 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 58.44444444444444,
+      "criteria_points": {
+        "K1": 64.0,
+        "K2": 54.0,
+        "T1": 54.0,
+        "T2": 54.0,
+        "C1": 64.0,
+        "C2": 64.0,
+        "C3": 54.0,
+        "A1": 64.0,
+        "A2": 54.0
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Jordan talks to people in a forum and says their name is \"J.\" Then they meet someone from school and it gets awkward.",
+          "rationale": "Shows some accurate knowledge of key plot events, but details are basic and limited (few specific events/evidence)."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "The theme is that you should be yourself because lying causes problems.",
+          "rationale": "Theme is stated in a general way with little interpretation of how/why the text develops it; understanding remains surface-level."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "\"My real name felt heavy in my mouth\" shows they were scared.",
+          "rationale": "Includes a simple claim about a quote but offers minimal analysis (no deeper reasoning about language, character change, or consequences)."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "This story shows you shouldnt lie.",
+          "rationale": "No evidence of inquiry/research processes (no questions posed, no gathering/selection of multiple pieces of textual information)."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "In the story \"The Borrowed Name\" its about a kid named Jordan that uses a fake name online.",
+          "rationale": "Some paragraphing and a basic main idea are present, but organization is minimal and lacks developed topic/concluding sentences and logical build."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "In the story \"The Borrowed Name\" its about a kid named Jordan that uses a fake name online.",
+          "rationale": "Noticeable convention errors (e.g., \"its\" for \"it's,\" run-on/awkward phrasing, \"shouldnt\") but meaning is generally clear."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "The theme is that you should be yourself because lying causes problems.",
+          "rationale": "Vocabulary is simple and repetitive (e.g., \"lie,\" \"problems,\" \"consequences\") with little subject-specific literary terminology."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "This story shows you shouldnt lie. If you lie you will have consequences.",
+          "rationale": "Applies a general lesson from the story to a familiar moral context, but does not apply analysis skills in a developed or nuanced way."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "This story shows you shouldnt lie.",
+          "rationale": "Does not make connections beyond a broad moral statement (no text-to-self/world/text connections or deeper linking of ideas)."
+        }
+      ],
+      "notes": "Basic summary and a general theme are present, but arguments are underdeveloped with minimal textual evidence and limited analysis; organization and conventions show noticeable errors."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 74.55555555555556,
+      "criteria_points": {
+        "K1": 75.0,
+        "K2": 75.0,
+        "T1": 75.0,
+        "T2": 64.0,
+        "C1": 84.0,
+        "C2": 84.0,
+        "C3": 75.0,
+        "A1": 75.0,
+        "A2": 64.0
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "In the short story \"The Borrowed Name,\" Jordan adopts a fake identity online to feel safer and more confident.",
+          "rationale": "Shows accurate knowledge of key plot situation (Jordan uses a fake identity online) and the basic context of the text."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "the author suggests that hiding who you are may seem protective, but it often produces consequences like anxiety, mistrust, and isolation.",
+          "rationale": "Explains the relationship between Jordan\u2019s choice and its consequences, demonstrating clear understanding of the story\u2019s theme/message."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "This line reveals a mental trick: Jordan separates words from responsibility.",
+          "rationale": "Analyzes how a quotation functions to reveal character reasoning; interpretation is logical and connected to the argument."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Jordan insists, \"It was just a screen name, not a lie.\"",
+          "rationale": "Uses textual evidence, but inquiry/research skills (questioning, investigating beyond provided quotes, MLA/page citation practices) are limited and not explicitly demonstrated."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "At the beginning, Jordan treats the fake name as harmless.",
+          "rationale": "Clear topic-sentence style transitions across paragraphs with logical sequencing (beginning \u2192 progress \u2192 peak \u2192 end), supporting strong organization."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "As the story progresses, the fake name affects Jordan's sense of self.",
+          "rationale": "Grammar, punctuation, and spelling are controlled and clear throughout; errors are minimal to none in the provided excerpt."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "This line reveals a mental trick: Jordan separates words from responsibility.",
+          "rationale": "Vocabulary is precise and appropriate for Grade 8 literary analysis (e.g., 'mental trick,' 'responsibility'), though not consistently sophisticated enough for Level 4/4+."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "The word \"heavy\" implies shame and fear, as if the truth has become difficult to carry.",
+          "rationale": "Applies literary analysis skills (interpreting connotation/metaphor) effectively to support the theme claim."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Overall, \"The Borrowed Name\" argues that identity is not only what you claim; it is what you are willing to stand behind.",
+          "rationale": "Makes a solid within-text thematic connection, but does not extend to broader text-to-text/self/world connections or more original cross-context insights."
+        }
+      ],
+      "notes": "Strong, organized 5-paragraph literary analysis with relevant quotes and clear explanations; mostly Level 3 insight with Level 4 organization/conventions. Inquiry/research and broader connections are limited (no MLA/page citations or outside connections)."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 73.33333333333333,
+      "criteria_points": {
+        "K1": 54.0,
+        "K2": 54.0,
+        "T1": 95.0,
+        "T2": 54.0,
+        "C1": 95.0,
+        "C2": 95.0,
+        "C3": 95.0,
+        "A1": 64.0,
+        "A2": 54.0
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "In \"The Borrowed Name,\" Jordan's decision to adopt a false screen name",
+          "rationale": "The assignment context targets Jason Reynolds\u2019 *Ghost*, but the response analyzes a different text (\"The Borrowed Name\"). This shows limited subject-specific knowledge of the required novel and its details (characters, events, quotations, page references)."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "The story argues that the most damaging consequence of a borrowed identity is the slow loss of wholeness.",
+          "rationale": "While the theme claim is clear, it is not grounded in the required *Ghost* content, so understanding of the targeted course text and its relationships (theme tied to *Ghost* events/characters) is limited for this task."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "That line is revealing because it is less a belief than a strategy. Jordan wants the benefits of dishonesty (distance from judgment) without the discomfort of naming it.",
+          "rationale": "Highly effective analysis and evaluation of character motivation and author\u2019s craft; the reasoning is layered (claim \u2192 interpretation \u2192 implication) and shows sophisticated critical thinking."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "\"It was just a screen name, not a lie.\"",
+          "rationale": "The response relies on interpretive commentary and includes no inquiry/research elements required by the task (e.g., gathering multiple text details from *Ghost*, MLA-style citations with author/page, or evidence selection across the novel)."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "Yet the author uses that choice to examine a larger tension: anonymity can create space to experiment, but it can also erode integrity by training a person to live in fragments.",
+          "rationale": "Ideas are organized logically with a strong controlling thesis and coherent paragraph progression; transitions and sentence-to-sentence flow are smooth and purposeful."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "The metaphor implies gravity: the real name pulls Jordan back to reality, while the borrowed name floats easily, detached from accountability.",
+          "rationale": "Grammar, punctuation, and sentence control are highly effective with virtually no errors; complex sentences remain clear."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "The author exposes how self-justification becomes a habit, and habits shape identity.",
+          "rationale": "Vocabulary is precise and appropriately academic for Grade 8 literary analysis (e.g., \"self-justification,\" \"integrity,\" \"paradox\"), enhancing clarity and sophistication."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Jordan responds by withdrawing from both spaces, which shows the paradox of the borrowed name: it promised safety but produces isolation.",
+          "rationale": "Demonstrates some effective application of literary analysis skills (theme, character consequence, author\u2019s message), but applies them to the wrong text for the assignment (*Ghost*), limiting successful application in the intended context."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "The author suggests that integrity is not a performance either; it is a decision to align speech, action, and self.",
+          "rationale": "The response stays within a single-text interpretation and does not make explicit text-to-text, text-to-self, or text-to-world connections, nor connections to *Ghost* (the intended context)."
+        }
+      ],
+      "notes": "Strong, sophisticated literary analysis with excellent organization and language, but it does not address the assigned novel (*Ghost*) or include required text-based details/citations from that book; this significantly lowers content/understanding and task-alignment scores."
+    }
+  ]
+}

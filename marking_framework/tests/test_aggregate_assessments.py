@@ -114,7 +114,7 @@ def test_aggregate_assessments_missing_conventions_allowed(tmp_path, monkeypatch
         write_pass1(pass1_dir, assessor, [{"student_id": "s1", "rubric_total_points": 1}])
 
     pass2_dir = tmp_path / "assessments/pass2_comparative"
-    for assessor in ["a", "b", "c"]:
+    for assessor in ["assessor_a", "assessor_b", "assessor_c"]:
         write_pass2(pass2_dir, assessor, ["s1"])
 
     # No conventions report written
@@ -130,7 +130,17 @@ def test_aggregate_assessments_rubric_points_from_assessor(tmp_path, monkeypatch
     (tmp_path / "processing").mkdir(parents=True)
 
     cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps({"weights": {}, "consensus": {}, "conventions": {}, "rubric": {"points_possible": None}}), encoding="utf-8")
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "weights": {},
+                "consensus": {"rubric_central_tendency": "mean"},
+                "conventions": {},
+                "rubric": {"points_possible": None},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     pass1_dir = tmp_path / "assessments/pass1_individual"
     scores = [{"student_id": "s1", "rubric_total_points": None, "criteria_points": {"c1": 5, "c2": 5}}]
@@ -207,7 +217,17 @@ def test_aggregate_assessments_bias_and_criteria_points(tmp_path, monkeypatch):
     (tmp_path / "outputs").mkdir(parents=True)
 
     cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps({"weights": {}, "consensus": {}, "conventions": {}, "rubric": {"points_possible": None}}), encoding="utf-8")
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "weights": {},
+                "consensus": {"rubric_central_tendency": "mean"},
+                "conventions": {},
+                "rubric": {"points_possible": None},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     criteria_path = tmp_path / "rubric_criteria.json"
     criteria_path.write_text(json.dumps({"categories": {"c1": {"max_points": 100, "criteria": []}}}), encoding="utf-8")
@@ -225,7 +245,19 @@ def test_aggregate_assessments_bias_and_criteria_points(tmp_path, monkeypatch):
     write_conventions(conv_path, [{"student_id": "s1", "word_count": 10, "mistake_rate_percent": 0.0}])
 
     bias_path = tmp_path / "outputs/calibration_bias.json"
-    bias_path.write_text(json.dumps({"assessors": {"assessor_a": {"bias": 10}}}), encoding="utf-8")
+    bias_path.write_text(
+        json.dumps(
+            {
+                "assessors": {
+                    "assessor_a": {
+                        "global": {"bias": 10, "weight": 0.6},
+                        "scopes": {"grade_6_7|literary_analysis": {"bias": 8, "weight": 0.7}},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     out_path = tmp_path / "outputs/consensus_scores.csv"
     monkeypatch.chdir(tmp_path)
@@ -235,6 +267,7 @@ def test_aggregate_assessments_bias_and_criteria_points(tmp_path, monkeypatch):
         "--output", str(out_path),
         "--rubric-criteria", str(criteria_path),
         "--calibration-bias", str(bias_path),
+        "--scope-key", "grade_6_7|literary_analysis",
     ])
     assert agg.main() == 0
     rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
@@ -266,3 +299,51 @@ def test_aggregate_assessments_no_level_band(tmp_path, monkeypatch):
     monkeypatch.setattr(agg, "get_level_band", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("sys.argv", ["agg", "--config", str(cfg_path), "--output", str(out_path)])
     assert agg.main() == 0
+
+
+def test_aggregate_assessments_rank_weight_from_calibration(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+    (tmp_path / "outputs").mkdir(parents=True)
+
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"weights": {}, "consensus": {}, "conventions": {}, "rubric": {}}), encoding="utf-8")
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    for assessor in ["assessor_a", "assessor_b", "assessor_c"]:
+        write_pass1(pass1_dir, assessor, [{"student_id": "s1", "rubric_total_points": 80}, {"student_id": "s2", "rubric_total_points": 60}])
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["assessor_a", "assessor_b", "assessor_c"]:
+        write_pass2(pass2_dir, assessor, ["s1", "s2"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(conv_path, [
+        {"student_id": "s1", "word_count": 10, "mistake_rate_percent": 0.0},
+        {"student_id": "s2", "word_count": 10, "mistake_rate_percent": 0.0},
+    ])
+
+    bias_path = tmp_path / "outputs/calibration_bias.json"
+    bias_path.write_text(
+        json.dumps(
+            {
+                "assessors": {
+                    "assessor_a": {"global": {"weight": 0.5}},
+                    "assessor_b": {"global": {"weight": 1.0}},
+                    "assessor_c": {"global": {"weight": 1.0}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["agg", "--config", str(cfg_path), "--output", str(out_path), "--calibration-bias", str(bias_path)],
+    )
+    assert agg.main() == 0
+    rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
+    assert float(rows[0]["borda_points"]) > float(rows[1]["borda_points"])

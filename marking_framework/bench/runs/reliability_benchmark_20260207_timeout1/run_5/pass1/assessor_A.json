@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "sample_level1_internet",
+      "rubric_total_points": 57.37,
+      "criteria_points": {
+        "K1": 53.37,
+        "K2": 55.37,
+        "T1": 57.37,
+        "T2": 59.37,
+        "C1": 61.37,
+        "C2": 53.37,
+        "C3": 55.37,
+        "A1": 57.37,
+        "A2": 59.37
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "sample_level2_internet",
+      "rubric_total_points": 60.93,
+      "criteria_points": {
+        "K1": 56.93,
+        "K2": 58.93,
+        "T1": 60.93,
+        "T2": 62.93,
+        "C1": 64.93,
+        "C2": 56.93,
+        "C3": 58.93,
+        "A1": 60.93,
+        "A2": 62.93
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "sample_level3_internet",
+      "rubric_total_points": 62.1,
+      "criteria_points": {
+        "K1": 58.1,
+        "K2": 60.1,
+        "T1": 62.1,
+        "T2": 64.1,
+        "C1": 66.1,
+        "C2": 58.1,
+        "C3": 60.1,
+        "A1": 62.1,
+        "A2": 64.1
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "sample_level4_internet",
+      "rubric_total_points": 68.72,
+      "criteria_points": {
+        "K1": 64.72,
+        "K2": 66.72,
+        "T1": 68.72,
+        "T2": 70.72,
+        "C1": 72.72,
+        "C2": 64.72,
+        "C3": 66.72,
+        "A1": 68.72,
+        "A2": 70.72
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

@@ -1,0 +1,386 @@
+{
+  "benchmark": "reliability_benchmark_20260207_contract_hardened_calibrated",
+  "settings": {
+    "calibration_bias": "/Users/bldt/Desktop/Essays/marking_framework/bench/runs/reliability_benchmark_20260207_contract_hardened/calibration_bias.json",
+    "mode": "codex_local",
+    "path_codex_disabled": true
+  },
+  "datasets": {
+    "internet_thoughtful": {
+      "runs_successful": 5,
+      "accuracy_mean": 0.25,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "sample_level1_internet_thoughtful": {
+          "expected_level": "1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.0,
+          "rank_stdev": 0.0
+        },
+        "sample_level2_internet_thoughtful": {
+          "expected_level": "2",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.0,
+          "rank_stdev": 0.0
+        },
+        "sample_level3_internet_thoughtful": {
+          "expected_level": "3",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 57.03,
+          "rank_stdev": 0.0
+        },
+        "sample_level4_internet_thoughtful": {
+          "expected_level": "4",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 95.0,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 0.25,
+          "students": {
+            "sample_level4_internet_thoughtful": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "sample_level3_internet_thoughtful": {
+              "rank": 2,
+              "level": "1",
+              "score": 57.03
+            },
+            "sample_level2_internet_thoughtful": {
+              "rank": 3,
+              "level": "1",
+              "score": 54.0
+            },
+            "sample_level1_internet_thoughtful": {
+              "rank": 4,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 0.25,
+          "students": {
+            "sample_level4_internet_thoughtful": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "sample_level3_internet_thoughtful": {
+              "rank": 2,
+              "level": "1",
+              "score": 57.03
+            },
+            "sample_level2_internet_thoughtful": {
+              "rank": 3,
+              "level": "1",
+              "score": 54.0
+            },
+            "sample_level1_internet_thoughtful": {
+              "rank": 4,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 0.25,
+          "students": {
+            "sample_level4_internet_thoughtful": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "sample_level3_internet_thoughtful": {
+              "rank": 2,
+              "level": "1",
+              "score": 57.03
+            },
+            "sample_level2_internet_thoughtful": {
+              "rank": 3,
+              "level": "1",
+              "score": 54.0
+            },
+            "sample_level1_internet_thoughtful": {
+              "rank": 4,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 0.25,
+          "students": {
+            "sample_level4_internet_thoughtful": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "sample_level3_internet_thoughtful": {
+              "rank": 2,
+              "level": "1",
+              "score": 57.03
+            },
+            "sample_level2_internet_thoughtful": {
+              "rank": 3,
+              "level": "1",
+              "score": 54.0
+            },
+            "sample_level1_internet_thoughtful": {
+              "rank": 4,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 0.25,
+          "students": {
+            "sample_level4_internet_thoughtful": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "sample_level3_internet_thoughtful": {
+              "rank": 2,
+              "level": "1",
+              "score": 57.03
+            },
+            "sample_level2_internet_thoughtful": {
+              "rank": 3,
+              "level": "1",
+              "score": 54.0
+            },
+            "sample_level1_internet_thoughtful": {
+              "rank": 4,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        }
+      ]
+    },
+    "repo_grade_6_7_argumentative": {
+      "runs_successful": 5,
+      "accuracy_mean": 0.8,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "level_1": {
+          "expected_level": "1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.0,
+          "rank_stdev": 0.0
+        },
+        "level_2": {
+          "expected_level": "2",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 55.26,
+          "rank_stdev": 0.0
+        },
+        "level_3": {
+          "expected_level": "3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 72.65,
+          "rank_stdev": 0.0
+        },
+        "level_4": {
+          "expected_level": "4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 84.6,
+          "rank_stdev": 0.0
+        },
+        "level_4_plus": {
+          "expected_level": "4+",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 95.0,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 0.8,
+          "students": {
+            "level_4_plus": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "level_4": {
+              "rank": 2,
+              "level": "4",
+              "score": 84.6
+            },
+            "level_3": {
+              "rank": 3,
+              "level": "3",
+              "score": 72.65
+            },
+            "level_2": {
+              "rank": 4,
+              "level": "1",
+              "score": 55.26
+            },
+            "level_1": {
+              "rank": 5,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 0.8,
+          "students": {
+            "level_4_plus": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "level_4": {
+              "rank": 2,
+              "level": "4",
+              "score": 84.6
+            },
+            "level_3": {
+              "rank": 3,
+              "level": "3",
+              "score": 72.65
+            },
+            "level_2": {
+              "rank": 4,
+              "level": "1",
+              "score": 55.26
+            },
+            "level_1": {
+              "rank": 5,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 0.8,
+          "students": {
+            "level_4_plus": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "level_4": {
+              "rank": 2,
+              "level": "4",
+              "score": 84.6
+            },
+            "level_3": {
+              "rank": 3,
+              "level": "3",
+              "score": 72.65
+            },
+            "level_2": {
+              "rank": 4,
+              "level": "1",
+              "score": 55.26
+            },
+            "level_1": {
+              "rank": 5,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 0.8,
+          "students": {
+            "level_4_plus": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "level_4": {
+              "rank": 2,
+              "level": "4",
+              "score": 84.6
+            },
+            "level_3": {
+              "rank": 3,
+              "level": "3",
+              "score": 72.65
+            },
+            "level_2": {
+              "rank": 4,
+              "level": "1",
+              "score": 55.26
+            },
+            "level_1": {
+              "rank": 5,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 0.8,
+          "students": {
+            "level_4_plus": {
+              "rank": 1,
+              "level": "4+",
+              "score": 95.0
+            },
+            "level_4": {
+              "rank": 2,
+              "level": "4",
+              "score": 84.6
+            },
+            "level_3": {
+              "rank": 3,
+              "level": "3",
+              "score": 72.65
+            },
+            "level_2": {
+              "rank": 4,
+              "level": "1",
+              "score": 55.26
+            },
+            "level_1": {
+              "rank": 5,
+              "level": "1",
+              "score": 54.0
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -89,3 +89,14 @@ def test_build_dashboard_data_primary_input(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["bdd", "--input", str(primary), "--fallback", str(tmp_path / "missing.csv"), "--output", str(out), "--texts", str(texts)])
     assert bdd.main() == 0
+
+
+def test_load_submission_metadata_variants(tmp_path):
+    path = tmp_path / "m.json"
+    path.write_text("not json", encoding="utf-8")
+    assert bdd.load_submission_metadata(path) == {}
+    path.write_text(json.dumps({"students": []}), encoding="utf-8")
+    assert bdd.load_submission_metadata(path) == {}
+    path.write_text(json.dumps([{"student_id": "s1", "display_name": "A"}]), encoding="utf-8")
+    meta = bdd.load_submission_metadata(path)
+    assert meta["s1"]["display_name"] == "A"

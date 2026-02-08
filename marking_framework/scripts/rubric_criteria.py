@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 
@@ -56,6 +57,10 @@ def evidence_requirements(criteria: dict) -> dict:
     return criteria.get("evidence_requirements", {})
 
 
+def _canonical_token(value) -> str:
+    return re.sub(r"[^A-Za-z0-9+]", "", str(value or "").upper())
+
+
 def validate_criteria_evidence(items: list | None, required_ids: list, reqs: dict) -> list:
     errors = []
     if not required_ids:
@@ -63,6 +68,7 @@ def validate_criteria_evidence(items: list | None, required_ids: list, reqs: dic
     if not isinstance(items, list) or not items:
         errors.append("Missing criteria evidence list.")
         return errors
+    required_map = {_canonical_token(cid): cid for cid in required_ids}
     by_id = {}
     for item in items:
         if not isinstance(item, dict):
@@ -75,14 +81,17 @@ def validate_criteria_evidence(items: list | None, required_ids: list, reqs: dic
         if not cid:
             cid = item.get("criteria")
         if cid:
-            by_id[cid] = item
+            token = _canonical_token(cid)
+            canonical = required_map.get(token)
+            if canonical:
+                by_id[canonical] = item
     for cid in required_ids:
         entry = by_id.get(cid)
         if not entry:
             errors.append(f"Missing evidence for {cid}.")
             continue
         if reqs.get("quote_validation", True):
-            quote = entry.get("evidence_quote", "")
+            quote = entry.get("evidence_quote") or entry.get("evidence", "")
             if not isinstance(quote, str) or not quote.strip():
                 errors.append(f"Missing evidence quote for {cid}.")
         rationale = entry.get("rationale", "")
@@ -90,6 +99,7 @@ def validate_criteria_evidence(items: list | None, required_ids: list, reqs: dic
         if min_words and len(str(rationale).split()) < min_words:
             errors.append(f"Rationale too short for {cid}.")
         score = entry.get("score")
-        if not isinstance(score, (int, float)):
-            errors.append(f"Missing score for {cid}.")
+        level = entry.get("level")
+        if not isinstance(score, (int, float)) and (not isinstance(level, str) or not level.strip()):
+            errors.append(f"Missing score/level for {cid}.")
     return errors

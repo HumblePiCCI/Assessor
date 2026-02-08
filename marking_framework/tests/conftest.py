@@ -2,8 +2,17 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_cache(tmp_path, monkeypatch):
+    # Tests should never share on-disk LLM cache state.
+    monkeypatch.setenv("LLM_CACHE", "0")
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path / "cache"))
 
 
 def make_docx(path: Path, text: str):

@@ -29,6 +29,17 @@ def load_feedback_text(feedback_dir: Path, student_id: str) -> str:
         return ""
     return path.read_text(encoding="utf-8", errors="ignore")
 
+def load_submission_metadata(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(data, list):
+        return {str(item.get("student_id")): item for item in data if isinstance(item, dict) and item.get("student_id")}
+    return {}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build dashboard JSON for the teacher UI")
@@ -58,6 +69,7 @@ def main() -> int:
     grades_rows = load_csv(grades_path) if grades_path.exists() else []
     grades = {row["student_id"]: row for row in grades_rows}
     texts = load_texts(texts_dir)
+    meta = load_submission_metadata(Path("processing/submission_metadata.json"))
 
     # Determine rank key
     rank_key = "final_rank" if "final_rank" in rows[0] else "consensus_rank"
@@ -65,10 +77,15 @@ def main() -> int:
     data = []
     for row in rows:
         sid = row.get("student_id")
+        meta_row = meta.get(sid, {})
         grade_row = grades.get(sid, {})
         data.append(
             {
                 "student_id": sid,
+                "display_name": meta_row.get("display_name") or sid,
+                "source_file": meta_row.get("source_file", ""),
+                "word_count": meta_row.get("word_count"),
+                "paragraph_count": meta_row.get("paragraph_count"),
                 "rank": int(row.get(rank_key, row.get("consensus_rank", 0)) or 0),
                 "rubric_mean_percent": row.get("rubric_mean_percent"),
                 "rubric_after_penalty_percent": row.get("rubric_after_penalty_percent"),

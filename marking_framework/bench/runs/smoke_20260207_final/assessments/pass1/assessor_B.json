@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_B",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 63.18,
+      "criteria_points": {
+        "K1": 57.362500000000004,
+        "K2": 57.362500000000004,
+        "T1": 66.33037037037037,
+        "T2": 66.33037037037037,
+        "C1": 65.56,
+        "C2": 73.2175,
+        "C3": 66.33037037037037,
+        "A1": 58.080000000000005,
+        "A2": 58.080000000000005
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 65.55,
+      "criteria_points": {
+        "K1": 60.925,
+        "K2": 60.925,
+        "T1": 67.17333333333333,
+        "T2": 67.17333333333333,
+        "C1": 69.04,
+        "C2": 74.74499999999999,
+        "C3": 67.17333333333333,
+        "A1": 61.4,
+        "A2": 61.4
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 66.28,
+      "criteria_points": {
+        "K1": 61.815000000000005,
+        "K2": 61.815000000000005,
+        "T1": 68.31822222222223,
+        "T2": 68.31822222222223,
+        "C1": 68.096,
+        "C2": 75.27799999999999,
+        "C3": 68.31822222222223,
+        "A1": 62.27600000000001,
+        "A2": 62.27600000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 72.13,
+      "criteria_points": {
+        "K1": 69.0625,
+        "K2": 69.0625,
+        "T1": 72.7104761904762,
+        "T2": 72.7104761904762,
+        "C1": 75.72,
+        "C2": 78.8725,
+        "C3": 72.7104761904762,
+        "A1": 69.18,
+        "A2": 69.18
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    }
+  ]
+}

@@ -1,0 +1,467 @@
+{
+  "benchmark": "reliability_benchmark_20260208_extra_bands",
+  "settings": {
+    "mode": "openai_no_key_fallback_deterministic",
+    "runs_per_dataset": 5
+  },
+  "datasets": {
+    "repo_grade_8_10_literary_analysis": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s005": {
+          "expected_level": "4+",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 92.85,
+          "rank_stdev": 0.0
+        },
+        "s004": {
+          "expected_level": "4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 83.21,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 75.74,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 64.91,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.51,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.85,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.21,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 75.74,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.91,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.51,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.85,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.21,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 75.74,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.91,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.51,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.85,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.21,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 75.74,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.91,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.51,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.85,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.21,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 75.74,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.91,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.51,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.85,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.21,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 75.74,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.91,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.51,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        }
+      ]
+    },
+    "repo_grade_11_12_news_report": {
+      "runs_successful": 5,
+      "accuracy_mean": 1.0,
+      "mean_rank_stdev": 0.0,
+      "student_summary": {
+        "s005": {
+          "expected_level": "4+",
+          "level_mode": "4+",
+          "level_consistency": 1.0,
+          "score_mean": 92.25,
+          "rank_stdev": 0.0
+        },
+        "s004": {
+          "expected_level": "4",
+          "level_mode": "4",
+          "level_consistency": 1.0,
+          "score_mean": 83.01,
+          "rank_stdev": 0.0
+        },
+        "s003": {
+          "expected_level": "3",
+          "level_mode": "3",
+          "level_consistency": 1.0,
+          "score_mean": 74.06,
+          "rank_stdev": 0.0
+        },
+        "s002": {
+          "expected_level": "2",
+          "level_mode": "2",
+          "level_consistency": 1.0,
+          "score_mean": 64.58,
+          "rank_stdev": 0.0
+        },
+        "s001": {
+          "expected_level": "1",
+          "level_mode": "1",
+          "level_consistency": 1.0,
+          "score_mean": 54.22,
+          "rank_stdev": 0.0
+        }
+      },
+      "runs_detail": [
+        {
+          "run": 1,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.25,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.01,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 74.06,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.58,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.22,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 2,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.25,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.01,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 74.06,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.58,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.22,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 3,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.25,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.01,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 74.06,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.58,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.22,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 4,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.25,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.01,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 74.06,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.58,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.22,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        },
+        {
+          "run": 5,
+          "ok": true,
+          "accuracy": 1.0,
+          "students": {
+            "s005": {
+              "level": "4+",
+              "score": 92.25,
+              "rank": 1,
+              "expected": "4+"
+            },
+            "s004": {
+              "level": "4",
+              "score": 83.01,
+              "rank": 2,
+              "expected": "4"
+            },
+            "s003": {
+              "level": "3",
+              "score": 74.06,
+              "rank": 3,
+              "expected": "3"
+            },
+            "s002": {
+              "level": "2",
+              "score": 64.58,
+              "rank": 4,
+              "expected": "2"
+            },
+            "s001": {
+              "level": "1",
+              "score": 54.22,
+              "rank": 5,
+              "expected": "1"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

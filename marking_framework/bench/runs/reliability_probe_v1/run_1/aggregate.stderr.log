@@ -1,0 +1,43 @@
+2026-02-08 05:06:43,657 - INFO - Loading config from config/marking_config.json
+2026-02-08 05:06:43,657 - INFO - Reading Pass 1 file: assessor_A.json
+2026-02-08 05:06:43,657 - INFO - Reading Pass 1 file: assessor_B.json
+2026-02-08 05:06:43,657 - INFO - Reading Pass 1 file: assessor_C.json
+2026-02-08 05:06:43,657 - INFO - Loaded 3 Pass 1 assessments
+2026-02-08 05:06:43,657 - INFO - Reading Pass 2 file: assessor_A.txt
+2026-02-08 05:06:43,657 - INFO - Reading Pass 2 file: assessor_B.txt
+2026-02-08 05:06:43,657 - INFO - Reading Pass 2 file: assessor_C.txt
+2026-02-08 05:06:43,657 - INFO - Loaded 3 Pass 2 rankings
+2026-02-08 05:06:43,657 - INFO - Loaded conventions data for 3 students
+2026-02-08 05:06:43,657 - INFO - Found 3 unique students
+2026-02-08 05:06:43,657 - INFO - Pass 1 assessors: 3
+2026-02-08 05:06:43,657 - INFO - Pass 2 assessors: 3
+2026-02-08 05:06:43,657 - INFO - ✓ Data completeness check PASSED
+2026-02-08 05:06:43,658 - INFO - Rubric points possible: 100
+2026-02-08 05:06:43,658 - INFO - Inter-rater reliability metrics:
+2026-02-08 05:06:43,658 - INFO -   Rubric ICC (approx): 1.237 (>0.7 = good, >0.9 = excellent)
+2026-02-08 05:06:43,658 - INFO -   Rank Kendall's W: 1.000 (>0.7 = good agreement)
+2026-02-08 05:06:43,658 - INFO -   Mean rubric SD: 2.35
+2026-02-08 05:06:43,658 - INFO -   Mean rank SD: 0.00
+2026-02-08 05:06:43,658 - INFO - Weighting: rubric=0.7, conventions=0.15, comparative=0.15
+2026-02-08 05:06:43,658 - INFO - Conventions penalty: mistake_rate_threshold=0.07, max_level_drop=1
+2026-02-08 05:06:43,658 - INFO - Level bands: 1, 2, 3, 4, 4+
+2026-02-08 05:06:43,658 - INFO - Student 's001': conventions penalty applied (mistake_rate=7.5% > threshold=7.0%, level_drop=0.07), rubric reduced from 56.2% to 55.5%
+2026-02-08 05:06:43,658 - INFO - Student 's002': conventions penalty applied (mistake_rate=7.2% > threshold=7.0%, level_drop=0.02), rubric reduced from 73.2% to 73.0%
+2026-02-08 05:06:43,658 - INFO - Student 's003': conventions penalty applied (mistake_rate=8.0% > threshold=7.0%, level_drop=0.14), rubric reduced from 84.6% to 83.1%
+2026-02-08 05:06:43,658 - WARNING - Conventions penalty applied to 3 student(s)
+2026-02-08 05:06:43,658 - INFO - Sorting by composite score (weighted: rubric + conventions + comparative)
+2026-02-08 05:06:43,658 - INFO - Consensus ranking established for 3 students
+2026-02-08 05:06:43,658 - INFO - ✓ Consensus scores written to bench/runs/reliability_probe_v1/run_1/consensus.csv
+2026-02-08 05:06:43,658 - INFO - ✓ Ranked list written to bench/runs/reliability_probe_v1/run_1/ranked_list.md
+2026-02-08 05:06:43,658 - INFO - ✓ Disagreements written to assessments/pass3_reconcile/disagreements.md (3 flagged)
+2026-02-08 05:06:43,659 - INFO - ✓ IRR metrics written to bench/runs/reliability_probe_v1/run_1/irr_metrics.json
+2026-02-08 05:06:43,659 - INFO - 
+2026-02-08 05:06:43,659 - INFO - ============================================================
+2026-02-08 05:06:43,659 - INFO - SUMMARY
+2026-02-08 05:06:43,659 - INFO - ============================================================
+2026-02-08 05:06:43,659 - INFO - Students processed: 3
+2026-02-08 05:06:43,659 - INFO - Students flagged for review: 3
+2026-02-08 05:06:43,659 - INFO - Conventions penalties: 3
+2026-02-08 05:06:43,659 - INFO - Rubric ICC: 1.237 (excellent)
+2026-02-08 05:06:43,659 - INFO - Rank agreement (Kendall's W): 1.000 (good)
+2026-02-08 05:06:43,659 - INFO - ============================================================

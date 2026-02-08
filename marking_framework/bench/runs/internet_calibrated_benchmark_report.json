@@ -1,0 +1,120 @@
+{
+  "mode": "deterministic_fallback_benchmark",
+  "runs": [
+    "bench/runs/internet_calibrated_run_1",
+    "bench/runs/internet_calibrated_run_2",
+    "bench/runs/internet_calibrated_run_3",
+    "bench/runs/internet_calibrated_run_4",
+    "bench/runs/internet_calibrated_run_5"
+  ],
+  "metrics_by_run": [
+    {
+      "run": 1,
+      "mae_levels": 1.5,
+      "exact_level_acc": 0.25,
+      "position_hit_ratio": 0.0
+    },
+    {
+      "run": 2,
+      "mae_levels": 1.5,
+      "exact_level_acc": 0.25,
+      "position_hit_ratio": 0.0
+    },
+    {
+      "run": 3,
+      "mae_levels": 1.5,
+      "exact_level_acc": 0.25,
+      "position_hit_ratio": 0.0
+    },
+    {
+      "run": 4,
+      "mae_levels": 1.5,
+      "exact_level_acc": 0.25,
+      "position_hit_ratio": 0.0
+    },
+    {
+      "run": 5,
+      "mae_levels": 1.5,
+      "exact_level_acc": 0.25,
+      "position_hit_ratio": 0.0
+    }
+  ],
+  "consistency_by_student": {
+    "s001": {
+      "display_name": "sample_level1_internet",
+      "score_mean": 62.27,
+      "score_sd": 0.0,
+      "rank_values": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "level_values": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "s002": {
+      "display_name": "sample_level2_internet",
+      "score_mean": 95.0,
+      "score_sd": 0.0,
+      "rank_values": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "level_values": [
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "s003": {
+      "display_name": "sample_level3_internet",
+      "score_mean": 93.35,
+      "score_sd": 0.0,
+      "rank_values": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "level_values": [
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "s004": {
+      "display_name": "sample_level4_internet",
+      "score_mean": 86.01,
+      "score_sd": 0.0,
+      "rank_values": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "level_values": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    }
+  }
+}

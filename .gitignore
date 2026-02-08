@@ -12,3 +12,5 @@ marking_framework/inputs/*.docx
 **/__pycache__/
 *.pyc
 .coverage
+marking_framework/.env
+marking_framework/.env.local

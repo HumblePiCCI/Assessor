@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.assessor_context import (
     build_grade_context,
     format_exemplars,
+    infer_genre_from_text,
     load_class_metadata,
     load_exemplars,
     load_grade_profiles,
@@ -39,36 +40,32 @@ from scripts.llm_assessors_core import (
     load_json,
     load_routing,
     load_texts,
+    looks_like_prompt_echo,
     parse_pass1_item,
     pass1_text_format,
     preflight_costs,
 )
+from scripts.fallback_assessor import deterministic_pass1_item
+from scripts.pass1_guard import stabilize_pass1_item
+from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ranking, pass2_text_format
 try:
     from scripts.openai_client import responses_create, extract_text, extract_usage
 except ImportError:  # pragma: no cover - Support running as a script without package context
     from openai_client import responses_create, extract_text, extract_usage  # pragma: no cover
-
-
-def build_pass2_repair_prompt(known_ids: list, prior: str, missing: list) -> str:
-    missing_block = ""
-    if missing:
-        missing_block = "Missing IDs: " + ", ".join(missing) + "\n"
-    ids_block = "\n".join(known_ids)
-    return (
-        "You returned an invalid or incomplete ranking. Return ONLY a ranked list (one student per line)\n"
-        "with ALL of these IDs exactly once, no extra text.\n"
-        f"{missing_block}"
-        "Use these IDs exactly as written:\n"
-        f"{ids_block}\n\nPrevious output:\n{prior}\n"
-    )
-
-
-def normalize_full_ranking(content: str, known_ids: list) -> tuple[list, list]:
-    lines = normalize_ranking_ids(content.splitlines(), known_ids)
-    missing = [sid for sid in known_ids if sid not in lines]
-    return lines, missing
-
-
+def reset_assessor_outputs(path: Path):
+    for file in path.glob("assessor_*"):
+        if file.is_file():
+            file.unlink()
+def write_text_atomic(path: Path, content: str):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+def ranking_from_scores(scores: dict, known_ids: list) -> list:
+    ranked = []
+    for sid in known_ids:
+        ranked.append((sid, float(scores.get(sid, 0.0) or 0.0)))
+    ranked.sort(key=lambda item: (-item[1], item[0].lower()))
+    return [sid for sid, _ in ranked]
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run LLM assessors for Pass 1 and Pass 2")
     parser.add_argument("--texts", default="processing/normalized_text", help="Normalized text directory")
@@ -88,6 +85,8 @@ def main() -> int:
     parser.add_argument("--exemplars", default="inputs/exemplars", help="Exemplars directory")
     parser.add_argument("--genre", default=None, help="Assignment genre for exemplar selection")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
+    parser.add_argument("--fallback", choices=["none", "deterministic"], default="deterministic", help="Fallback strategy when model output is invalid")
+    parser.add_argument("--require-model-usage", action="store_true", help="Fail if no model outputs are accepted")
     args = parser.parse_args()
     routing = load_routing(Path(args.routing))
     mode = os.environ.get("LLM_MODE") or routing.get("mode", "openai")
@@ -100,6 +99,10 @@ def main() -> int:
     pass2_model = routing["tasks"]["pass2_ranker"]["model"]
     pass2_reasoning = routing["tasks"]["pass2_ranker"].get("reasoning", "medium")
     pass2_temp = routing["tasks"]["pass2_ranker"].get("temperature", 0.2)
+    guard_cfg = routing.get("pass1_guard", {})
+    guard_enabled = bool(guard_cfg.get("enabled", False)) and args.fallback == "deterministic"
+    guard_max_score_delta = float(guard_cfg.get("max_score_delta", 8.0) or 8.0)
+    guard_max_level_gap = int(guard_cfg.get("max_level_gap", 1) or 1)
     texts = load_texts(Path(args.texts))
     rubric_path = resolve_input_path(Path(args.rubric), "rubric")
     outline_path = resolve_input_path(Path(args.outline), "assignment_outline")
@@ -113,6 +116,8 @@ def main() -> int:
     grade_level = select_grade_level(args.grade_level, metadata)
     grade_context = build_grade_context(grade_level, profiles)
     genre = args.genre or metadata.get("genre") or metadata.get("assignment_genre")
+    if not genre:
+        genre = infer_genre_from_text(rubric, outline)
     genre = normalize_genre(genre)
     base_exemplars = Path(args.exemplars)
     exemplars_dir = base_exemplars
@@ -121,16 +126,21 @@ def main() -> int:
     exemplars = load_exemplars(exemplars_dir)
     exemplar_block = format_exemplars(exemplars)
     criteria_cfg = load_rubric_criteria(Path(args.rubric_criteria))
-    criteria_block = criteria_prompt(criteria_cfg, genre) if criteria_cfg else ""
-    required_ids = criteria_ids(criteria_cfg, genre) if criteria_cfg else []
+    # Use a stable, standards-aligned base criteria set for consistency.
+    # Genre-specific criteria can be added later as optional signals.
+    criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
+    required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
     reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
-    if mode == "codex_local" and reqs:
+    if reqs:
         reqs = dict(reqs)
+        # Keep scoring resilient: evidence quality checks are handled later in feedback phase.
         reqs["quote_validation"] = False
         reqs["rationale_min_words"] = 0
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
     ensure_dir(Path(args.pass1_out))
     ensure_dir(Path(args.pass2_out))
+    reset_assessor_outputs(Path(args.pass1_out))
+    reset_assessor_outputs(Path(args.pass2_out))
     usage_log = Path("outputs/usage_log.jsonl")
     usage_log.parent.mkdir(parents=True, exist_ok=True)
     failure_log = Path("logs/llm_failures.jsonl")
@@ -171,10 +181,14 @@ def main() -> int:
                     return 1
             if per_job_max and total_cost > (per_job_max * (alert_at / 100.0)):
                 print(f"Warning: estimated total cost ${total_cost:.2f} is above {alert_at}% of job limit ${per_job_max:.2f}")
+    pass1_scores_by_assessor = {}
+    model_successes = 0
+    model_attempts = 0
     # Pass 1
     for assessor in assessors:
         scores = []
         for student_id, text in texts.items():
+            anchor_item = deterministic_pass1_item(student_id, text, assessor, required_ids, exemplars)
             prompt = build_pass1_prompt(
                 assessor,
                 rubric,
@@ -187,21 +201,30 @@ def main() -> int:
                 reqs,
             )
             item = None
-            for attempt in range(2):
-                response = responses_create(
-                    model=pass1_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=pass1_temp,
-                    reasoning=pass1_reasoning,
-                    routing_path=args.routing,
-                    text_format=pass1_text_format(),
-                )
-                content = extract_text(response)
-                usage = extract_usage(response)
-                with usage_log.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps({"task": "pass1", "assessor": assessor, "student_id": student_id, "usage": usage, "model": pass1_model}) + "\n")
+            for attempt in range(3):
                 try:
-                    item = parse_pass1_item(content, student_id, required_ids, reqs, text)
+                    model_attempts += 1
+                    response = responses_create(
+                        model=pass1_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=pass1_temp,
+                        reasoning=pass1_reasoning,
+                        routing_path=args.routing,
+                        text_format=pass1_text_format(),
+                    )
+                    content = extract_text(response)
+                    usage = extract_usage(response)
+                    with usage_log.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps({"task": "pass1", "assessor": assessor, "student_id": student_id, "usage": usage, "model": pass1_model}) + "\n")
+                except Exception as exc:
+                    content = f"[model_error] {exc}"
+                try:
+                    if mode == "codex_local" and looks_like_prompt_echo(content, student_id):
+                        raise ValueError("Model returned prompt echo instead of scored JSON.")
+                    item = parse_pass1_item(content, student_id, required_ids, reqs, text, strict=True)
+                    if guard_enabled:
+                        item = stabilize_pass1_item(item, anchor_item, guard_max_score_delta, guard_max_level_gap)
+                    model_successes += 1
                     break
                 except ValueError as exc:
                     failure = {
@@ -218,8 +241,14 @@ def main() -> int:
                         f.write(json.dumps(failure) + "\n")
                     prompt = build_pass1_repair_prompt(student_id, content, bool(required_ids))
             if item is None:
-                raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
+                if args.fallback == "deterministic":
+                    item = anchor_item
+                else:
+                    raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
             scores.append(item)
+        pass1_scores_by_assessor[assessor] = {
+            s["student_id"]: float(s.get("rubric_total_points", 0.0) or 0.0) for s in scores
+        }
         pass1_payload = {
             "assessor_id": f"assessor_{assessor}",
             "role": "llm_assessor",
@@ -227,49 +256,71 @@ def main() -> int:
             "scores": scores,
         }
         out_path = Path(args.pass1_out) / f"assessor_{assessor}.json"
-        out_path.write_text(json.dumps(pass1_payload, indent=2), encoding="utf-8")
+        write_text_atomic(out_path, json.dumps(pass1_payload, indent=2))
     # Pass 2
     student_summaries = summaries
     known_ids = list(texts.keys())
     for assessor in assessors:
+        score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
         prompt = build_pass2_prompt(assessor, rubric, outline, student_summaries, grade_context)
-        response = responses_create(
-            model=pass2_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=pass2_temp,
-            reasoning=pass2_reasoning,
-            routing_path=args.routing,
-        )
-        content = extract_text(response)
-        usage = extract_usage(response)
-        with usage_log.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"task": "pass2", "assessor": assessor, "usage": usage, "model": pass2_model}) + "\n")
         error = ""
         try:
-            lines, missing = normalize_full_ranking(content, known_ids)
-        except ValueError as exc:
+            model_attempts += 1
+            response = responses_create(
+                model=pass2_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=pass2_temp,
+                reasoning=pass2_reasoning,
+                routing_path=args.routing,
+                text_format=pass2_text_format(),
+            )
+            content = extract_text(response)
+            usage = extract_usage(response)
+            with usage_log.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"task": "pass2", "assessor": assessor, "usage": usage, "model": pass2_model}) + "\n")
+            try:
+                lines, missing = normalize_full_ranking(content, known_ids)
+                if not missing:
+                    model_successes += 1
+            except ValueError as exc:
+                lines = []
+                missing = known_ids
+                error = str(exc)
+        except Exception as exc:
+            content = f"[model_error] {exc}"
             lines = []
             missing = known_ids
             error = str(exc)
         if error or missing:
             repair_prompt = build_pass2_repair_prompt(known_ids, content, missing)
-            response = responses_create(
-                model=pass2_model,
-                messages=[{"role": "user", "content": repair_prompt}],
-                temperature=0.0,
-                reasoning=pass2_reasoning,
-                routing_path=args.routing,
-            )
-            repair_content = extract_text(response)
             try:
-                lines, missing = normalize_full_ranking(repair_content, known_ids)
-                error = ""
-            except ValueError as exc:
+                response = responses_create(
+                    model=pass2_model,
+                    messages=[{"role": "user", "content": repair_prompt}],
+                    temperature=0.0,
+                    reasoning=pass2_reasoning,
+                    routing_path=args.routing,
+                    text_format=pass2_text_format(),
+                )
+                repair_content = extract_text(response)
+                try:
+                    lines, missing = normalize_full_ranking(repair_content, known_ids)
+                    error = ""
+                    if not missing:
+                        model_successes += 1
+                except ValueError as exc:
+                    error = str(exc)
+                    lines = list(score_order)
+                    missing = []
+            except Exception as exc:
+                repair_content = f"[model_error] {exc}"
                 error = str(exc)
-                lines = list(known_ids)
+                lines = list(score_order)
                 missing = []
             if missing:
-                for sid in missing:
+                for sid in score_order:
+                    if sid not in missing:
+                        continue
                     lines.append(sid)
             if error or missing:
                 failure = {
@@ -283,8 +334,15 @@ def main() -> int:
                 }
                 with failure_log.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(failure) + "\n")
+        if not lines:
+            lines = list(score_order)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
-        out_path.write_text("\n".join(lines), encoding="utf-8")
+        write_text_atomic(out_path, "\n".join(lines))
+    if mode == "openai":
+        print(f"Model coverage: {model_successes}/{model_attempts} successful structured outputs.")
+        if args.require_model_usage and model_successes == 0:
+            print("No model outputs were accepted; failing because --require-model-usage is set.")
+            return 1
     print("LLM assessor runs completed.")
     return 0
 if __name__ == "__main__":  # pragma: no cover

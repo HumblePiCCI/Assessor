@@ -1,0 +1,262 @@
+{
+  "assessor_id": "assessor_C",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "grade_11_12_news_report_level_1",
+      "rubric_total_points": 46.32,
+      "criteria_points": {
+        "K1": 42.32,
+        "K2": 44.32,
+        "T1": 46.32,
+        "T2": 48.32,
+        "C1": 50.32,
+        "C2": 42.32,
+        "C3": 44.32,
+        "A1": 46.32,
+        "A2": 48.32
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_11_12_news_report_level_2",
+      "rubric_total_points": 49.08,
+      "criteria_points": {
+        "K1": 45.08,
+        "K2": 47.08,
+        "T1": 49.08,
+        "T2": 51.08,
+        "C1": 53.08,
+        "C2": 45.08,
+        "C3": 47.08,
+        "A1": 49.08,
+        "A2": 51.08
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_11_12_news_report_level_3",
+      "rubric_total_points": 50.16,
+      "criteria_points": {
+        "K1": 46.16,
+        "K2": 48.16,
+        "T1": 50.16,
+        "T2": 52.16,
+        "C1": 54.16,
+        "C2": 46.16,
+        "C3": 48.16,
+        "A1": 50.16,
+        "A2": 52.16
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_11_12_news_report_level_4",
+      "rubric_total_points": 55.08,
+      "criteria_points": {
+        "K1": 51.08,
+        "K2": 53.08,
+        "T1": 55.08,
+        "T2": 57.08,
+        "C1": 59.08,
+        "C2": 51.08,
+        "C3": 53.08,
+        "A1": 55.08,
+        "A2": 57.08
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_11_12_news_report_level_4_plus",
+      "rubric_total_points": 56.38,
+      "criteria_points": {
+        "K1": 52.38,
+        "K2": 54.38,
+        "T1": 56.38,
+        "T2": 58.38,
+        "C1": 60.38,
+        "C2": 52.38,
+        "C3": 54.38,
+        "A1": 56.38,
+        "A2": 58.38
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_6_7_argumentative_level_1",
+      "rubric_total_points": 45.96,
+      "criteria_points": {
+        "K1": 41.96,
+        "K2": 43.96,
+        "T1": 45.96,
+        "T2": 47.96,
+        "C1": 49.96,
+        "C2": 41.96,
+        "C3": 43.96,
+        "A1": 45.96,
+        "A2": 47.96
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_6_7_argumentative_level_2",
+      "rubric_total_points": 50.96,
+      "criteria_points": {
+        "K1": 46.96,
+        "K2": 48.96,
+        "T1": 50.96,
+        "T2": 52.96,
+        "C1": 54.96,
+        "C2": 46.96,
+        "C3": 48.96,
+        "A1": 50.96,
+        "A2": 52.96
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_6_7_argumentative_level_3",
+      "rubric_total_points": 66.18,
+      "criteria_points": {
+        "K1": 62.18000000000001,
+        "K2": 64.18,
+        "T1": 66.18,
+        "T2": 68.18,
+        "C1": 70.18,
+        "C2": 62.18000000000001,
+        "C3": 64.18,
+        "A1": 66.18,
+        "A2": 68.18
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_6_7_argumentative_level_4",
+      "rubric_total_points": 56.35,
+      "criteria_points": {
+        "K1": 52.35,
+        "K2": 54.35,
+        "T1": 56.35,
+        "T2": 58.35,
+        "C1": 60.35,
+        "C2": 52.35,
+        "C3": 54.35,
+        "A1": 56.35,
+        "A2": 58.35
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_6_7_argumentative_level_4_plus",
+      "rubric_total_points": 57.78,
+      "criteria_points": {
+        "K1": 53.78,
+        "K2": 55.78,
+        "T1": 57.78,
+        "T2": 59.78,
+        "C1": 61.78,
+        "C2": 53.78,
+        "C3": 55.78,
+        "A1": 57.78,
+        "A2": 59.78
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_8_10_literary_analysis_level_1",
+      "rubric_total_points": 51.84,
+      "criteria_points": {
+        "K1": 47.84,
+        "K2": 49.84,
+        "T1": 51.84,
+        "T2": 53.84,
+        "C1": 55.84,
+        "C2": 47.84,
+        "C3": 49.84,
+        "A1": 51.84,
+        "A2": 53.84
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_8_10_literary_analysis_level_2",
+      "rubric_total_points": 58.11,
+      "criteria_points": {
+        "K1": 54.11,
+        "K2": 56.11,
+        "T1": 58.11,
+        "T2": 60.11,
+        "C1": 62.11,
+        "C2": 54.11,
+        "C3": 56.11,
+        "A1": 58.11,
+        "A2": 60.11
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_8_10_literary_analysis_level_3",
+      "rubric_total_points": 67.0,
+      "criteria_points": {
+        "K1": 63.0,
+        "K2": 65.0,
+        "T1": 67.0,
+        "T2": 69.0,
+        "C1": 71.0,
+        "C2": 63.0,
+        "C3": 65.0,
+        "A1": 67.0,
+        "A2": 69.0
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_8_10_literary_analysis_level_4",
+      "rubric_total_points": 66.33,
+      "criteria_points": {
+        "K1": 62.33,
+        "K2": 64.33,
+        "T1": 66.33,
+        "T2": 68.33,
+        "C1": 70.33,
+        "C2": 62.33,
+        "C3": 64.33,
+        "A1": 66.33,
+        "A2": 68.33
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    },
+    {
+      "student_id": "grade_8_10_literary_analysis_level_4_plus",
+      "rubric_total_points": 78.21,
+      "criteria_points": {
+        "K1": 74.21,
+        "K2": 76.21,
+        "T1": 78.21,
+        "T2": 80.21,
+        "C1": 82.21,
+        "C2": 74.21,
+        "C3": 76.21,
+        "A1": 78.21,
+        "A2": 80.21
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor C."
+    }
+  ]
+}

@@ -31,10 +31,12 @@ def main() -> int:
     base = Path(".")
     inputs = base / "inputs" / "submissions"
     normalized = base / "processing" / "normalized_text"
+    meta = base / "processing" / "submission_metadata.json"
     conventions = base / "processing" / "conventions_report.csv"
 
     if not args.skip_extract:
-        if run(["python3", "scripts/extract_text.py", "--inputs", str(inputs), "--output", str(normalized)]) != 0:
+        cmd = ["python3", "scripts/extract_text.py", "--inputs", str(inputs), "--output", str(normalized), "--metadata", str(meta)]
+        if run(cmd) != 0:
             return 1
 
     if not args.skip_conventions:

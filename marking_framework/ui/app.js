@@ -14,6 +14,7 @@ function num(value, fallback = 0) { const n = parseFloat(value); return Number.i
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function computeGrades(top, bottom, count) { if (count <= 0) return []; if (count === 1) return [Math.round(top)]; const result = []; for (let i = 0; i < count; i += 1) { const grade = top - (top - bottom) * (i / (count - 1)); result.push(Math.round(grade)); } return result; }
 function baseName(name) { return name.replace(/\.[^.]+$/, ''); }
+function labelFor(s) { return (s && (s.display_name || s.student_id)) ? (s.display_name || s.student_id) : ''; }
 function getStudents() { return previewStudents.length ? previewStudents : ((data && data.students && data.students.length) ? data.students : []); }
 async function refreshAuthStatus() { const status = document.getElementById('authStatus'); if (!status) return; try { const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const codex = codexRes.ok ? await codexRes.json() : null; const api = apiRes.ok ? await apiRes.json() : null; if (codex && codex.available && codex.connected) status.textContent = 'Codex connected'; else if (api && api.connected) status.textContent = 'API key connected'; else if (codex && codex.available) status.textContent = 'Codex not connected'; else status.textContent = 'Offline'; } catch (err) { status.textContent = 'Offline'; } }
 async function connectApiKey() { const input = document.getElementById('apiKeyInput'); const status = document.getElementById('authStatus'); if (!input || !status) return; const key = input.value.trim(); if (!key) return; try { const res = await fetch(apiUrl('/auth'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key }) }); if (!res.ok) { status.textContent = 'Invalid key'; return; } input.value = ''; status.textContent = 'API key connected'; } catch (err) { status.textContent = 'Offline'; } }
@@ -66,18 +67,18 @@ function renderRail(animate = false) {
   if (animate) rail.querySelectorAll('.rail-item').forEach(el => first.set(el.dataset.id, el.getBoundingClientRect()));
   const existing = {};
   rail.querySelectorAll('.rail-item').forEach(el => { existing[el.dataset.id] = el; });
-  list.forEach((s, idx) => {
-    let item = existing[s.student_id];
+	list.forEach((s, idx) => {
+		let item = existing[s.student_id];
     if (!item) {
       item = document.createElement('button');
       item.className = 'rail-item';
       item.dataset.id = s.student_id;
       item.addEventListener('click', () => scrollToIndex(parseInt(item.dataset.index, 10), true));
-    }
-    item.dataset.index = idx;
-    item.innerHTML = `<div class="rail-rank">Rank ${s.rank || idx + 1}</div><div class="rail-name">${s.student_id}</div><div class="rail-grade"></div>`;
-    rail.appendChild(item);
-  });
+		}
+		item.dataset.index = idx;
+		item.innerHTML = `<div class="rail-rank">Rank ${s.rank || idx + 1}</div><div class="rail-name">${labelFor(s)}</div><div class="rail-grade"></div>`;
+		rail.appendChild(item);
+	});
   rail.querySelectorAll('.rail-item').forEach(el => { if (!keep.has(el.dataset.id)) el.remove(); });
   if (animate) {
     rail.querySelectorAll('.rail-item').forEach(el => {
@@ -206,24 +207,24 @@ function renderDetail() {
     document.getElementById('essay').innerHTML = '';
     document.getElementById('essayLabelPrimary').textContent = '';
     return;
-  }
-  const student = data.students[currentIndex];
-  document.getElementById('detailTitle').textContent = `${student.student_id} • Rank ${student.rank}`;
-  renderSummary(student);
-  document.getElementById('essayLabelPrimary').textContent = `${student.student_id} • Rank ${student.rank}`;
-  renderEssayTo('essay', student.text || '');
+	}
+	const student = data.students[currentIndex];
+	document.getElementById('detailTitle').textContent = `${labelFor(student)} • Rank ${student.rank}`;
+	renderSummary(student);
+	document.getElementById('essayLabelPrimary').textContent = `${labelFor(student)} • Rank ${student.rank}`;
+	renderEssayTo('essay', student.text || '');
   const compareIndex = getCompareIndex();
   const comparePanel = document.getElementById('comparePanel');
   const splitView = document.body.dataset.view === 'split';
   if (!splitView || compareIndex === null) {
     comparePanel.style.display = 'none';
-  } else {
-    comparePanel.style.display = '';
-    const compare = data.students[compareIndex];
-    document.getElementById('essayLabelCompare').textContent = `${compare.student_id} • Rank ${compare.rank}`;
-    renderEssayTo('essayCompare', compare.text || '');
-    comparePanel.onclick = () => scrollToIndex(compareIndex, true);
-  }
+	} else {
+		comparePanel.style.display = '';
+		const compare = data.students[compareIndex];
+		document.getElementById('essayLabelCompare').textContent = `${labelFor(compare)} • Rank ${compare.rank}`;
+		renderEssayTo('essayCompare', compare.text || '');
+		comparePanel.onclick = () => scrollToIndex(compareIndex, true);
+	}
   renderFeedback(student);
   const gradeInput = document.getElementById('gradeOverride');
   const override = overrides[student.student_id];
@@ -238,6 +239,8 @@ function stopPipelineNarrative(msg) { if (msg) pipelineLog(msg); if (pipelineTim
 function startShuffle() { if (shuffleTimer || !previewStudents.length) return; shuffleTimer = setInterval(() => { if (previewStudents.length < 2) return; const i = Math.floor(Math.random() * (previewStudents.length - 1)); const t = previewStudents[i]; previewStudents[i] = previewStudents[i + 1]; previewStudents[i + 1] = t; previewStudents.forEach((s, idx) => { s.rank = idx + 1; }); renderRail(true); }, 900); }
 function stopShuffle() { if (shuffleTimer) clearInterval(shuffleTimer); shuffleTimer = null; }
 function updatePreviewFromUploads() { const essays = document.getElementById('uploadEssays'); if (!essays || !essays.files || !essays.files.length) return; previewStudents = Array.from(essays.files).map((f, idx) => ({ student_id: baseName(f.name), rank: idx + 1, text: '' })); currentIndex = 0; renderRail(true); }
+async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
 async function runPipeline() {
   const status = document.getElementById('pipelineStatus'); if (!status) return;
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
@@ -248,7 +251,7 @@ async function runPipeline() {
   if (!mode) { status.textContent = 'Connect Codex or API key'; return; }
   const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode);
   status.textContent = 'Running...'; setRunning(true); startPipelineNarrative(); startShuffle();
-  try { const res = await fetch(apiUrl('/pipeline/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); return; } status.textContent = 'Complete'; stopShuffle(); stopPipelineNarrative('Done. Opening your dashboard…'); setTimeout(() => location.reload(), 800); } catch (err) { status.textContent = 'Offline'; stopShuffle(); stopPipelineNarrative('Connection lost.'); }
+  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); const jobId = submit.job_id; const job = submit.status === 'completed' ? submit : await waitForJob(jobId); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || jobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); status.textContent = 'Complete'; stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); }
 }
 function setupUploads() {
   document.querySelectorAll('.upload').forEach(zone => {

@@ -1,0 +1,6 @@
+student_id,word_count,spelling_errors,sentence_start_lowercase,missing_end_punct,repeated_spaces,total_errors,mistake_rate_percent,wordlist_used
+level_1,67,4,0,1,0,5,7.46,yes
+level_2,169,6,0,1,0,7,4.14,yes
+level_3,227,9,0,1,0,10,4.41,yes
+level_4,225,13,0,1,0,14,6.22,yes
+level_4_plus,228,14,0,1,0,15,6.58,yes

@@ -1,0 +1,22 @@
+{
+  "inter_rater_reliability": {
+    "rubric_icc": 0.953,
+    "rank_kendall_w": 0.997,
+    "mean_rubric_sd": 2.69,
+    "mean_rank_sd": 0.13
+  },
+  "assessment_info": {
+    "num_students": 15,
+    "num_assessors_pass1": 3,
+    "num_assessors_pass2": 3,
+    "rubric_points_possible": 100
+  },
+  "quality_summary": {
+    "students_flagged": 15,
+    "conventions_penalties": 0
+  },
+  "interpretation": {
+    "rubric_icc": "excellent",
+    "rank_agreement": "good"
+  }
+}
