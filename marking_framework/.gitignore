@@ -1,0 +1,5 @@
+cache/llm/
+bench/runs/
+bench/internet_real_student_samples_8pack/
+outputs/usage_log.jsonl
+logs/llm_failures.jsonl

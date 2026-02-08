@@ -671,7 +671,8 @@ def test_run_llm_assessors_pass2_uses_structured_contract(tmp_path, monkeypatch)
     )
     assert rla.main() == 0
     assert seen["pass1"] and seen["pass2"]
-    assert seen["pass1"][0]["schema"]["required"] == ["student_id", "rubric_total_points", "criteria_points", "criteria_evidence", "notes"]
+    assert seen["pass1"][0]["schema"]["required"] == ["student_id", "rubric_total_points", "criteria_points", "notes"]
+    assert "criteria_evidence" not in seen["pass1"][0]["schema"]["required"]
     assert seen["pass2"][0]["schema"]["required"] == ["ranking"]
 
 

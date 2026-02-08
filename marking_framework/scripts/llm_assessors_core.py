@@ -97,8 +97,10 @@ def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: st
     if criteria_block:
         context += criteria_block.strip() + "\n\n"
     evidence_note = ""
+    evidence_field = ""
     if evidence_reqs:
         min_words = evidence_reqs.get("rationale_min_words", 0)
+        evidence_field = '  "criteria_evidence": [],\n'
         evidence_note = (
             "For EACH criterion ID above, include one criteria_evidence item with:\n"
             "- criterion_id (use the ID exactly)\n"
@@ -124,8 +126,7 @@ Return ONLY valid JSON in this exact format:
   "student_id": "{student_id}",
   "rubric_total_points": <number 0-100 percent>,
   "criteria_points": {{}},
-  "criteria_evidence": [],
-  "notes": "short justification"
+{evidence_field}  "notes": "short justification"
 }}
 {evidence_note}
 """
@@ -174,23 +175,24 @@ def json_from_text(text: str):
     return candidates[-1]
 
 
-def pass1_text_format() -> dict:
-    return {"type": "json_schema", "name": "pass1_assessment", "strict": True, "schema": {"type": "object", "properties": {
+def pass1_text_format(require_evidence: bool = False) -> dict:
+    properties = {
         "student_id": {"type": "string"},
         "rubric_total_points": {"type": "number", "minimum": 0, "maximum": 100},
         "criteria_points": {"type": "array", "items": {"type": "object", "properties": {
             "criterion_id": {"type": "string"},
             "score": {"type": "number"},
         }, "required": ["criterion_id", "score"], "additionalProperties": False}},
-        "criteria_evidence": {"type": "array", "items": {"type": "object", "properties": {
-            "criterion_id": {"type": "string"},
-            "level": {"type": "string"},
-            "score": {"type": "number"},
-            "evidence_quote": {"type": "string"},
-            "rationale": {"type": "string"},
-        }, "required": ["criterion_id", "level", "score", "evidence_quote", "rationale"], "additionalProperties": False}},
         "notes": {"type": "string"},
-    }, "required": ["student_id", "rubric_total_points", "criteria_points", "criteria_evidence", "notes"], "additionalProperties": False}}
+    }
+    required = ["student_id", "rubric_total_points", "criteria_points", "notes"]
+    if require_evidence:
+        properties["criteria_evidence"] = {"type": "array", "items": {"type": "object", "properties": {
+            "criterion_id": {"type": "string"}, "level": {"type": "string"}, "score": {"type": "number"},
+            "evidence_quote": {"type": "string"}, "rationale": {"type": "string"},
+        }, "required": ["criterion_id", "level", "score", "evidence_quote", "rationale"], "additionalProperties": False}}
+        required.append("criteria_evidence")
+    return {"type": "json_schema", "name": "pass1_assessment", "strict": True, "schema": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}}
 
 
 def _normalize_for_match(text: str) -> str:

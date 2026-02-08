@@ -20,6 +20,7 @@ from scripts.llm_assessors_core import (
 from scripts.fallback_assessor import deterministic_pass1_item
 from scripts.calibration_gate import calibration_gate_error
 from scripts.pass1_guard import stabilize_pass1_item
+from scripts.pass1_reconcile import guard_parameters, reconcile_pass1_item, strip_internal_fields
 from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ranking, pass2_text_format
 try:
     from scripts.openai_client import responses_create, extract_text, extract_usage
@@ -102,10 +103,13 @@ def main() -> int:
     criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
     required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
     reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
-    if reqs:
+    require_evidence = bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False))
+    if reqs and require_evidence:
         reqs = dict(reqs)
         reqs["quote_validation"] = False
         reqs["rationale_min_words"] = 0
+    else:
+        reqs = {}
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
     scope = f"{grade_band_for_level(grade_level)}|{genre}" if grade_band_for_level(grade_level) and genre else ""
     gate_error = calibration_gate_error(routing, assessors, scope)
@@ -176,7 +180,7 @@ def main() -> int:
                         temperature=pass1_temp,
                         reasoning=pass1_reasoning,
                         routing_path=args.routing,
-                        text_format=pass1_text_format(),
+                        text_format=pass1_text_format(require_evidence),
                         max_output_tokens=pass1_max_tokens,
                     )
                     content = extract_text(response)
@@ -194,8 +198,13 @@ def main() -> int:
                     score = item.get("rubric_total_points")
                     if not isinstance(score, (int, float)):
                         raise ValueError("Pass1 response missing numeric rubric_total_points.")
+                    item = reconcile_pass1_item(item, required_ids)
                     if guard_enabled:
-                        item = stabilize_pass1_item(item, anchor_item, guard_max_score_delta, guard_max_level_gap, guard_anchor_blend)
+                        dyn_delta, dyn_gap, dyn_blend = guard_parameters(
+                            item, guard_max_score_delta, guard_max_level_gap, guard_anchor_blend
+                        )
+                        item = stabilize_pass1_item(item, anchor_item, dyn_delta, dyn_gap, dyn_blend)
+                    item = strip_internal_fields(item)
                     model_successes += 1
                     break
                 except ValueError as exc:

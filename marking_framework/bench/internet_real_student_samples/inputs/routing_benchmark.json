@@ -4,7 +4,9 @@
     "pass1_assessor": {
       "model": "gpt-5.2",
       "reasoning": "low",
-      "temperature": 0.0
+      "temperature": 0.0,
+      "max_output_tokens": 1200,
+      "require_evidence": false
     },
     "pass2_ranker": {
       "model": "gpt-5.2",

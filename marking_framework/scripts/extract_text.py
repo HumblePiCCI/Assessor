@@ -41,6 +41,32 @@ def scrub_personal_headers(text: str) -> str:
     return "\n".join(out).strip()
 
 
+def scrub_reference_tail(text: str) -> str:
+    lines = text.splitlines()
+    stop_patterns = (
+        r"(?i)\blicensed under a creative commons\b",
+        r"(?i)\bbased on a work at\b",
+        r"(?i)^teacher support\b",
+        r"(?i)^standards correlations\b",
+        r"(?i)^topic:\b",
+        r"(?i)^mode:\b",
+        r"(?i)^form:\b",
+        r"(?i)^ccss\.",
+    )
+    cut_idx = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(re.search(pattern, stripped) for pattern in stop_patterns):
+            cut_idx = idx
+            break
+    if cut_idx is None:
+        return text.strip()
+    kept = "\n".join(lines[:cut_idx]).strip()
+    return kept if kept else text.strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inputs", required=True, help="Directory with student submissions")
@@ -56,7 +82,7 @@ def main() -> int:
     files = [p for p in sorted(in_dir.iterdir()) if p.is_file() and p.suffix.lower() in {".docx", ".txt", ".md"}]
     width = max(3, len(str(len(files))))
     for idx, path in enumerate(files, start=1):
-        text = scrub_personal_headers(extract_text(path))
+        text = scrub_reference_tail(scrub_personal_headers(extract_text(path)))
         anon_id = f"s{idx:0{width}d}"
         out_path = out_dir / f"{anon_id}.txt"
         out_path.write_text(text, encoding="utf-8")

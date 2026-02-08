@@ -5,7 +5,8 @@
       "model": "gpt-5.2",
       "reasoning": "medium",
       "temperature": 0.0,
-      "max_output_tokens": 1800
+      "max_output_tokens": 1200,
+      "require_evidence": false
     },
     "pass2_ranker": {
       "model": "gpt-5.2",

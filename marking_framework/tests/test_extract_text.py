@@ -48,3 +48,21 @@ def test_scrub_personal_headers():
     assert "Name:" not in scrubbed
     assert "By:" not in scrubbed
     assert "By the end of the story" in scrubbed
+
+
+def test_scrub_reference_tail_cuts_boilerplate():
+    raw = "\n".join(
+        [
+            "My essay opening.",
+            "Second paragraph.",
+            "Teacher Support:",
+            "Click to find out more about this resource.",
+        ]
+    )
+    scrubbed = et.scrub_reference_tail(raw)
+    assert scrubbed == "My essay opening.\nSecond paragraph."
+
+
+def test_scrub_reference_tail_keeps_clean_text():
+    raw = "First line.\nSecond line."
+    assert et.scrub_reference_tail(raw) == raw
