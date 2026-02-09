@@ -1,0 +1,16 @@
+{
+  "thresholds": {
+    "min_rank_kendall_w": 0.65,
+    "max_mean_rubric_sd": 2.5,
+    "min_model_coverage": 0.95,
+    "boundary_margin_percent": 1.0,
+    "max_boundary_students": 8,
+    "anchor_min_hit_rate": 0.8,
+    "anchor_max_mae": 0.5,
+    "calibration_min_level_hit_rate": 0.2,
+    "calibration_max_mae": 20.0,
+    "calibration_min_pairwise_order": 0.55,
+    "calibration_min_repeat_level_consistency": 0.8,
+    "calibration_max_abs_bias": 6.0
+  }
+}

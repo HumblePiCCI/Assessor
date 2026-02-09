@@ -11,6 +11,7 @@ def run(cmd):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Hero Path orchestration")
+    parser.add_argument("--accuracy-consistency", action="store_true", help="Enable strict calibration + consistency + publish gates")
     parser.add_argument("--skip-extract", action="store_true", help="Skip text extraction")
     parser.add_argument("--skip-conventions", action="store_true", help="Skip conventions scan")
     parser.add_argument("--skip-aggregate", action="store_true", help="Skip aggregation")
@@ -22,6 +23,12 @@ def main() -> int:
     parser.add_argument("--apply-pairs", action="store_true", help="Apply pairwise review decisions")
     parser.add_argument("--verify-consistency", action="store_true", help="Verify adjacent rank consistency")
     parser.add_argument("--apply-consistency", action="store_true", help="Apply high-confidence consistency swaps")
+    parser.add_argument("--boundary-recheck", action="store_true", help="Recheck near-boundary essays and update pass1 scores")
+    parser.add_argument("--boundary-margin", type=float, default=1.0, help="Boundary recheck margin in percentage points")
+    parser.add_argument("--boundary-replicates", type=int, default=3, help="Boundary recheck replicate attempts")
+    parser.add_argument("--boundary-max-students", type=int, default=8, help="Boundary recheck max students")
+    parser.add_argument("--publish-gate", action="store_true", help="Run publish quality gate")
+    parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Publish gate config JSON")
     parser.add_argument("--build-dashboard", action="store_true", help="Build dashboard data JSON")
     parser.add_argument("--serve-ui", action="store_true", help="Serve the review UI")
     parser.add_argument("--allow-missing-data", action="store_true", help="Allow missing data in aggregation")
@@ -33,6 +40,14 @@ def main() -> int:
     normalized = base / "processing" / "normalized_text"
     meta = base / "processing" / "submission_metadata.json"
     conventions = base / "processing" / "conventions_report.csv"
+
+    if args.accuracy_consistency:
+        args.calibrate = True
+        args.llm_assessors = True
+        args.boundary_recheck = True
+        args.verify_consistency = True
+        args.apply_consistency = True
+        args.publish_gate = True
 
     if not args.skip_extract:
         cmd = ["python3", "scripts/extract_text.py", "--inputs", str(inputs), "--output", str(normalized), "--metadata", str(meta)]
@@ -69,6 +84,24 @@ def main() -> int:
             cmd.append("--allow-missing-data")
         if run(cmd) != 0:
             return 1
+        if args.boundary_recheck:
+            cmd = [
+                "python3",
+                "scripts/boundary_recheck.py",
+                "--margin",
+                str(args.boundary_margin),
+                "--replicates",
+                str(args.boundary_replicates),
+                "--max-students",
+                str(args.boundary_max_students),
+            ]
+            if run(cmd) != 0:
+                return 1
+            cmd = ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]
+            if args.allow_missing_data:
+                cmd.append("--allow-missing-data")
+            if run(cmd) != 0:
+                return 1
 
     if args.generate_pairs:
         if run(["python3", "scripts/generate_pairwise_review.py"]) != 0:
@@ -82,6 +115,11 @@ def main() -> int:
         cmd = ["python3", "scripts/verify_consistency.py"]
         if args.apply_consistency:
             cmd.append("--apply")
+        if run(cmd) != 0:
+            return 1
+
+    if args.publish_gate:
+        cmd = ["python3", "scripts/publish_gate.py", "--gate-config", args.gate_config]
         if run(cmd) != 0:
             return 1
 

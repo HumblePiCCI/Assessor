@@ -113,6 +113,9 @@ async def ui_index():
 @app.get("/app.js")
 async def ui_app_js():
     return ui_file_response("app.js", media_type="application/javascript")
+@app.get("/progress_stream.js")
+async def ui_progress_stream_js():
+    return ui_file_response("progress_stream.js", media_type="application/javascript")
 @app.get("/style.css")
 async def ui_style_css():
     return ui_file_response("style.css", media_type="text/css")
@@ -231,12 +234,17 @@ async def run_pipeline_v2(
         save_upload(outline, outline_path)
         for upload in submissions:
             save_upload(upload, submissions_dir / upload.filename)
+        root = workspace_root()
         result = PIPELINE_QUEUE.submit(
             mode=mode,
             rubric_path=rubric_path,
             outline_path=outline_path,
             submissions_dir=submissions_dir,
-            extra_paths=[Path("config/llm_routing.json"), Path("config/marking_config.json"), Path("config/rubric_criteria.json")],
+            extra_paths=[
+                root / "config" / "llm_routing.json",
+                root / "config" / "marking_config.json",
+                root / "config" / "rubric_criteria.json",
+            ],
         )
     return result
 @app.get("/pipeline/v2/jobs/{job_id}")
@@ -251,6 +259,12 @@ async def pipeline_v2_data(job_id: str):
     if data is None:
         raise HTTPException(status_code=404, detail="Dashboard data not ready")
     return data
+@app.get("/pipeline/v2/jobs/{job_id}/events")
+async def pipeline_v2_events(job_id: str, after: int = -1, limit: int = 200):
+    payload = PIPELINE_QUEUE.get_events(job_id, after=after, limit=limit)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return payload
 @app.post("/jobs")
 async def create_job(
     rubric: UploadFile = File(...),

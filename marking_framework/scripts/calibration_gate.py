@@ -44,6 +44,11 @@ def calibration_gate_error(routing: dict, assessor_ids: list[str], scope_key: st
     assessors = payload.get("assessors", {}) if isinstance(payload, dict) else {}
     min_samples = int(cfg.get("min_scope_samples", 1) or 1)
     min_weight = float(cfg.get("min_scope_weight", 0.0) or 0.0)
+    min_level_hit = cfg.get("min_scope_level_hit_rate")
+    max_mae = cfg.get("max_scope_mae")
+    min_pairwise = cfg.get("min_scope_pairwise_order_agreement")
+    min_repeat_consistency = cfg.get("min_scope_repeat_level_consistency")
+    max_abs_bias = cfg.get("max_scope_abs_bias")
     for raw_id in assessor_ids:
         aid = raw_id if raw_id.startswith("assessor_") else f"assessor_{raw_id}"
         entry = assessors.get(aid)
@@ -63,4 +68,39 @@ def calibration_gate_error(routing: dict, assessor_ids: list[str], scope_key: st
         weight = float(scope_profile.get("weight", 0.0) or 0.0)
         if weight < min_weight:
             return f"Calibration gate failed: {aid} scope '{scope_key}' weight {weight:.2f} (< {min_weight:.2f})."
+        if min_level_hit is not None:
+            value = float(scope_profile.get("level_hit_rate", 0.0) or 0.0)
+            if value < float(min_level_hit):
+                return (
+                    f"Calibration gate failed: {aid} scope '{scope_key}' level_hit_rate "
+                    f"{value:.2f} (< {float(min_level_hit):.2f})."
+                )
+        if max_mae is not None:
+            value = float(scope_profile.get("mae", 100.0) or 100.0)
+            if value > float(max_mae):
+                return (
+                    f"Calibration gate failed: {aid} scope '{scope_key}' mae "
+                    f"{value:.2f} (> {float(max_mae):.2f})."
+                )
+        if min_pairwise is not None:
+            value = float(scope_profile.get("pairwise_order_agreement", 0.0) or 0.0)
+            if value < float(min_pairwise):
+                return (
+                    f"Calibration gate failed: {aid} scope '{scope_key}' pairwise_order_agreement "
+                    f"{value:.2f} (< {float(min_pairwise):.2f})."
+                )
+        if min_repeat_consistency is not None:
+            value = float(scope_profile.get("repeat_level_consistency", 0.0) or 0.0)
+            if value < float(min_repeat_consistency):
+                return (
+                    f"Calibration gate failed: {aid} scope '{scope_key}' repeat_level_consistency "
+                    f"{value:.2f} (< {float(min_repeat_consistency):.2f})."
+                )
+        if max_abs_bias is not None:
+            value = abs(float(scope_profile.get("bias", 0.0) or 0.0))
+            if value > float(max_abs_bias):
+                return (
+                    f"Calibration gate failed: {aid} scope '{scope_key}' |bias| "
+                    f"{value:.2f} (> {float(max_abs_bias):.2f})."
+                )
     return None

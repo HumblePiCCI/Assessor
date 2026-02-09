@@ -118,7 +118,7 @@ def test_process_job_failure_paths(tmp_path):
     job = queue.get_job(result["job_id"])
     assert job["status"] == "failed"
     assert "boom" in job["error"]
-    assert any("QUEUE ERROR hero_path failed" in entry[1] for entry in logs)
+    assert any("QUEUE ERROR step" in entry[1] for entry in logs)
 
 
 def test_process_job_without_api_key_and_skip_nonqueued(tmp_path, monkeypatch):
@@ -213,3 +213,34 @@ def test_copy_inputs_skips_non_files_in_source_submissions(tmp_path):
     queue._copy_inputs_to_workspace(job_dir)
     assert (root / "inputs" / "submissions" / "s1.txt").exists()
     assert not (root / "inputs" / "submissions" / "nested").exists()
+
+
+def test_get_events_handles_offsets_bad_json_and_done_flag(tmp_path):
+    queue, _root, _data, _logs = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, [])
+    job_id = submitted["job_id"]
+    job = queue.get_job(job_id)
+    event_path = Path(job["job_dir"]) / "events.jsonl"
+    event_path.write_text(
+        json.dumps({"timestamp": "t", "stage": "extract", "source": "stdout", "level": "info", "message": "first"}) + "\n" +
+        "{bad json}\n",
+        encoding="utf-8",
+    )
+    all_events = queue.get_events(job_id, after=-1, limit=10)
+    assert all_events["status"] == "queued"
+    assert all_events["done"] is False
+    assert [e["index"] for e in all_events["events"]] == [0, 1]
+    assert all_events["events"][1]["level"] == "error"
+    one_event = queue.get_events(job_id, after=0, limit=1)
+    assert len(one_event["events"]) == 1
+    assert one_event["events"][0]["index"] == 1
+    queue._update_job(job_id, "completed")
+    done_events = queue.get_events(job_id, after=-1, limit=10)
+    assert done_events["done"] is True
+
+
+def test_get_events_returns_none_for_missing_job(tmp_path):
+    queue, _root, _data, _logs = _make_queue(tmp_path)
+    assert queue.get_events("missing") is None

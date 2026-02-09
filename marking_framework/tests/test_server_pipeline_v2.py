@@ -11,6 +11,7 @@ class FakeQueue:
         self.submitted = None
         self.job = None
         self.data = None
+        self.events = None
 
     def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths):
         self.submitted = {
@@ -31,6 +32,13 @@ class FakeQueue:
         if self.data and job_id == "j1":
             return self.data
         return None
+
+    def get_events(self, job_id, after=-1, limit=200):
+        if job_id != "j1":
+            return None
+        payload = self.events or {"events": [], "next_after": after, "done": False, "status": "running"}
+        payload["job_id"] = job_id
+        return payload
 
 
 def _files():
@@ -99,3 +107,17 @@ def test_pipeline_v2_status_and_data(monkeypatch):
     fake.data = None
     no_data = client.get("/pipeline/v2/jobs/j1/data")
     assert no_data.status_code == 404
+
+
+def test_pipeline_v2_events_and_progress_asset(monkeypatch):
+    fake = FakeQueue()
+    fake.events = {"events": [{"index": 0, "message": "ok"}], "next_after": 0, "done": True, "status": "completed"}
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    client = TestClient(app)
+    events = client.get("/pipeline/v2/jobs/j1/events?after=-1&limit=10")
+    assert events.status_code == 200
+    assert events.json()["events"][0]["message"] == "ok"
+    missing = client.get("/pipeline/v2/jobs/missing/events")
+    assert missing.status_code == 404
+    asset = client.get("/progress_stream.js")
+    assert asset.status_code == 200

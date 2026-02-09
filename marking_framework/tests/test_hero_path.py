@@ -243,3 +243,96 @@ def test_hero_path_verify_consistency_fail(tmp_path, monkeypatch):
         "--verify-consistency",
     ])
     assert hp.main() == 1
+
+
+def test_hero_path_publish_gate_fail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+
+    def fake_run(cmd):
+        if any("publish_gate.py" in str(part) for part in cmd):
+            return 2
+        return 0
+
+    assert fake_run(["echo"]) == 0
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--skip-aggregate",
+        "--publish-gate",
+    ])
+    assert hp.main() == 1
+
+
+def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", ["hp", "--skip-extract", "--skip-conventions", "--accuracy-consistency"])
+    assert hp.main() == 0
+    assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
+    assert any("run_llm_assessors.py" in str(part) for call in calls for part in call)
+    assert any("boundary_recheck.py" in str(part) for call in calls for part in call)
+    assert any("verify_consistency.py" in str(part) for call in calls for part in call)
+    assert any("publish_gate.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_boundary_recheck_flow(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--boundary-recheck",
+        "--boundary-margin",
+        "1.5",
+        "--boundary-replicates",
+        "4",
+        "--boundary-max-students",
+        "3",
+    ])
+    assert hp.main() == 0
+    aggregate_calls = [c for c in calls if any("aggregate_assessments.py" in str(p) for p in c)]
+    assert len(aggregate_calls) == 2
+    boundary_calls = [c for c in calls if any("boundary_recheck.py" in str(p) for p in c)]
+    assert len(boundary_calls) == 1
+    flat = [str(p) for p in boundary_calls[0]]
+    assert "--margin" in flat and "1.5" in flat
+    assert "--replicates" in flat and "4" in flat
+    assert "--max-students" in flat and "3" in flat
+
+
+def test_hero_path_boundary_recheck_fail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+
+    def fake_run(cmd):
+        if any("boundary_recheck.py" in str(part) for part in cmd):
+            return 1
+        return 0
+
+    assert fake_run(["echo"]) == 0
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--boundary-recheck",
+    ])
+    assert hp.main() == 1
