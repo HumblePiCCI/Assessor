@@ -38,7 +38,8 @@ Quick Start
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`
-   - Interactively adjust top/bottom grades and preview distribution
+   - Or run the deterministic default directly: `python3 scripts/review_and_grade.py --non-interactive`
+   - Grades are now level-locked and band-aware, then organized into a bell-shaped distribution within the resolved order
 
 8) Generate Two Stars and a Wish feedback (post-curve)
    - `python3 scripts/generate_feedback.py`
@@ -57,7 +58,7 @@ Key Outputs
 - `outputs/ranked_list.md` (consensus order + confidence signals)
 - `outputs/consensus_scores.csv` (rubric means, conventions, Borda, composite scores)
 - `outputs/irr_metrics.json` (inter-rater reliability: ICC, Kendall's W)
-- `outputs/grade_curve.csv` (final curve-based grades)
+- `outputs/grade_curve.csv` (level-aware bell-curve grades based on the resolved order)
 - `assessments/pass3_reconcile/disagreements.md` (items requiring re-read)
 - `outputs/final_order.csv` (post pairwise review, if applied)
 - `outputs/final_review_log.md` (pairwise decisions and reasons)

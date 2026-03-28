@@ -32,6 +32,7 @@ def test_hero_path_full_flow(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["hp", "--skip-extract", "--skip-conventions", "--llm-assessors", "--pricing-report", "--generate-pairs", "--apply-pairs", "--build-dashboard"])
     assert hp.main() == 0
     assert calls
+    assert any("review_and_grade.py" in str(part) for call in calls for part in call)
 
 
 def test_hero_path_ignore_cost_limits(tmp_path, monkeypatch):
@@ -283,6 +284,23 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("boundary_recheck.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
+    assert any("sota_gate.py" in str(part) for call in calls for part in call)
+    assert any("review_and_grade.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_skip_grading(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", ["hp", "--skip-extract", "--skip-conventions", "--skip-grading"])
+    assert hp.main() == 0
+    assert not any("review_and_grade.py" in str(part) for call in calls for part in call)
 
 
 def test_hero_path_boundary_recheck_flow(tmp_path, monkeypatch):

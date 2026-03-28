@@ -289,6 +289,9 @@ def main() -> int:
                 "level_modifier": level_modifier,
                 "level_with_modifier": level_with_modifier,
                 "flags": ";".join(flags),
+                "_level_order": float(adjusted_band.get("min", -1.0) if adjusted_band else (base_band.get("min", -1.0) if base_band else -1.0)),
+                "_composite_bucket": round(composite, 3),
+                "_borda_bucket": round(borda, 3),
             }
         )
     
@@ -299,15 +302,19 @@ def main() -> int:
     rows_sorted = sorted(
         rows,
         key=lambda r: (
-            -r["composite_score"],  # PRIMARY: composite score (descending)
-            -r["borda_points"],      # Tie-break 1: comparative ranking
-            -r["rubric_after_penalty_percent"],  # Tie-break 2: rubric after penalty
-            r["conventions_mistake_rate_percent"],  # Tie-break 3: conventions (ascending)
-            r["student_id"].lower(),  # Tie-break 4: alphabetical
+            -r["_level_order"],  # PRIMARY: keep adjusted levels in band order
+            -r["_composite_bucket"],  # Tie-break 1: composite score, damped against tiny drift
+            -r["_borda_bucket"],      # Tie-break 2: comparative ranking
+            -r["rubric_after_penalty_percent"],  # Tie-break 3: rubric after penalty
+            r["conventions_mistake_rate_percent"],  # Tie-break 4: conventions (ascending)
+            r["student_id"].lower(),  # Tie-break 5: alphabetical
         ),
     )
 
     for idx, row in enumerate(rows_sorted, start=1):
+        row.pop("_level_order", None)
+        row.pop("_composite_bucket", None)
+        row.pop("_borda_bucket", None)
         row["consensus_rank"] = idx
     logger.info(f"Consensus ranking established for {len(rows_sorted)} students")
     out_path = Path(args.output)

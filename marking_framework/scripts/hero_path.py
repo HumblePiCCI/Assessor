@@ -27,8 +27,11 @@ def main() -> int:
     parser.add_argument("--boundary-margin", type=float, default=1.0, help="Boundary recheck margin in percentage points")
     parser.add_argument("--boundary-replicates", type=int, default=3, help="Boundary recheck replicate attempts")
     parser.add_argument("--boundary-max-students", type=int, default=8, help="Boundary recheck max students")
+    parser.add_argument("--skip-grading", action="store_true", help="Skip automatic non-interactive grade curve generation")
     parser.add_argument("--publish-gate", action="store_true", help="Run publish quality gate")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Publish gate config JSON")
+    parser.add_argument("--sota-gate", action="store_true", help="Run strict SOTA readiness gate")
+    parser.add_argument("--sota-config", default="config/sota_gate.json", help="SOTA gate config JSON")
     parser.add_argument("--build-dashboard", action="store_true", help="Build dashboard data JSON")
     parser.add_argument("--serve-ui", action="store_true", help="Serve the review UI")
     parser.add_argument("--allow-missing-data", action="store_true", help="Allow missing data in aggregation")
@@ -48,6 +51,7 @@ def main() -> int:
         args.verify_consistency = True
         args.apply_consistency = True
         args.publish_gate = True
+        args.sota_gate = True
 
     if not args.skip_extract:
         cmd = ["python3", "scripts/extract_text.py", "--inputs", str(inputs), "--output", str(normalized), "--metadata", str(meta)]
@@ -121,6 +125,18 @@ def main() -> int:
     if args.publish_gate:
         cmd = ["python3", "scripts/publish_gate.py", "--gate-config", args.gate_config]
         if run(cmd) != 0:
+            return 1
+
+    if args.sota_gate:
+        cmd = ["python3", "scripts/sota_gate.py", "--gate-config", args.sota_config]
+        if run(cmd) != 0:
+            return 1
+
+    should_grade = not args.skip_grading and (
+        (not args.skip_aggregate) or args.apply_pairs or args.verify_consistency or args.build_dashboard
+    )
+    if should_grade:
+        if run(["python3", "scripts/review_and_grade.py", "--non-interactive"]) != 0:
             return 1
 
     if args.build_dashboard:

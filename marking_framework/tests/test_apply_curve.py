@@ -57,3 +57,56 @@ def test_apply_curve_empty(tmp_path, monkeypatch):
     out_csv = tmp_path / "out.csv"
     monkeypatch.setattr("sys.argv", ["ac", "--config", str(config), "--input", str(input_csv), "--output", str(out_csv)])
     assert ac.main() == 0
+
+
+def test_calculate_curve_rows_prefers_consistency_rank_and_locks_levels():
+    config = {
+        "curve": {
+            "top": 92,
+            "bottom": 58,
+            "rounding": "nearest",
+            "profile": "bell",
+            "rubric_weight": 0.65,
+            "rank_weight": 0.35,
+            "level_lock": True,
+        },
+        "levels": {
+            "bands": [
+                {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                {"level": "4", "min": 80, "max": 89, "letter": "A"},
+            ]
+        },
+    }
+    rows = [
+        {
+            "student_id": "s2",
+            "consensus_rank": "2",
+            "consistency_rank": "2",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "78",
+        },
+        {
+            "student_id": "s1",
+            "consensus_rank": "1",
+            "consistency_rank": "1",
+            "adjusted_level": "4",
+            "rubric_after_penalty_percent": "81",
+        },
+    ]
+
+    graded_rows, meta = ac.calculate_curve_rows(rows, config)
+
+    assert meta["rank_key"] == "consistency_rank"
+    assert [row["student_id"] for row in graded_rows] == ["s1", "s2"]
+    assert graded_rows[0]["final_grade"] >= 80
+    assert graded_rows[0]["final_grade"] <= 89
+    assert graded_rows[1]["final_grade"] <= 79
+
+
+def test_calculate_curve_rows_handles_missing_levels():
+    config = {"curve": {"top": 90, "bottom": 80, "rounding": "nearest", "profile": "bell"}}
+    rows = [{"student_id": "s1", "consensus_rank": "1"}, {"student_id": "s2", "consensus_rank": "2"}]
+    graded_rows, meta = ac.calculate_curve_rows(rows, config)
+    assert meta["rank_key"] == "consensus_rank"
+    assert graded_rows[0]["final_grade"] == 90
+    assert graded_rows[1]["final_grade"] == 80

@@ -301,6 +301,63 @@ def test_aggregate_assessments_no_level_band(tmp_path, monkeypatch):
     assert agg.main() == 0
 
 
+def test_aggregate_assessments_keeps_higher_level_ahead_of_lower_level(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "weights": {"rubric": 0.7, "conventions": 0.15, "comparative": 0.15},
+                "consensus": {},
+                "conventions": {"mistake_rate_threshold": 0.5, "max_level_drop": 0.0, "missing_data_mistake_rate_percent": 100.0},
+                "rubric": {"points_possible": 100},
+                "levels": {
+                    "bands": [
+                        {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                        {"level": "4", "min": 80, "max": 89, "letter": "A"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    for assessor in ["a", "b", "c"]:
+        write_pass1(
+            pass1_dir,
+            assessor,
+            [
+                {"student_id": "s4", "rubric_total_points": 80},
+                {"student_id": "s3", "rubric_total_points": 79},
+            ],
+        )
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["a", "b", "c"]:
+        write_pass2(pass2_dir, assessor, ["s3", "s4"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(
+        conv_path,
+        [
+            {"student_id": "s4", "word_count": 100, "mistake_rate_percent": 9.0},
+            {"student_id": "s3", "word_count": 100, "mistake_rate_percent": 0.0},
+        ],
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["agg", "--config", str(cfg_path), "--output", str(out_path)])
+    assert agg.main() == 0
+
+    rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s4", "s3"]
+
+
 def test_aggregate_assessments_rank_weight_from_calibration(tmp_path, monkeypatch):
     (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
     (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)

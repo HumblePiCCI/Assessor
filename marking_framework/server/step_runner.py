@@ -7,16 +7,56 @@ from pathlib import Path
 
 def pipeline_steps() -> list[dict]:
     return [
-        {"id": "extract", "label": "Extracting text", "cmd": ["python3", "scripts/extract_text.py"]},
-        {"id": "conventions", "label": "Scanning writing conventions", "cmd": ["python3", "scripts/conventions_scan.py"]},
-        {"id": "calibrate", "label": "Calibrating assessors", "cmd": ["python3", "scripts/calibrate_assessors.py"]},
+        {
+            "id": "extract",
+            "label": "Extracting text",
+            "cmd": [
+                "python3",
+                "scripts/extract_text.py",
+                "--inputs",
+                "inputs/submissions",
+                "--output",
+                "processing/normalized_text",
+                "--metadata",
+                "processing/submission_metadata.json",
+            ],
+        },
+        {
+            "id": "conventions",
+            "label": "Scanning writing conventions",
+            "cmd": [
+                "python3",
+                "scripts/conventions_scan.py",
+                "--inputs",
+                "processing/normalized_text",
+                "--output",
+                "processing/conventions_report.csv",
+            ],
+        },
         {"id": "assess", "label": "Running assessor passes", "cmd": ["python3", "scripts/run_llm_assessors.py"]},
+        {
+            "id": "cost",
+            "label": "Tracking API usage cost",
+            "cmd": ["python3", "scripts/usage_pricing.py", "--usage", "outputs/usage_log.jsonl", "--pricing", "config/pricing.json", "--output", "outputs/usage_costs.json"],
+            "required": False,
+        },
         {"id": "aggregate_1", "label": "Building consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
         {"id": "boundary", "label": "Rechecking boundary essays", "cmd": ["python3", "scripts/boundary_recheck.py"]},
         {"id": "aggregate_2", "label": "Rebuilding consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
         {"id": "consistency", "label": "Verifying ordering consistency", "cmd": ["python3", "scripts/verify_consistency.py", "--apply"]},
-        {"id": "quality_gate", "label": "Running publish quality gate", "cmd": ["python3", "scripts/publish_gate.py", "--gate-config", "config/accuracy_gate.json"]},
+        {
+            "id": "quality_gate",
+            "label": "Running publish quality gate",
+            "cmd": ["python3", "scripts/publish_gate.py", "--gate-config", "config/accuracy_gate.json"],
+            "required": False,
+        },
+        {
+            "id": "sota_gate",
+            "label": "Enforcing SOTA readiness gate",
+            "cmd": ["python3", "scripts/sota_gate.py", "--gate-config", "config/sota_gate.json"],
+        },
         {"id": "pairwise", "label": "Preparing pairwise review", "cmd": ["python3", "scripts/generate_pairwise_review.py"]},
+        {"id": "grade", "label": "Applying level-aware bell curve", "cmd": ["python3", "scripts/review_and_grade.py", "--non-interactive"]},
         {"id": "dashboard", "label": "Building dashboard output", "cmd": ["python3", "scripts/build_dashboard_data.py"]},
     ]
 

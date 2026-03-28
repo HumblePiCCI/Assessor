@@ -5,13 +5,17 @@ import json
 from collections import Counter
 from pathlib import Path
 
+try:
+    from scripts.apply_curve import calculate_curve_rows, round_grade, sort_rows
+except ImportError:  # pragma: no cover - Support running as a script
+    from apply_curve import calculate_curve_rows, round_grade, sort_rows  # pragma: no cover
 
-def round_grade(value: float, mode: str) -> int:
-    if mode == "floor":
-        return int(value // 1)
-    if mode == "ceil":
-        return int(-(-value // 1))
-    return int(round(value))
+
+DEFAULT_INPUTS = (
+    Path("outputs/final_order.csv"),
+    Path("outputs/consistency_adjusted.csv"),
+    Path("outputs/consensus_scores.csv"),
+)
 
 
 def display_ranking_summary(rows, limit=10):
@@ -21,8 +25,9 @@ def display_ranking_summary(rows, limit=10):
     print(f"{'Rank':<6} {'Student ID':<28} {'Rubric %':<10} {'Conv %':<10} {'Flags':<20}")
     print("-" * 78)
     for row in rows[:limit]:
+        rank = row.get("final_rank") or row.get("consistency_rank") or row.get("consensus_rank") or ""
         print(
-            f"{row.get('consensus_rank',''):<6} {row.get('student_id',''):<28} "
+            f"{rank:<6} {row.get('student_id',''):<28} "
             f"{row.get('rubric_mean_percent',''):<10} {row.get('conventions_mistake_rate_percent',''):<10} "
             f"{row.get('flags',''):<20}"
         )
@@ -31,17 +36,21 @@ def display_ranking_summary(rows, limit=10):
     print()
 
 
-def preview_curve(rows, top, bottom, rounding):
-    n = len(rows)
-    grades = []
-    for idx in range(n):
-        if n == 1:
-            grade = top
-        else:
-            grade = top - (top - bottom) * (idx / (n - 1))
-        grades.append(round_grade(grade, rounding))
+def preview_curve(rows, top, bottom, rounding, config=None):
+    config_data = dict(config or {})
+    config_data["curve"] = dict(config_data.get("curve", {}))
+    config_data["curve"]["top"] = top
+    config_data["curve"]["bottom"] = bottom
+    config_data["curve"]["rounding"] = rounding
+    graded_rows, meta = calculate_curve_rows(rows, config_data, top=top, bottom=bottom, rounding=rounding)
+    grades = [int(row["final_grade"]) for row in graded_rows]
+    if not grades:
+        return []
 
-    print(f"\nCURVE PREVIEW (top={top}, bottom={bottom}, rounding={rounding})")
+    print(
+        f"\nCURVE PREVIEW (top={top}, bottom={bottom}, rounding={rounding}, "
+        f"profile={meta['profile']}, rank={meta['rank_key'] or 'input-order'})"
+    )
     print("-" * 60)
     print(f"Highest grade: {grades[0]}")
     print(f"Median grade: {grades[len(grades) // 2]}")
@@ -70,9 +79,18 @@ def get_user_input(prompt, default, value_type=int):
             print(f"Invalid input. Please enter a {value_type.__name__}.")
 
 
+def resolve_input_path(explicit: str) -> Path:
+    if explicit:
+        return Path(explicit)
+    for candidate in DEFAULT_INPUTS:
+        if candidate.exists():
+            return candidate
+    return DEFAULT_INPUTS[-1]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Review consensus ranking and apply grade curve interactively")
-    parser.add_argument("--input", default="", help="Ranking CSV input (defaults to final_order.csv if present)")
+    parser.add_argument("--input", default="", help="Ranking CSV input (defaults to final_order.csv, then consistency_adjusted.csv, then consensus_scores.csv)")
     parser.add_argument("--config", default="config/marking_config.json", help="Marking config JSON")
     parser.add_argument("--output", default="outputs/grade_curve.csv", help="Final grades output")
     parser.add_argument("--non-interactive", action="store_true", help="Use config defaults without prompts")
@@ -89,11 +107,7 @@ def main() -> int:
     default_bottom = curve_config.get("bottom", 58)
     default_rounding = curve_config.get("rounding", "nearest")
 
-    if args.input:
-        input_path = Path(args.input)
-    else:
-        final_path = Path("outputs/final_order.csv")
-        input_path = final_path if final_path.exists() else Path("outputs/consensus_scores.csv")
+    input_path = resolve_input_path(args.input)
     if not input_path.exists():
         print(f"Error: Input file not found: {input_path}")
         return 1
@@ -106,10 +120,7 @@ def main() -> int:
         print("Error: No data in consensus scores file")
         return 1
 
-    if "final_rank" in rows[0]:
-        rows.sort(key=lambda r: int(r["final_rank"]))
-    elif "consensus_rank" in rows[0]:
-        rows.sort(key=lambda r: int(r["consensus_rank"]))
+    rows, _rank_key = sort_rows(rows)
 
     display_ranking_summary(rows)
 
@@ -143,7 +154,7 @@ def main() -> int:
             if top > 100 or bottom < 0:
                 print("Warning: Grades outside 0-100 range")
 
-            preview_curve(rows, top, bottom, default_rounding)
+            preview_curve(rows, top, bottom, default_rounding, config)
 
             response = input("Apply this curve? (yes/no/adjust) [yes]: ").strip().lower()
             if response in ("", "y", "yes"):
@@ -154,26 +165,18 @@ def main() -> int:
 
         rounding = default_rounding
 
-    n = len(rows)
-    for idx, row in enumerate(rows):
-        if n == 1:
-            grade = top
-        else:
-            grade = top - (top - bottom) * (idx / (n - 1))
-        row["curve_top"] = top
-        row["curve_bottom"] = bottom
-        row["final_grade"] = round_grade(grade, rounding)
+    graded_rows, _curve_meta = calculate_curve_rows(rows, config, top=top, bottom=bottom, rounding=rounding)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=list(graded_rows[0].keys()))
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(graded_rows)
 
     print(f"\nGrades written to: {output_path}")
-    print(f"Students graded: {len(rows)}")
-    print(f"Grade range: {rows[0]['final_grade']} (top) to {rows[-1]['final_grade']} (bottom)")
+    print(f"Students graded: {len(graded_rows)}")
+    print(f"Grade range: {graded_rows[0]['final_grade']} (top) to {graded_rows[-1]['final_grade']} (bottom)")
     return 0
 
 

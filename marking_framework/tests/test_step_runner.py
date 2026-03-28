@@ -10,8 +10,16 @@ def test_pipeline_steps_structure():
     ids = [item["id"] for item in steps]
     assert ids[0] == "extract"
     assert ids[-1] == "dashboard"
-    assert {"assess", "consistency", "quality_gate"}.issubset(set(ids))
+    assert {"assess", "consistency", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
     assert all("cmd" in item and "label" in item for item in steps)
+    extract = next(item for item in steps if item["id"] == "extract")
+    assert "--inputs" in extract["cmd"]
+    assert "inputs/submissions" in extract["cmd"]
+    conventions = next(item for item in steps if item["id"] == "conventions")
+    assert "--output" in conventions["cmd"]
+    assert "processing/conventions_report.csv" in conventions["cmd"]
+    grade = next(item for item in steps if item["id"] == "grade")
+    assert "--non-interactive" in grade["cmd"]
 
 
 def test_can_stream_subprocess_detection():
@@ -57,6 +65,21 @@ def test_run_stream_collects_stdout_and_stderr(tmp_path):
     assert "warn" in stderr
     assert ("stdout", "hello") in seen
     assert ("stderr", "warn") in seen
+
+
+def test_run_stream_skips_blank_lines(tmp_path):
+    cmd = ["python3", "-c", "print(''); print('ok')"]
+    seen = []
+    code, stdout, stderr = step_runner._run_stream(
+        cmd,
+        os.environ.copy(),
+        tmp_path,
+        lambda source, text: seen.append((source, text)),
+    )
+    assert code == 0
+    assert stderr == ""
+    assert stdout.strip() == "ok"
+    assert seen == [("stdout", "ok")]
 
 
 def test_run_step_routes_by_runner_type(tmp_path):

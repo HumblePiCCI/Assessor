@@ -114,6 +114,24 @@ def test_review_and_grade_default_input_and_sort(tmp_path, monkeypatch):
     assert rg.main() == 0
 
 
+def test_review_and_grade_defaults_to_consistency_adjusted(tmp_path, monkeypatch):
+    consistency = tmp_path / "outputs/consistency_adjusted.csv"
+    consistency.parent.mkdir(parents=True)
+    with consistency.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["student_id", "consistency_rank", "flags"])
+        writer.writeheader()
+        writer.writerow({"student_id": "s2", "consistency_rank": "2", "flags": ""})
+        writer.writerow({"student_id": "s1", "consistency_rank": "1", "flags": ""})
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text("{}", encoding="utf-8")
+    out_csv = tmp_path / "grades.csv"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["rg", "--config", str(cfg), "--output", str(out_csv), "--non-interactive"])
+    assert rg.main() == 0
+    rows = list(csv.DictReader(out_csv.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s1", "s2"]
+
+
 def test_review_and_grade_single_row(tmp_path, monkeypatch):
     input_csv = tmp_path / "consensus.csv"
     with input_csv.open("w", encoding="utf-8", newline="") as f:

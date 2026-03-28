@@ -54,8 +54,9 @@ Model Components
   - Optional `--require-model-usage` fails the run if zero model outputs are accepted (prevents silent full fallback).
 
 5) Curve-Based Grades
-- After consensus order, grades are assigned along a fixed curve.
-- Default: highest = 92, lowest = 58 (linear interpolation).
+- After consensus order, grades are assigned by a level-aware bell profile.
+- Default: highest = 92, lowest = 58, with rubric evidence blended with resolved cohort order.
+- Level bands remain locked first; ordering organizes students within each level band.
 - Rounding policy is configurable.
 - Optional review step allows manual adjustment of top/bottom before applying the curve.
 
@@ -73,7 +74,8 @@ Model Components
 
 Decision Rules
 - Final ranking determined by composite score (weighted: rubric + conventions + comparative).
-- Tie-breakers in order: Borda points, rubric after penalty, conventions mistake rate, student ID.
+- Adjusted level band is resolved before fine-grained ordering.
+- Tie-breakers in order: composite bucket, Borda bucket, rubric after penalty, conventions mistake rate, student ID.
 - Conventions penalty triggers if mistake rate exceeds threshold (default: 7%).
 - Missing data from any assessor for any student causes aggregation to fail (ensures fairness).
 - Inter-rater reliability thresholds: ICC >0.7 recommended, Kendall's W >0.7 recommended.

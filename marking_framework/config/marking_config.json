@@ -11,7 +11,11 @@
   "curve": {
     "top": 92,
     "bottom": 58,
-    "rounding": "nearest"
+    "rounding": "nearest",
+    "profile": "bell",
+    "rubric_weight": 0.65,
+    "rank_weight": 0.35,
+    "level_lock": true
   },
   "rubric": {
     "points_possible": null
