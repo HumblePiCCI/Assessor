@@ -201,6 +201,7 @@ def main() -> int:
     texts = load_texts(texts_dir)
     meta = load_submission_metadata(Path("processing/submission_metadata.json"))
     cost_report = load_json(cost_path)
+    consistency_report = load_json(Path("outputs/consistency_report.json"))
 
     # Determine rank key
     rank_key = select_rank_key(rows) or "consensus_rank"
@@ -222,6 +223,11 @@ def main() -> int:
                 "word_count": meta_row.get("word_count"),
                 "paragraph_count": meta_row.get("paragraph_count"),
                 "rank": rank,
+                "seed_rank": row.get("seed_rank") or row.get("consensus_rank"),
+                "final_rank": row.get("final_rank") or row.get("consistency_rank") or row.get("consensus_rank"),
+                "rerank_score": row.get("rerank_score"),
+                "rerank_displacement": row.get("rerank_displacement"),
+                "rerank_notes": row.get("rerank_notes"),
                 "rubric_mean_percent": row.get("rubric_mean_percent"),
                 "rubric_after_penalty_percent": row.get("rubric_after_penalty_percent"),
                 "conventions_mistake_rate_percent": row.get("conventions_mistake_rate_percent"),
@@ -262,6 +268,7 @@ def main() -> int:
         "distribution": build_distribution(data),
         "class_metadata": class_metadata,
         "cost_report": cost_report,
+        "consistency_report": consistency_report,
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

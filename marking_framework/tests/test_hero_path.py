@@ -202,6 +202,7 @@ def test_hero_path_calibrate_and_consistency(tmp_path, monkeypatch):
     assert hp.main() == 0
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
+    assert any("global_rerank.py" in str(part) for call in calls for part in call)
 
 
 def test_hero_path_calibrate_fail(tmp_path, monkeypatch):
@@ -283,6 +284,7 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("run_llm_assessors.py" in str(part) for call in calls for part in call)
     assert any("boundary_recheck.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
+    assert any("global_rerank.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
     assert any("sota_gate.py" in str(part) for call in calls for part in call)
     assert any("review_and_grade.py" in str(part) for call in calls for part in call)

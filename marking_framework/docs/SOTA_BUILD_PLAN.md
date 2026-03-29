@@ -641,9 +641,9 @@ Use this section as the running status checkpoint.
 
 ### Current State
 
-- Phase 1: not started
-- Phase 2: not started
-- Phase 3: not started
+- Phase 1: completed
+- Phase 2: completed
+- Phase 3: completed
 - Phase 4: not started
 - Phase 5: not started
 - Phase 6: not started
@@ -654,15 +654,17 @@ Use this section as the running status checkpoint.
 - aggregation now prefers stable level-first ordering
 - dashboard data prefers resolved ranking artifacts
 - the step graph now includes non-interactive grade generation
+- queued execution now owns the authoritative production path with manifest-keyed artifacts
+- benchmark datasets now use explicit human gold and benchmark reports are gate-readable
+- pairwise consistency checks now feed a deterministic global reranker with explicit final-order artifacts
 
 ### Outstanding Architectural Risks
 
-- split execution paths still exist
 - cache key coverage is still incomplete
-- benchmark gold is still too weak
-- consistency repair is still local, not global
 - calibration bootstrap can still overstate readiness
+- release gates still treat bootstrap calibration as potentially production-valid
+- teacher adjudications are not yet feeding back into calibration and eval refresh
 
 ### Next Decision Point
 
-Start Phase 1 by collapsing `/pipeline/run` into the queue-backed path and introducing the pipeline manifest.
+Start Phase 4 by versioning calibration artifacts, marking bootstrap profiles as synthetic, and rejecting synthetic-only calibration for release scope.

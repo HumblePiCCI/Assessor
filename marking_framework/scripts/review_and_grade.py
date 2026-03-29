@@ -26,6 +26,8 @@ def display_ranking_summary(rows, limit=10):
     print("-" * 78)
     for row in rows[:limit]:
         rank = row.get("final_rank") or row.get("consistency_rank") or row.get("consensus_rank") or ""
+        if row.get("final_rank") and row.get("seed_rank") and str(row.get("final_rank")) != str(row.get("seed_rank")):
+            rank = f"{rank} ({row.get('seed_rank')})"
         print(
             f"{rank:<6} {row.get('student_id',''):<28} "
             f"{row.get('rubric_mean_percent',''):<10} {row.get('conventions_mistake_rate_percent',''):<10} "

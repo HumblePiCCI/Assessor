@@ -10,7 +10,7 @@ def test_pipeline_steps_structure():
     ids = [item["id"] for item in steps]
     assert ids[0] == "extract"
     assert ids[-1] == "dashboard"
-    assert {"assess", "consistency", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
+    assert {"assess", "consistency", "rerank", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
     assert all("cmd" in item and "label" in item for item in steps)
     extract = next(item for item in steps if item["id"] == "extract")
     assert "--inputs" in extract["cmd"]
@@ -18,6 +18,8 @@ def test_pipeline_steps_structure():
     conventions = next(item for item in steps if item["id"] == "conventions")
     assert "--output" in conventions["cmd"]
     assert "processing/conventions_report.csv" in conventions["cmd"]
+    rerank = next(item for item in steps if item["id"] == "rerank")
+    assert "global_rerank.py" in " ".join(str(part) for part in rerank["cmd"])
     grade = next(item for item in steps if item["id"] == "grade")
     assert "--non-interactive" in grade["cmd"]
 

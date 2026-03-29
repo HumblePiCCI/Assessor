@@ -80,8 +80,11 @@ def test_build_dashboard_data_no_grades(tmp_path, monkeypatch):
 
 def test_build_dashboard_data_primary_input(tmp_path, monkeypatch):
     primary = tmp_path / "primary.csv"
-    rows = [{"student_id": "s1", "final_rank": "1"}]
-    write_csv(primary, rows, ["student_id", "final_rank"])
+    rows = [{"student_id": "s1", "final_rank": "1", "seed_rank": "2", "rerank_displacement": "-1", "rerank_notes": "moved_up_1"}]
+    write_csv(primary, rows, ["student_id", "final_rank", "seed_rank", "rerank_displacement", "rerank_notes"])
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "consistency_report.json").write_text(json.dumps({"summary": {"pairwise_agreement_with_final_order": 1.0}}), encoding="utf-8")
     out = tmp_path / "dash.json"
     texts = tmp_path / "texts"
     texts.mkdir()
@@ -89,6 +92,9 @@ def test_build_dashboard_data_primary_input(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["bdd", "--input", str(primary), "--fallback", str(tmp_path / "missing.csv"), "--output", str(out), "--texts", str(texts)])
     assert bdd.main() == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["students"][0]["seed_rank"] == "2"
+    assert payload["consistency_report"]["summary"]["pairwise_agreement_with_final_order"] == 1.0
 
 
 def test_load_submission_metadata_variants(tmp_path):

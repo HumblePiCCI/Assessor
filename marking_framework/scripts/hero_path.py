@@ -131,11 +131,11 @@ def main() -> int:
             return 1
 
     if args.verify_consistency:
-        cmd = step_cmd("consistency", ["python3", "scripts/verify_consistency.py"])
-        if args.apply_consistency:
-            cmd.append("--apply")
-        if run(cmd) != 0:
+        if run(step_cmd("consistency", ["python3", "scripts/verify_consistency.py"])) != 0:
             return 1
+        if args.apply_consistency:
+            if run(step_cmd("rerank", ["python3", "scripts/global_rerank.py"])) != 0:
+                return 1
 
     if args.publish_gate:
         cmd = step_cmd("quality_gate", ["python3", "scripts/publish_gate.py", "--gate-config", args.gate_config])

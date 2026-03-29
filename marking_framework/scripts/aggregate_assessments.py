@@ -315,6 +315,7 @@ def main() -> int:
         row.pop("_level_order", None)
         row.pop("_composite_bucket", None)
         row.pop("_borda_bucket", None)
+        row["seed_rank"] = idx
         row["consensus_rank"] = idx
     logger.info(f"Consensus ranking established for {len(rows_sorted)} students")
     out_path = Path(args.output)
