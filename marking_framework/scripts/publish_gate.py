@@ -12,11 +12,13 @@ try:
     from scripts.assessor_context import grade_band_for_level, load_class_metadata, normalize_genre, select_grade_level
     from scripts.calibration_contract import build_run_scope, calibration_manifest_path
     from scripts.calibration_gate import inspect_calibration_profile
+    from scripts.gate_profiles import decision_state, highest_passing_profile, resolve_gate_profiles
 except ImportError:  # pragma: no cover
     from aggregate_helpers import get_level_bands  # pragma: no cover
     from assessor_context import grade_band_for_level, load_class_metadata, normalize_genre, select_grade_level  # pragma: no cover
     from calibration_contract import build_run_scope, calibration_manifest_path  # pragma: no cover
     from calibration_gate import inspect_calibration_profile  # pragma: no cover
+    from gate_profiles import decision_state, highest_passing_profile, resolve_gate_profiles  # pragma: no cover
 
 
 def load_json(path: Path) -> dict:
@@ -212,6 +214,9 @@ def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
     report = load_json(report_path)
     label, summary = benchmark_mode_summary(report, preferred_mode)
     stability = summary.get("stability", {}) if isinstance(summary, dict) else {}
+    level_variance = float(stability.get("mean_student_level_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
+    rank_variance = float(stability.get("mean_student_rank_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
+    score_variance = float(stability.get("mean_student_score_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
     return {
         "present": bool(summary),
         "mode": label,
@@ -226,9 +231,42 @@ def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
         "model_usage_ratio": float(summary.get("model_usage_ratio_mean", 0.0) or 0.0) if summary else 0.0,
         "cost_usd": float(summary.get("cost_usd_mean", 0.0) or 0.0) if summary else 0.0,
         "latency_seconds": float(summary.get("latency_seconds_mean", 0.0) or 0.0) if summary else 0.0,
-        "mean_student_level_variance": float(stability.get("mean_student_level_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
-        "mean_student_rank_variance": float(stability.get("mean_student_rank_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
-        "mean_student_score_variance": float(stability.get("mean_student_score_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
+        "mean_student_level_variance": level_variance,
+        "mean_student_rank_variance": rank_variance,
+        "mean_student_score_variance": score_variance,
+        "mean_student_level_sd": level_variance ** 0.5,
+        "mean_student_rank_sd": rank_variance ** 0.5,
+        "mean_student_score_sd": score_variance ** 0.5,
+    }
+
+
+def reproducibility_metrics(report_path: Path) -> dict:
+    report = load_json(report_path)
+    if not report:
+        return {
+            "present": False,
+            "runs_compared": 0,
+            "manifest_identical": False,
+            "final_outputs_exact_match": False,
+            "within_tolerance": False,
+            "max_intermediate_metric_delta": 0.0,
+            "mismatched_final_artifact_count": 0,
+            "mismatched_intermediate_artifact_count": 0,
+        }
+    summary = report.get("summary", report) if isinstance(report, dict) else {}
+    mismatched_final = summary.get("mismatched_final_artifacts", []) if isinstance(summary, dict) else []
+    mismatched_intermediate = summary.get("mismatched_intermediate_artifacts", []) if isinstance(summary, dict) else []
+    final_exact = bool(summary.get("final_outputs_exact_match", summary.get("exact_match", False)))
+    within_tolerance = bool(summary.get("within_tolerance", final_exact))
+    return {
+        "present": True,
+        "runs_compared": int(summary.get("runs_compared", summary.get("manifest_identical_runs", 0)) or 0),
+        "manifest_identical": bool(summary.get("manifest_identical", summary.get("manifest_hash_match", False))),
+        "final_outputs_exact_match": final_exact,
+        "within_tolerance": within_tolerance,
+        "max_intermediate_metric_delta": float(summary.get("max_intermediate_metric_delta", 0.0) or 0.0),
+        "mismatched_final_artifact_count": len(mismatched_final) if isinstance(mismatched_final, list) else 0,
+        "mismatched_intermediate_artifact_count": len(mismatched_intermediate) if isinstance(mismatched_intermediate, list) else 0,
     }
 
 
@@ -252,6 +290,10 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("anchor_mae_above_threshold")
     if metrics["cal_missing_assessors"]:
         failures.append("calibration_scope_missing")
+    if metrics.get("calibration_scope_samples", 0) < int(thresholds.get("calibration_min_scope_samples", 0)):
+        failures.append("calibration_scope_samples_below_threshold")
+    if metrics.get("calibration_scope_observations", 0) < int(thresholds.get("calibration_min_scope_observations", 0)):
+        failures.append("calibration_scope_observations_below_threshold")
     if thresholds.get("calibration_require_manifest", strict_release) and not metrics.get("calibration_manifest_present", False):
         failures.append("calibration_manifest_missing")
     if thresholds.get("calibration_require_manifest_integrity", strict_release) and not metrics.get("calibration_manifest_integrity_ok", True):
@@ -260,6 +302,10 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("calibration_scope_mismatch")
     if thresholds.get("calibration_require_production_profile", strict_release) and metrics.get("calibration_synthetic", False):
         failures.append("calibration_synthetic_not_allowed")
+    if metrics.get("calibration_generated_age_hours") is not None and metrics.get("calibration_generated_age_hours", 0.0) > float(
+        thresholds.get("calibration_max_age_hours", 999999.0)
+    ):
+        failures.append("calibration_stale")
     if metrics.get("calibration_drift_failures", []) and thresholds.get("calibration_fail_on_drift", strict_release):
         drift_map = {
             "stale": "calibration_stale",
@@ -294,6 +340,25 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         thresholds.get("calibration_max_boundary_pairwise_disagreement_concentration", 999.0)
     ):
         failures.append("calibration_boundary_pairwise_concentration_above_threshold")
+    if thresholds.get("reproducibility_require_report", False) and not metrics.get("reproducibility_report_present", False):
+        failures.append("reproducibility_report_missing")
+    if metrics.get("reproducibility_report_present", False):
+        if metrics.get("reproducibility_runs_compared", 0) < int(thresholds.get("reproducibility_min_runs_compared", 0)):
+            failures.append("reproducibility_runs_compared_below_threshold")
+        if thresholds.get("reproducibility_require_manifest_identical", False) and not metrics.get("reproducibility_manifest_identical", False):
+            failures.append("reproducibility_manifest_mismatch")
+        if thresholds.get("reproducibility_require_exact_final_outputs", False) and not metrics.get(
+            "reproducibility_final_outputs_exact_match", False
+        ):
+            failures.append("reproducibility_final_outputs_mismatch")
+        if thresholds.get("reproducibility_require_within_tolerance", False) and not metrics.get(
+            "reproducibility_within_tolerance", False
+        ):
+            failures.append("reproducibility_outside_tolerance")
+        if metrics.get("reproducibility_max_intermediate_metric_delta", 0.0) > float(
+            thresholds.get("reproducibility_max_intermediate_metric_delta", 999999.0)
+        ):
+            failures.append("reproducibility_intermediate_delta_above_threshold")
     if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_report_present"]:
         failures.append("benchmark_report_missing")
     if metrics["benchmark_report_present"]:
@@ -323,7 +388,143 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             failures.append("benchmark_student_rank_variance_above_threshold")
         if metrics["benchmark_mean_student_score_variance"] > float(thresholds.get("benchmark_max_mean_student_score_variance", 999999.0)):
             failures.append("benchmark_student_score_variance_above_threshold")
+        if metrics.get("benchmark_mean_student_level_sd", 0.0) > float(thresholds.get("benchmark_max_mean_student_level_sd", 999999.0)):
+            failures.append("benchmark_student_level_sd_above_threshold")
+        if metrics.get("benchmark_mean_student_rank_sd", 0.0) > float(thresholds.get("benchmark_max_mean_student_rank_sd", 999999.0)):
+            failures.append("benchmark_student_rank_sd_above_threshold")
+        if metrics.get("benchmark_mean_student_score_sd", 0.0) > float(thresholds.get("benchmark_max_mean_student_score_sd", 999999.0)):
+            failures.append("benchmark_student_score_sd_above_threshold")
     return failures
+
+
+def build_profile_metrics(
+    base_metrics: dict,
+    *,
+    thresholds: dict,
+    rows: list[dict],
+    level_bands: list[dict],
+    benchmark_report_path: Path,
+) -> dict:
+    metrics = dict(base_metrics)
+    boundary_margin = float(thresholds.get("boundary_margin_percent", 1.0) or 1.0)
+    benchmark = benchmark_metrics(benchmark_report_path, str(thresholds.get("benchmark_mode", "")).strip())
+    metrics.update(
+        {
+            "boundary_count": boundary_count(rows, level_bands, boundary_margin),
+            "benchmark_report_present": bool(benchmark.get("present", False)),
+            "benchmark_mode": benchmark.get("mode", ""),
+            "benchmark_runs_successful": int(benchmark.get("runs_successful", 0) or 0),
+            "benchmark_runs_attempted": int(benchmark.get("runs_attempted", 0) or 0),
+            "benchmark_exact_level_hit_rate": float(benchmark.get("exact_level_hit_rate", 0.0) or 0.0),
+            "benchmark_within_one_level_hit_rate": float(benchmark.get("within_one_level_hit_rate", 0.0) or 0.0),
+            "benchmark_score_band_mae": float(benchmark.get("score_band_mae", 0.0) or 0.0),
+            "benchmark_mean_rank_displacement": float(benchmark.get("mean_rank_displacement", 0.0) or 0.0),
+            "benchmark_kendall_tau": float(benchmark.get("kendall_tau", 0.0) or 0.0),
+            "benchmark_pairwise_order_agreement": float(benchmark.get("pairwise_order_agreement", 0.0) or 0.0),
+            "benchmark_model_usage_ratio": float(benchmark.get("model_usage_ratio", 0.0) or 0.0),
+            "benchmark_cost_usd": float(benchmark.get("cost_usd", 0.0) or 0.0),
+            "benchmark_latency_seconds": float(benchmark.get("latency_seconds", 0.0) or 0.0),
+            "benchmark_mean_student_level_variance": float(benchmark.get("mean_student_level_variance", 0.0) or 0.0),
+            "benchmark_mean_student_rank_variance": float(benchmark.get("mean_student_rank_variance", 0.0) or 0.0),
+            "benchmark_mean_student_score_variance": float(benchmark.get("mean_student_score_variance", 0.0) or 0.0),
+            "benchmark_mean_student_level_sd": float(benchmark.get("mean_student_level_sd", 0.0) or 0.0),
+            "benchmark_mean_student_rank_sd": float(benchmark.get("mean_student_rank_sd", 0.0) or 0.0),
+            "benchmark_mean_student_score_sd": float(benchmark.get("mean_student_score_sd", 0.0) or 0.0),
+        }
+    )
+    return metrics
+
+
+def evaluate_profiles(
+    base_metrics: dict,
+    gate_cfg: dict,
+    *,
+    rows: list[dict],
+    level_bands: list[dict],
+    benchmark_report_path: Path,
+) -> tuple[list[str], str, dict[str, dict]]:
+    order, target_profile, profiles = resolve_gate_profiles(gate_cfg, fallback_profile="dev")
+    results = {}
+    for name in order:
+        thresholds = profiles[name]
+        metrics = build_profile_metrics(
+            base_metrics,
+            thresholds=thresholds,
+            rows=rows,
+            level_bands=level_bands,
+            benchmark_report_path=benchmark_report_path,
+        )
+        failures = evaluate(metrics, thresholds)
+        results[name] = {
+            "ok": len(failures) == 0,
+            "failures": failures,
+            "thresholds": thresholds,
+            "metrics": metrics,
+        }
+    return order, target_profile, results
+
+
+def write_markdown_report(path: Path, payload: dict) -> None:
+    metrics = payload.get("metrics", {})
+    profiles = payload.get("profiles", {})
+    lines = [
+        "# Publish Gate",
+        "",
+        f"- **ok**: {payload.get('ok', False)}",
+        f"- **target_profile**: {payload.get('target_profile', '')}",
+        f"- **highest_attained_profile**: {payload.get('highest_attained_profile', '') or 'none'}",
+        f"- **decision_state**: {payload.get('decision_state', '')}",
+        "",
+        "## Profiles",
+    ]
+    for name in payload.get("profile_order", []):
+        profile = profiles.get(name, {})
+        lines.append(f"- **{name}**: {'pass' if profile.get('ok', False) else 'fail'}")
+        for failure in profile.get("failures", []):
+            lines.append(f"- {name}: {failure}")
+    lines.extend(["", "## Metrics"])
+    for key in (
+        "irr_rank_kendalls_w",
+        "irr_mean_rubric_sd",
+        "model_coverage",
+        "boundary_count",
+        "anchor_hit_rate",
+        "anchor_level_mae",
+        "calibration_scope_samples",
+        "calibration_scope_observations",
+        "calibration_scope_match",
+        "calibration_synthetic",
+        "calibration_generated_age_hours",
+        "benchmark_mode",
+        "benchmark_runs_successful",
+        "benchmark_exact_level_hit_rate",
+        "benchmark_within_one_level_hit_rate",
+        "benchmark_score_band_mae",
+        "benchmark_mean_rank_displacement",
+        "benchmark_kendall_tau",
+        "benchmark_pairwise_order_agreement",
+        "benchmark_model_usage_ratio",
+        "benchmark_cost_usd",
+        "benchmark_latency_seconds",
+        "benchmark_mean_student_level_variance",
+        "benchmark_mean_student_rank_variance",
+        "benchmark_mean_student_score_variance",
+        "benchmark_mean_student_level_sd",
+        "benchmark_mean_student_rank_sd",
+        "benchmark_mean_student_score_sd",
+        "reproducibility_report_present",
+        "reproducibility_runs_compared",
+        "reproducibility_manifest_identical",
+        "reproducibility_final_outputs_exact_match",
+        "reproducibility_within_tolerance",
+        "reproducibility_max_intermediate_metric_delta",
+    ):
+        lines.append(f"- **{key}**: {metrics.get(key)}")
+    failures = payload.get("failures", [])
+    if failures:
+        lines.extend(["", "## Failures"])
+        lines.extend(f"- {item}" for item in failures)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -342,6 +543,7 @@ def main() -> int:
     parser.add_argument("--exemplars", default="inputs/exemplars", help="Exemplars root")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Accuracy gate JSON config")
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
+    parser.add_argument("--reproducibility-report", default="outputs/reproducibility_report.json", help="Optional reproducibility report JSON")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--output", default="outputs/publish_gate.json", help="Gate result JSON")
     args = parser.parse_args()
@@ -353,9 +555,7 @@ def main() -> int:
     irr = load_json(Path(args.irr)).get("inter_rater_reliability", {})
     marking_cfg = load_json(Path(args.marking_config))
     gate_cfg = load_json(Path(args.gate_config))
-    thresholds = gate_cfg.get("thresholds", gate_cfg)
     bands = get_level_bands(marking_cfg)
-    boundary_margin = float(thresholds.get("boundary_margin_percent", 1.0) or 1.0)
     run_scope = run_scope_from_inputs(Path(args.class_metadata), Path(args.routing), Path(args.rubric))
     scope = run_scope.get("key", "")
     assessor_ids = [item.strip() for item in args.assessors.split(",") if item.strip()]
@@ -372,15 +572,15 @@ def main() -> int:
         calibration_set_path=Path(args.calibration_set),
         exemplars_path=Path(args.exemplars),
     )
-    benchmark = benchmark_metrics(Path(args.benchmark_report), str(thresholds.get("benchmark_mode", "")).strip())
+    scope_coverage = cal.get("coverage_scope", {}) if isinstance(cal.get("coverage_scope", {}), dict) else {}
+    reproducibility = reproducibility_metrics(Path(args.reproducibility_report))
 
     anchors_total, anchor_hit_rate, anchor_level_mae = anchor_metrics(rows, metadata)
-    metrics = {
+    base_metrics = {
         "rows": len(rows),
         "irr_rank_kendalls_w": float(irr.get("rank_kendall_w", 0.0) or 0.0),
         "irr_mean_rubric_sd": float(irr.get("mean_rubric_sd", 0.0) or 0.0),
         "model_coverage": model_coverage(Path(args.pass1)),
-        "boundary_count": boundary_count(rows, bands, boundary_margin),
         "anchors_total": anchors_total,
         "anchor_hit_rate": anchor_hit_rate,
         "anchor_level_mae": anchor_level_mae,
@@ -397,6 +597,8 @@ def main() -> int:
         "calibration_generated_age_hours": cal.get("generated_age_hours"),
         "calibration_freshness_window_hours": cal.get("freshness_window_hours"),
         "calibration_drift_failures": cal.get("drift_failures", []),
+        "calibration_scope_samples": int(scope_coverage.get("samples", 0) or 0),
+        "calibration_scope_observations": int(scope_coverage.get("observations", 0) or 0),
         "cal_level_hit_rate": float(cal.get("level_hit_rate", 0.0) or 0.0),
         "cal_mae": float(cal.get("mae", 0.0) or 0.0),
         "cal_pairwise_order": float(cal.get("pairwise_order_agreement", 0.0) or 0.0),
@@ -408,53 +610,47 @@ def main() -> int:
         "cal_boundary_pairwise_disagreement_concentration": float(
             cal.get("boundary_pairwise_disagreement_concentration", 0.0) or 0.0
         ),
-        "benchmark_report_present": bool(benchmark.get("present", False)),
-        "benchmark_mode": benchmark.get("mode", ""),
-        "benchmark_runs_successful": int(benchmark.get("runs_successful", 0) or 0),
-        "benchmark_runs_attempted": int(benchmark.get("runs_attempted", 0) or 0),
-        "benchmark_exact_level_hit_rate": float(benchmark.get("exact_level_hit_rate", 0.0) or 0.0),
-        "benchmark_within_one_level_hit_rate": float(benchmark.get("within_one_level_hit_rate", 0.0) or 0.0),
-        "benchmark_score_band_mae": float(benchmark.get("score_band_mae", 0.0) or 0.0),
-        "benchmark_mean_rank_displacement": float(benchmark.get("mean_rank_displacement", 0.0) or 0.0),
-        "benchmark_kendall_tau": float(benchmark.get("kendall_tau", 0.0) or 0.0),
-        "benchmark_pairwise_order_agreement": float(benchmark.get("pairwise_order_agreement", 0.0) or 0.0),
-        "benchmark_model_usage_ratio": float(benchmark.get("model_usage_ratio", 0.0) or 0.0),
-        "benchmark_cost_usd": float(benchmark.get("cost_usd", 0.0) or 0.0),
-        "benchmark_latency_seconds": float(benchmark.get("latency_seconds", 0.0) or 0.0),
-        "benchmark_mean_student_level_variance": float(benchmark.get("mean_student_level_variance", 0.0) or 0.0),
-        "benchmark_mean_student_rank_variance": float(benchmark.get("mean_student_rank_variance", 0.0) or 0.0),
-        "benchmark_mean_student_score_variance": float(benchmark.get("mean_student_score_variance", 0.0) or 0.0),
+        "reproducibility_report_present": bool(reproducibility.get("present", False)),
+        "reproducibility_runs_compared": int(reproducibility.get("runs_compared", 0) or 0),
+        "reproducibility_manifest_identical": bool(reproducibility.get("manifest_identical", False)),
+        "reproducibility_final_outputs_exact_match": bool(reproducibility.get("final_outputs_exact_match", False)),
+        "reproducibility_within_tolerance": bool(reproducibility.get("within_tolerance", False)),
+        "reproducibility_max_intermediate_metric_delta": float(reproducibility.get("max_intermediate_metric_delta", 0.0) or 0.0),
+        "reproducibility_mismatched_final_artifact_count": int(reproducibility.get("mismatched_final_artifact_count", 0) or 0),
+        "reproducibility_mismatched_intermediate_artifact_count": int(
+            reproducibility.get("mismatched_intermediate_artifact_count", 0) or 0
+        ),
     }
-    failures = evaluate(metrics, thresholds)
+    profile_order, target_profile, profile_results = evaluate_profiles(
+        base_metrics,
+        gate_cfg,
+        rows=rows,
+        level_bands=bands,
+        benchmark_report_path=Path(args.benchmark_report),
+    )
+    highest_profile = highest_passing_profile(profile_order, profile_results)
+    target_result = profile_results.get(
+        target_profile,
+        {"ok": False, "failures": ["target_profile_missing"], "thresholds": {}, "metrics": base_metrics},
+    )
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "ok": len(failures) == 0,
-        "failures": failures,
-        "thresholds": thresholds,
-        "metrics": metrics,
+        "ok": bool(target_result.get("ok", False)),
+        "target_profile": target_profile,
+        "highest_attained_profile": highest_profile,
+        "decision_state": decision_state(profile_order, highest_profile),
+        "profile_order": profile_order,
+        "failures": list(target_result.get("failures", [])),
+        "thresholds": target_result.get("thresholds", {}),
+        "metrics": target_result.get("metrics", base_metrics),
+        "profiles": profile_results,
     }
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     md = out.with_suffix(".md")
-    lines = ["# Publish Gate", "", f"- **ok**: {payload['ok']}"]
-    for key in (
-        "irr_rank_kendalls_w", "irr_mean_rubric_sd", "model_coverage", "boundary_count",
-        "anchor_hit_rate", "anchor_level_mae", "cal_level_hit_rate", "cal_mae",
-        "cal_pairwise_order", "cal_repeat_consistency", "cal_abs_bias", "cal_boundary_mae",
-        "cal_rank_stability_sd", "calibration_manifest_present", "calibration_scope_match",
-        "calibration_synthetic",
-        "benchmark_mode", "benchmark_runs_successful", "benchmark_exact_level_hit_rate",
-        "benchmark_within_one_level_hit_rate", "benchmark_score_band_mae",
-        "benchmark_mean_rank_displacement", "benchmark_kendall_tau",
-        "benchmark_pairwise_order_agreement", "benchmark_model_usage_ratio",
-        "benchmark_cost_usd", "benchmark_latency_seconds",
-    ):
-        lines.append(f"- **{key}**: {metrics.get(key)}")
-    if failures:
-        lines.extend(["", "## Failures"] + [f"- {item}" for item in failures])
-    md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_markdown_report(md, payload)
     print(f"Wrote {out}")
     print(f"Wrote {md}")
     return 0 if payload["ok"] else 2

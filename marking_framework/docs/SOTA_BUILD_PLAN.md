@@ -645,7 +645,7 @@ Use this section as the running status checkpoint.
 - Phase 2: completed
 - Phase 3: completed
 - Phase 4: completed
-- Phase 5: not started
+- Phase 5: completed
 - Phase 6: not started
 
 ### Latest Confirmed Improvements
@@ -658,13 +658,13 @@ Use this section as the running status checkpoint.
 - benchmark datasets now use explicit human gold and benchmark reports are gate-readable
 - pairwise consistency checks now feed a deterministic global reranker with explicit final-order artifacts
 - calibration now ships with a versioned manifest, explicit run scope, synthetic bootstrap marking, and drift-aware release checks
+- publish and SOTA gates now evaluate explicit `dev`, `candidate`, and `release` contracts with benchmark, reproducibility, calibration freshness, and budget thresholds
 
 ### Outstanding Architectural Risks
 
 - cache key coverage is still incomplete
-- release-gate policy still needs Phase 5 profile tightening across dev, candidate, and release modes
 - teacher adjudications are not yet feeding back into calibration and eval refresh
 
 ### Next Decision Point
 
-Start Phase 5 by promoting publish and SOTA gates into explicit release contracts with stronger benchmark, reproducibility, and stability thresholds.
+Start Phase 6 by wiring teacher adjudications and overrides back into benchmark gold, calibration refresh, and scoped drift control.

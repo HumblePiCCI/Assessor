@@ -15,6 +15,8 @@ def _write_benchmark_report(path):
         "modes": {
             "main": {
                 "summary": {
+                    "runs_attempted": 3,
+                    "runs_successful": 3,
                     "exact_level_hit_rate_mean": 0.9,
                     "within_one_level_hit_rate_mean": 1.0,
                     "score_band_mae_mean": 1.0,
@@ -33,6 +35,8 @@ def _write_benchmark_report(path):
             },
             "fallback": {
                 "summary": {
+                    "runs_attempted": 3,
+                    "runs_successful": 3,
                     "exact_level_hit_rate_mean": 0.7,
                     "within_one_level_hit_rate_mean": 0.8,
                     "score_band_mae_mean": 3.0,
@@ -142,6 +146,7 @@ def test_assessor_spread_and_consistency_metrics(tmp_path):
     _write_benchmark_report(tmp_path / "benchmark_report.json")
     benchmark = sg.benchmark_comparison_metrics(tmp_path / "benchmark_report.json", "main", "fallback")
     assert benchmark["present"] is True
+    assert benchmark["candidate"]["mean_student_level_sd"] > 0
     assert benchmark["delta"]["exact_level_hit_rate"] == 0.2
 
 
@@ -149,6 +154,8 @@ def test_evaluate_covers_failure_codes():
     metrics = {
         "publish_gate_present": False,
         "publish_gate_ok": False,
+        "publish_profile_order": ["dev", "candidate", "release"],
+        "publish_highest_attained_profile": "dev",
         "assessor_files": 1,
         "model_coverage": 0.1,
         "nonzero_score_rate": 0.1,
@@ -159,6 +166,22 @@ def test_evaluate_covers_failure_codes():
         "consistency_swap_rate": 0.9,
         "consistency_low_confidence_rate": 0.9,
         "benchmark_comparison_present": True,
+        "benchmark_runs_successful": 0,
+        "benchmark_exact_level_hit_rate": 0.1,
+        "benchmark_within_one_level_hit_rate": 0.2,
+        "benchmark_score_band_mae": 6.0,
+        "benchmark_mean_rank_displacement": 4.0,
+        "benchmark_kendall_tau": 0.1,
+        "benchmark_pairwise_order_agreement": 0.2,
+        "benchmark_model_usage_ratio": 0.1,
+        "benchmark_cost_usd": 10.0,
+        "benchmark_latency_seconds": 100.0,
+        "benchmark_mean_student_level_variance": 1.0,
+        "benchmark_mean_student_rank_variance": 1.0,
+        "benchmark_mean_student_score_variance": 1.0,
+        "benchmark_mean_student_level_sd": 1.0,
+        "benchmark_mean_student_rank_sd": 1.0,
+        "benchmark_mean_student_score_sd": 1.0,
         "benchmark_exact_level_hit_rate_delta": -0.5,
         "benchmark_within_one_level_hit_rate_delta": -0.5,
         "benchmark_score_band_mae_delta": 5.0,
@@ -171,9 +194,13 @@ def test_evaluate_covers_failure_codes():
         "benchmark_mean_student_level_variance_delta": 1.0,
         "benchmark_mean_student_rank_variance_delta": 1.0,
         "benchmark_mean_student_score_variance_delta": 1.0,
+        "benchmark_mean_student_level_sd_delta": 1.0,
+        "benchmark_mean_student_rank_sd_delta": 1.0,
+        "benchmark_mean_student_score_sd_delta": 1.0,
     }
     thresholds = {
         "require_publish_gate_ok": True,
+        "min_publish_profile": "candidate",
         "min_assessor_files": 3,
         "min_model_coverage": 0.9,
         "min_nonzero_score_rate": 0.9,
@@ -184,6 +211,22 @@ def test_evaluate_covers_failure_codes():
         "max_consistency_swap_rate": 0.3,
         "max_consistency_low_confidence_rate": 0.5,
         "require_benchmark_report": True,
+        "benchmark_min_runs_successful": 1,
+        "benchmark_min_exact_level_hit_rate": 0.8,
+        "benchmark_min_within_one_level_hit_rate": 0.95,
+        "benchmark_max_score_band_mae": 2.0,
+        "benchmark_max_mean_rank_displacement": 1.0,
+        "benchmark_min_kendall_tau": 0.8,
+        "benchmark_min_pairwise_order_agreement": 0.9,
+        "benchmark_min_model_usage_ratio": 0.8,
+        "benchmark_max_cost_usd": 2.0,
+        "benchmark_max_latency_seconds": 20.0,
+        "benchmark_max_mean_student_level_variance": 0.1,
+        "benchmark_max_mean_student_rank_variance": 0.1,
+        "benchmark_max_mean_student_score_variance": 0.5,
+        "benchmark_max_mean_student_level_sd": 0.3,
+        "benchmark_max_mean_student_rank_sd": 0.3,
+        "benchmark_max_mean_student_score_sd": 0.7,
         "benchmark_min_exact_level_hit_rate_delta": 0.0,
         "benchmark_min_within_one_level_hit_rate_delta": 0.0,
         "benchmark_max_score_band_mae_delta": 0.0,
@@ -196,10 +239,14 @@ def test_evaluate_covers_failure_codes():
         "benchmark_max_mean_student_level_variance_delta": 0.0,
         "benchmark_max_mean_student_rank_variance_delta": 0.0,
         "benchmark_max_mean_student_score_variance_delta": 0.0,
+        "benchmark_max_mean_student_level_sd_delta": 0.0,
+        "benchmark_max_mean_student_rank_sd_delta": 0.0,
+        "benchmark_max_mean_student_score_sd_delta": 0.0,
     }
     failures = sg.evaluate(metrics, thresholds)
     assert "publish_gate_not_ok" in failures
     assert "publish_gate_missing" in failures
+    assert "publish_gate_profile_below_threshold" in failures
     assert "assessor_count_below_threshold" in failures
     assert "model_coverage_below_threshold" in failures
     assert "nonzero_score_rate_below_threshold" in failures
@@ -209,6 +256,22 @@ def test_evaluate_covers_failure_codes():
     assert "p95_assessor_sd_above_threshold" in failures
     assert "consistency_swap_rate_above_threshold" in failures
     assert "consistency_low_confidence_rate_above_threshold" in failures
+    assert "benchmark_runs_successful_below_threshold" in failures
+    assert "benchmark_exact_level_hit_rate_below_threshold" in failures
+    assert "benchmark_within_one_level_hit_rate_below_threshold" in failures
+    assert "benchmark_score_band_mae_above_threshold" in failures
+    assert "benchmark_mean_rank_displacement_above_threshold" in failures
+    assert "benchmark_kendall_tau_below_threshold" in failures
+    assert "benchmark_pairwise_order_below_threshold" in failures
+    assert "benchmark_model_usage_below_threshold" in failures
+    assert "benchmark_cost_above_threshold" in failures
+    assert "benchmark_latency_above_threshold" in failures
+    assert "benchmark_student_level_variance_above_threshold" in failures
+    assert "benchmark_student_rank_variance_above_threshold" in failures
+    assert "benchmark_student_score_variance_above_threshold" in failures
+    assert "benchmark_student_level_sd_above_threshold" in failures
+    assert "benchmark_student_rank_sd_above_threshold" in failures
+    assert "benchmark_student_score_sd_above_threshold" in failures
     assert "benchmark_exact_level_hit_rate_delta_below_threshold" in failures
     assert "benchmark_within_one_level_hit_rate_delta_below_threshold" in failures
     assert "benchmark_score_band_mae_delta_above_threshold" in failures
@@ -221,6 +284,9 @@ def test_evaluate_covers_failure_codes():
     assert "benchmark_student_level_variance_delta_above_threshold" in failures
     assert "benchmark_student_rank_variance_delta_above_threshold" in failures
     assert "benchmark_student_score_variance_delta_above_threshold" in failures
+    assert "benchmark_student_level_sd_delta_above_threshold" in failures
+    assert "benchmark_student_rank_sd_delta_above_threshold" in failures
+    assert "benchmark_student_score_sd_delta_above_threshold" in failures
 
 
 def test_main_success_and_failure(tmp_path, monkeypatch):
@@ -313,3 +379,130 @@ def test_main_success_and_failure(tmp_path, monkeypatch):
     failed = json.loads((tmp_path / "outputs/sota_gate.json").read_text(encoding="utf-8"))
     assert failed["ok"] is False
     assert "publish_gate_not_ok" in failed["failures"]
+
+
+def test_sota_gate_profile_contracts_and_publish_profile_handoff(tmp_path, monkeypatch):
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    rows = [
+        {
+            "student_id": "s1",
+            "rubric_total_points": 82,
+            "criteria_points": {"K1": 81},
+            "criteria_evidence": [{"criterion_id": "K1"}],
+            "notes": "Model score",
+        },
+        {
+            "student_id": "s2",
+            "rubric_total_points": 74,
+            "criteria_points": {"K1": 73},
+            "criteria_evidence": [{"criterion_id": "K1"}],
+            "notes": "Model score",
+        },
+    ]
+    _write_pass1(pass1_dir / "assessor_A.json", "assessor_A", rows)
+    _write_pass1(pass1_dir / "assessor_B.json", "assessor_B", [dict(item, rubric_total_points=item["rubric_total_points"] + 1) for item in rows])
+    _write_pass1(pass1_dir / "assessor_C.json", "assessor_C", [dict(item, rubric_total_points=item["rubric_total_points"] - 1) for item in rows])
+
+    publish = tmp_path / "outputs/publish_gate.json"
+    publish.parent.mkdir(parents=True, exist_ok=True)
+    publish.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "target_profile": "release",
+                "highest_attained_profile": "release",
+                "profile_order": ["dev", "candidate", "release"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    consistency = tmp_path / "outputs/consistency_checks.json"
+    consistency.write_text(json.dumps({"checks": [{"decision": "KEEP", "confidence": "high"}]}), encoding="utf-8")
+    _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
+
+    config = tmp_path / "config/sota_gate.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        json.dumps(
+            {
+                "target_profile": "release",
+                "profiles": {
+                    "dev": {
+                        "thresholds": {
+                            "require_publish_gate_ok": True,
+                            "min_publish_profile": "dev",
+                            "min_assessor_files": 3,
+                            "min_model_coverage": 0.8,
+                            "min_nonzero_score_rate": 1.0,
+                            "min_criteria_coverage": 1.0,
+                            "min_evidence_coverage": 1.0,
+                            "max_mean_assessor_sd": 5.0,
+                            "max_p95_assessor_sd": 6.0,
+                            "max_consistency_swap_rate": 0.2,
+                            "max_consistency_low_confidence_rate": 0.2,
+                            "require_benchmark_report": True,
+                            "benchmark_candidate_mode": "main",
+                            "benchmark_baseline_mode": "fallback",
+                            "benchmark_min_runs_successful": 2,
+                            "benchmark_min_exact_level_hit_rate": 0.8,
+                            "benchmark_min_within_one_level_hit_rate": 0.95,
+                            "benchmark_max_score_band_mae": 2.0,
+                            "benchmark_max_mean_rank_displacement": 1.0,
+                            "benchmark_min_kendall_tau": 0.8,
+                            "benchmark_min_pairwise_order_agreement": 0.9,
+                            "benchmark_min_model_usage_ratio": 0.8,
+                            "benchmark_max_cost_usd": 2.0,
+                            "benchmark_max_latency_seconds": 20.0,
+                            "benchmark_max_mean_student_level_sd": 0.25,
+                            "benchmark_max_mean_student_rank_sd": 0.25,
+                            "benchmark_max_mean_student_score_sd": 1.0,
+                            "benchmark_min_exact_level_hit_rate_delta": 0.0,
+                            "benchmark_min_within_one_level_hit_rate_delta": 0.0,
+                            "benchmark_max_score_band_mae_delta": 0.0,
+                            "benchmark_max_mean_rank_displacement_delta": 0.0,
+                            "benchmark_min_kendall_tau_delta": 0.0,
+                            "benchmark_min_pairwise_order_agreement_delta": 0.0,
+                            "benchmark_min_model_usage_ratio_delta": 0.0
+                        }
+                    },
+                    "candidate": {
+                        "inherits": "dev",
+                        "thresholds": {
+                            "min_publish_profile": "candidate"
+                        }
+                    },
+                    "release": {
+                        "inherits": "candidate",
+                        "thresholds": {
+                            "min_publish_profile": "release"
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sota_gate",
+            "--publish-gate",
+            "outputs/publish_gate.json",
+            "--pass1",
+            "assessments/pass1_individual",
+            "--consistency",
+            "outputs/consistency_checks.json",
+            "--benchmark-report",
+            "outputs/benchmark_report.json",
+            "--gate-config",
+            "config/sota_gate.json",
+            "--output",
+            "outputs/sota_gate.json",
+        ],
+    )
+    assert sg.main() == 0
+    payload = json.loads((tmp_path / "outputs/sota_gate.json").read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["highest_attained_profile"] == "release"
+    assert payload["decision_state"] == "release_ready"

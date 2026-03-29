@@ -169,6 +169,54 @@ def _write_benchmark_report(path, exact=0.9, within_one=1.0, score_band_mae=1.5,
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_calibration_manifest(tmp_path, *, synthetic=False, samples=12, observations=12, generated_at="2026-03-28T00:00:00+00:00"):
+    (tmp_path / "outputs/calibration_manifest.json").write_text(
+        json.dumps(
+            {
+                "generated_at": generated_at,
+                "synthetic": synthetic,
+                "profile_type": "calibrated" if not synthetic else "bootstrap_neutral",
+                "freshness_window_hours": 336,
+                "scope_coverage": [
+                    {
+                        "key": "grade_8_10|argumentative",
+                        "grade_band": "grade_8_10",
+                        "genre": "argumentative",
+                        "rubric_family": "rubric_unknown",
+                        "model_family": "",
+                        "samples": samples,
+                        "observations": observations,
+                    }
+                ],
+                "artifact_hashes": {"calibration_bias_sha256": file_sha256(tmp_path / "outputs/calibration_bias.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_reproducibility_report(path, *, exact=True, within_tolerance=None, manifest_identical=True, runs_compared=2, max_delta=0.0):
+    if within_tolerance is None:
+        within_tolerance = exact
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "runs_compared": runs_compared,
+                    "manifest_identical": manifest_identical,
+                    "final_outputs_exact_match": exact,
+                    "within_tolerance": within_tolerance,
+                    "max_intermediate_metric_delta": max_delta,
+                    "mismatched_final_artifacts": [] if exact else ["outputs/final_order.csv"],
+                    "mismatched_intermediate_artifacts": [] if max_delta == 0.0 else ["outputs/consistency_report.json"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_publish_gate_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_inputs(tmp_path)
@@ -321,6 +369,9 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_mean_student_level_variance": 10.0,
         "benchmark_mean_student_rank_variance": 10.0,
         "benchmark_mean_student_score_variance": 10.0,
+        "benchmark_mean_student_level_sd": 4.0,
+        "benchmark_mean_student_rank_sd": 4.0,
+        "benchmark_mean_student_score_sd": 4.0,
     }
     thresholds = {
         "min_rank_kendall_w": 0.7,
@@ -348,6 +399,9 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_max_mean_student_level_variance": 0.5,
         "benchmark_max_mean_student_rank_variance": 0.5,
         "benchmark_max_mean_student_score_variance": 1.0,
+        "benchmark_max_mean_student_level_sd": 0.5,
+        "benchmark_max_mean_student_rank_sd": 0.5,
+        "benchmark_max_mean_student_score_sd": 1.0,
     }
     failures = pg.evaluate(metrics, thresholds)
     assert "kendall_w_below_threshold" in failures
@@ -375,6 +429,9 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "benchmark_student_level_variance_above_threshold" in failures
     assert "benchmark_student_rank_variance_above_threshold" in failures
     assert "benchmark_student_score_variance_above_threshold" in failures
+    assert "benchmark_student_level_sd_above_threshold" in failures
+    assert "benchmark_student_rank_sd_above_threshold" in failures
+    assert "benchmark_student_score_sd_above_threshold" in failures
 
 
 def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):
@@ -447,3 +504,153 @@ def test_publish_gate_release_mode_rejects_synthetic_calibration(tmp_path, monke
     assert pg.main() == 2
     result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
     assert "calibration_synthetic_not_allowed" in result["failures"]
+
+
+def test_publish_gate_release_profile_contract_success(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_inputs(tmp_path)
+    _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
+    _write_calibration_manifest(tmp_path, synthetic=False, samples=12, observations=12)
+    _write_reproducibility_report(tmp_path / "outputs/reproducibility_report.json", exact=True, within_tolerance=True, max_delta=0.0)
+    (tmp_path / "config/accuracy_gate.json").write_text(
+        json.dumps(
+            {
+                "target_profile": "release",
+                "profiles": {
+                    "dev": {
+                        "thresholds": {
+                            "min_rank_kendall_w": 0.0,
+                            "max_mean_rubric_sd": 999.0,
+                            "min_model_coverage": 0.0,
+                            "max_boundary_students": 99,
+                            "calibration_min_level_hit_rate": 0.0,
+                            "calibration_max_mae": 999.0,
+                            "calibration_min_pairwise_order": 0.0,
+                            "calibration_min_repeat_level_consistency": 0.0,
+                            "calibration_max_abs_bias": 999.0,
+                            "benchmark_mode": "main"
+                        }
+                    },
+                    "candidate": {
+                        "inherits": "dev",
+                        "thresholds": {
+                            "calibration_require_manifest": True,
+                            "calibration_require_manifest_integrity": True,
+                            "calibration_require_scope_match": True,
+                            "calibration_require_production_profile": True,
+                            "calibration_fail_on_drift": True,
+                            "calibration_min_scope_samples": 8,
+                            "calibration_min_scope_observations": 8,
+                            "calibration_max_age_hours": 336,
+                            "require_benchmark_report": True,
+                            "benchmark_min_runs_successful": 2,
+                            "benchmark_min_exact_level_hit_rate": 0.8,
+                            "benchmark_min_within_one_level_hit_rate": 0.95,
+                            "benchmark_max_score_band_mae": 2.0,
+                            "benchmark_min_pairwise_order_agreement": 0.9,
+                            "benchmark_max_mean_student_level_sd": 0.2,
+                            "benchmark_max_mean_student_rank_sd": 0.2,
+                            "benchmark_max_mean_student_score_sd": 1.0,
+                            "reproducibility_require_report": True,
+                            "reproducibility_min_runs_compared": 2,
+                            "reproducibility_require_manifest_identical": True,
+                            "reproducibility_require_within_tolerance": True
+                        }
+                    },
+                    "release": {
+                        "inherits": "candidate",
+                        "thresholds": {
+                            "reproducibility_require_exact_final_outputs": True,
+                            "reproducibility_max_intermediate_metric_delta": 0.0
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "publish_gate",
+            "--gate-config",
+            "config/accuracy_gate.json",
+            "--reproducibility-report",
+            "outputs/reproducibility_report.json",
+            "--output",
+            "outputs/publish_gate.json",
+        ],
+    )
+    assert pg.main() == 0
+    result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert result["highest_attained_profile"] == "release"
+    assert result["decision_state"] == "release_ready"
+    assert result["profiles"]["release"]["ok"] is True
+
+
+def test_publish_gate_release_profile_rejects_reproducibility_mismatch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_inputs(tmp_path)
+    _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
+    _write_calibration_manifest(tmp_path, synthetic=False, samples=12, observations=12)
+    _write_reproducibility_report(tmp_path / "outputs/reproducibility_report.json", exact=False, within_tolerance=False, max_delta=0.05)
+    (tmp_path / "config/accuracy_gate.json").write_text(
+        json.dumps(
+            {
+                "target_profile": "release",
+                "profiles": {
+                    "dev": {
+                        "thresholds": {
+                            "min_rank_kendall_w": 0.0,
+                            "max_mean_rubric_sd": 999.0,
+                            "min_model_coverage": 0.0,
+                            "max_boundary_students": 99,
+                            "calibration_min_level_hit_rate": 0.0,
+                            "calibration_max_mae": 999.0,
+                            "calibration_min_pairwise_order": 0.0,
+                            "calibration_min_repeat_level_consistency": 0.0,
+                            "calibration_max_abs_bias": 999.0,
+                            "benchmark_mode": "main"
+                        }
+                    },
+                    "release": {
+                        "inherits": "dev",
+                        "thresholds": {
+                            "calibration_require_manifest": True,
+                            "calibration_require_manifest_integrity": True,
+                            "calibration_require_scope_match": True,
+                            "calibration_require_production_profile": True,
+                            "require_benchmark_report": True,
+                            "benchmark_min_runs_successful": 2,
+                            "benchmark_min_exact_level_hit_rate": 0.8,
+                            "reproducibility_require_report": True,
+                            "reproducibility_min_runs_compared": 2,
+                            "reproducibility_require_manifest_identical": True,
+                            "reproducibility_require_within_tolerance": True,
+                            "reproducibility_require_exact_final_outputs": True,
+                            "reproducibility_max_intermediate_metric_delta": 0.0
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "publish_gate",
+            "--gate-config",
+            "config/accuracy_gate.json",
+            "--reproducibility-report",
+            "outputs/reproducibility_report.json",
+            "--output",
+            "outputs/publish_gate.json",
+        ],
+    )
+    assert pg.main() == 2
+    result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
+    assert result["ok"] is False
+    assert result["highest_attained_profile"] == "dev"
+    assert "reproducibility_final_outputs_mismatch" in result["failures"]
