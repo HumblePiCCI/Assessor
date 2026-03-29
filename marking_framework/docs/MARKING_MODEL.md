@@ -90,5 +90,6 @@ Outputs
 
 Validation Harness
 - Run `python3 scripts/benchmark_main_vs_fallback.py --dataset <dataset> --runs 3`.
-- The benchmark compares OpenAI main-path vs deterministic fallback and exits non-zero if main-path accuracy is lower.
-- Report includes model usage ratio so you can confirm the model actually ran (and not silent fallback).
+- Benchmark datasets must include `inputs/`, `submissions/`, and explicit `gold.jsonl` or `gold.csv`.
+- The harness emits `benchmark_report.json` and `benchmark_report.md` with exact-level hit rate, within-one-level hit rate, score-band MAE, rank displacement, Kendall correlation, pairwise agreement, stability variance, model usage ratio, cost, and latency.
+- The default comparison is current candidate routing versus deterministic fallback, and the report is structured for `publish_gate.py` and `sota_gate.py` to consume directly.

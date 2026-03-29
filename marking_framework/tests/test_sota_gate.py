@@ -9,6 +9,52 @@ def _write_pass1(path, assessor_id, rows):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_benchmark_report(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "modes": {
+            "main": {
+                "summary": {
+                    "exact_level_hit_rate_mean": 0.9,
+                    "within_one_level_hit_rate_mean": 1.0,
+                    "score_band_mae_mean": 1.0,
+                    "mean_rank_displacement_mean": 0.5,
+                    "kendall_tau_mean": 0.9,
+                    "pairwise_order_agreement_mean": 0.95,
+                    "model_usage_ratio_mean": 0.9,
+                    "cost_usd_mean": 1.0,
+                    "latency_seconds_mean": 10.0,
+                    "stability": {
+                        "mean_student_level_variance": 0.05,
+                        "mean_student_rank_variance": 0.05,
+                        "mean_student_score_variance": 0.5,
+                    },
+                }
+            },
+            "fallback": {
+                "summary": {
+                    "exact_level_hit_rate_mean": 0.7,
+                    "within_one_level_hit_rate_mean": 0.8,
+                    "score_band_mae_mean": 3.0,
+                    "mean_rank_displacement_mean": 1.5,
+                    "kendall_tau_mean": 0.6,
+                    "pairwise_order_agreement_mean": 0.8,
+                    "model_usage_ratio_mean": 0.0,
+                    "cost_usd_mean": 0.0,
+                    "latency_seconds_mean": 4.0,
+                    "stability": {
+                        "mean_student_level_variance": 0.2,
+                        "mean_student_rank_variance": 0.2,
+                        "mean_student_score_variance": 2.0,
+                    },
+                }
+            },
+        },
+        "comparison": {"candidate_mode": "main", "baseline_mode": "fallback"},
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_load_helpers_and_core_metrics(tmp_path):
     assert sg.load_json(tmp_path / "missing.json") == {}
     bad = tmp_path / "bad.json"
@@ -93,6 +139,10 @@ def test_assessor_spread_and_consistency_metrics(tmp_path):
     assert total == 3
     assert round(swap_rate, 5) == round(2 / 3, 5)
     assert round(low_rate, 5) == round(1 / 3, 5)
+    _write_benchmark_report(tmp_path / "benchmark_report.json")
+    benchmark = sg.benchmark_comparison_metrics(tmp_path / "benchmark_report.json", "main", "fallback")
+    assert benchmark["present"] is True
+    assert benchmark["delta"]["exact_level_hit_rate"] == 0.2
 
 
 def test_evaluate_covers_failure_codes():
@@ -108,6 +158,19 @@ def test_evaluate_covers_failure_codes():
         "p95_assessor_sd": 25.0,
         "consistency_swap_rate": 0.9,
         "consistency_low_confidence_rate": 0.9,
+        "benchmark_comparison_present": True,
+        "benchmark_exact_level_hit_rate_delta": -0.5,
+        "benchmark_within_one_level_hit_rate_delta": -0.5,
+        "benchmark_score_band_mae_delta": 5.0,
+        "benchmark_mean_rank_displacement_delta": 5.0,
+        "benchmark_kendall_tau_delta": -0.5,
+        "benchmark_pairwise_order_agreement_delta": -0.5,
+        "benchmark_model_usage_ratio_delta": -0.5,
+        "benchmark_cost_usd_delta": 10.0,
+        "benchmark_latency_seconds_delta": 10.0,
+        "benchmark_mean_student_level_variance_delta": 1.0,
+        "benchmark_mean_student_rank_variance_delta": 1.0,
+        "benchmark_mean_student_score_variance_delta": 1.0,
     }
     thresholds = {
         "require_publish_gate_ok": True,
@@ -120,6 +183,19 @@ def test_evaluate_covers_failure_codes():
         "max_p95_assessor_sd": 15.0,
         "max_consistency_swap_rate": 0.3,
         "max_consistency_low_confidence_rate": 0.5,
+        "require_benchmark_report": True,
+        "benchmark_min_exact_level_hit_rate_delta": 0.0,
+        "benchmark_min_within_one_level_hit_rate_delta": 0.0,
+        "benchmark_max_score_band_mae_delta": 0.0,
+        "benchmark_max_mean_rank_displacement_delta": 0.0,
+        "benchmark_min_kendall_tau_delta": 0.0,
+        "benchmark_min_pairwise_order_agreement_delta": 0.0,
+        "benchmark_min_model_usage_ratio_delta": 0.0,
+        "benchmark_max_cost_usd_delta": 1.0,
+        "benchmark_max_latency_seconds_delta": 1.0,
+        "benchmark_max_mean_student_level_variance_delta": 0.0,
+        "benchmark_max_mean_student_rank_variance_delta": 0.0,
+        "benchmark_max_mean_student_score_variance_delta": 0.0,
     }
     failures = sg.evaluate(metrics, thresholds)
     assert "publish_gate_not_ok" in failures
@@ -133,6 +209,18 @@ def test_evaluate_covers_failure_codes():
     assert "p95_assessor_sd_above_threshold" in failures
     assert "consistency_swap_rate_above_threshold" in failures
     assert "consistency_low_confidence_rate_above_threshold" in failures
+    assert "benchmark_exact_level_hit_rate_delta_below_threshold" in failures
+    assert "benchmark_within_one_level_hit_rate_delta_below_threshold" in failures
+    assert "benchmark_score_band_mae_delta_above_threshold" in failures
+    assert "benchmark_mean_rank_displacement_delta_above_threshold" in failures
+    assert "benchmark_kendall_tau_delta_below_threshold" in failures
+    assert "benchmark_pairwise_order_delta_below_threshold" in failures
+    assert "benchmark_model_usage_delta_below_threshold" in failures
+    assert "benchmark_cost_delta_above_threshold" in failures
+    assert "benchmark_latency_delta_above_threshold" in failures
+    assert "benchmark_student_level_variance_delta_above_threshold" in failures
+    assert "benchmark_student_rank_variance_delta_above_threshold" in failures
+    assert "benchmark_student_score_variance_delta_above_threshold" in failures
 
 
 def test_main_success_and_failure(tmp_path, monkeypatch):
@@ -164,6 +252,7 @@ def test_main_success_and_failure(tmp_path, monkeypatch):
     publish.write_text(json.dumps({"ok": True}), encoding="utf-8")
     consistency = tmp_path / "outputs/consistency_checks.json"
     consistency.write_text(json.dumps({"checks": [{"decision": "KEEP", "confidence": "high"}]}), encoding="utf-8")
+    _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
 
     config = tmp_path / "config/sota_gate.json"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -181,6 +270,15 @@ def test_main_success_and_failure(tmp_path, monkeypatch):
                     "max_p95_assessor_sd": 6.0,
                     "max_consistency_swap_rate": 0.2,
                     "max_consistency_low_confidence_rate": 0.2,
+                    "require_benchmark_report": True,
+                    "benchmark_candidate_mode": "main",
+                    "benchmark_baseline_mode": "fallback",
+                    "benchmark_min_exact_level_hit_rate_delta": 0.0,
+                    "benchmark_min_within_one_level_hit_rate_delta": 0.0,
+                    "benchmark_max_score_band_mae_delta": 0.0,
+                    "benchmark_max_mean_rank_displacement_delta": 0.0,
+                    "benchmark_min_kendall_tau_delta": 0.0,
+                    "benchmark_min_pairwise_order_agreement_delta": 0.0,
                 }
             }
         ),
@@ -198,6 +296,8 @@ def test_main_success_and_failure(tmp_path, monkeypatch):
             "assessments/pass1_individual",
             "--consistency",
             "outputs/consistency_checks.json",
+            "--benchmark-report",
+            "outputs/benchmark_report.json",
             "--gate-config",
             "config/sota_gate.json",
             "--output",

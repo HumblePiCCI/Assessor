@@ -11,6 +11,21 @@
     "calibration_max_mae": 20.0,
     "calibration_min_pairwise_order": 0.55,
     "calibration_min_repeat_level_consistency": 0.8,
-    "calibration_max_abs_bias": 6.0
+    "calibration_max_abs_bias": 6.0,
+    "require_benchmark_report": false,
+    "benchmark_mode": "main",
+    "benchmark_min_runs_successful": 0,
+    "benchmark_min_exact_level_hit_rate": 0.0,
+    "benchmark_min_within_one_level_hit_rate": 0.0,
+    "benchmark_max_score_band_mae": 999.0,
+    "benchmark_max_mean_rank_displacement": 999.0,
+    "benchmark_min_kendall_tau": -1.0,
+    "benchmark_min_pairwise_order_agreement": 0.0,
+    "benchmark_min_model_usage_ratio": 0.0,
+    "benchmark_max_cost_usd": 999999.0,
+    "benchmark_max_latency_seconds": 999999.0,
+    "benchmark_max_mean_student_level_variance": 999999.0,
+    "benchmark_max_mean_student_rank_variance": 999999.0,
+    "benchmark_max_mean_student_score_variance": 999999.0
   }
 }

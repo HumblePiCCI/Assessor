@@ -123,6 +123,59 @@ def consistency_metrics(path: Path) -> tuple[int, float, float]:
     return total, swaps / total, low / total
 
 
+def benchmark_mode_summary(report: dict, mode: str) -> dict:
+    modes = report.get("modes", {}) if isinstance(report, dict) else {}
+    if not isinstance(modes, dict):
+        return {}
+    payload = modes.get(mode, {})
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    return summary if isinstance(summary, dict) else {}
+
+
+def benchmark_comparison_metrics(report_path: Path, candidate_mode: str = "", baseline_mode: str = "") -> dict:
+    report = load_json(report_path)
+    if not isinstance(report, dict) or not report:
+        return {"present": False, "candidate_mode": "", "baseline_mode": "", "delta": {}}
+    comparison = report.get("comparison", {})
+    report_candidate = str(comparison.get("candidate_mode", "")).strip()
+    report_baseline = str(comparison.get("baseline_mode", "")).strip()
+    candidate_mode = candidate_mode or report_candidate
+    baseline_mode = baseline_mode or report_baseline
+    if not candidate_mode or not baseline_mode:
+        return {"present": False, "candidate_mode": candidate_mode, "baseline_mode": baseline_mode, "delta": {}}
+    candidate_summary = benchmark_mode_summary(report, candidate_mode)
+    baseline_summary = benchmark_mode_summary(report, baseline_mode)
+    if not candidate_summary or not baseline_summary:
+        return {"present": False, "candidate_mode": candidate_mode, "baseline_mode": baseline_mode, "delta": {}}
+    delta = {
+        "exact_level_hit_rate": round(candidate_summary.get("exact_level_hit_rate_mean", 0.0) - baseline_summary.get("exact_level_hit_rate_mean", 0.0), 6),
+        "within_one_level_hit_rate": round(candidate_summary.get("within_one_level_hit_rate_mean", 0.0) - baseline_summary.get("within_one_level_hit_rate_mean", 0.0), 6),
+        "score_band_mae": round(candidate_summary.get("score_band_mae_mean", 0.0) - baseline_summary.get("score_band_mae_mean", 0.0), 6),
+        "mean_rank_displacement": round(candidate_summary.get("mean_rank_displacement_mean", 0.0) - baseline_summary.get("mean_rank_displacement_mean", 0.0), 6),
+        "kendall_tau": round(candidate_summary.get("kendall_tau_mean", 0.0) - baseline_summary.get("kendall_tau_mean", 0.0), 6),
+        "pairwise_order_agreement": round(candidate_summary.get("pairwise_order_agreement_mean", 0.0) - baseline_summary.get("pairwise_order_agreement_mean", 0.0), 6),
+        "model_usage_ratio": round(candidate_summary.get("model_usage_ratio_mean", 0.0) - baseline_summary.get("model_usage_ratio_mean", 0.0), 6),
+        "cost_usd": round(candidate_summary.get("cost_usd_mean", 0.0) - baseline_summary.get("cost_usd_mean", 0.0), 6),
+        "latency_seconds": round(candidate_summary.get("latency_seconds_mean", 0.0) - baseline_summary.get("latency_seconds_mean", 0.0), 6),
+        "mean_student_level_variance": round(
+            candidate_summary.get("stability", {}).get("mean_student_level_variance", 0.0)
+            - baseline_summary.get("stability", {}).get("mean_student_level_variance", 0.0),
+            6,
+        ),
+        "mean_student_rank_variance": round(
+            candidate_summary.get("stability", {}).get("mean_student_rank_variance", 0.0)
+            - baseline_summary.get("stability", {}).get("mean_student_rank_variance", 0.0),
+            6,
+        ),
+        "mean_student_score_variance": round(
+            candidate_summary.get("stability", {}).get("mean_student_score_variance", 0.0)
+            - baseline_summary.get("stability", {}).get("mean_student_score_variance", 0.0),
+            6,
+        ),
+    }
+    return {"present": True, "candidate_mode": candidate_mode, "baseline_mode": baseline_mode, "delta": delta}
+
+
 def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     failures = []
     if thresholds.get("require_publish_gate_ok", True) and not metrics["publish_gate_ok"]:
@@ -147,6 +200,33 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("consistency_swap_rate_above_threshold")
     if metrics["consistency_low_confidence_rate"] > float(thresholds.get("max_consistency_low_confidence_rate", 1.0)):
         failures.append("consistency_low_confidence_rate_above_threshold")
+    if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_comparison_present"]:
+        failures.append("benchmark_report_missing")
+    if metrics["benchmark_comparison_present"]:
+        if metrics["benchmark_exact_level_hit_rate_delta"] < float(thresholds.get("benchmark_min_exact_level_hit_rate_delta", -999.0)):
+            failures.append("benchmark_exact_level_hit_rate_delta_below_threshold")
+        if metrics["benchmark_within_one_level_hit_rate_delta"] < float(thresholds.get("benchmark_min_within_one_level_hit_rate_delta", -999.0)):
+            failures.append("benchmark_within_one_level_hit_rate_delta_below_threshold")
+        if metrics["benchmark_score_band_mae_delta"] > float(thresholds.get("benchmark_max_score_band_mae_delta", 999.0)):
+            failures.append("benchmark_score_band_mae_delta_above_threshold")
+        if metrics["benchmark_mean_rank_displacement_delta"] > float(thresholds.get("benchmark_max_mean_rank_displacement_delta", 999.0)):
+            failures.append("benchmark_mean_rank_displacement_delta_above_threshold")
+        if metrics["benchmark_kendall_tau_delta"] < float(thresholds.get("benchmark_min_kendall_tau_delta", -999.0)):
+            failures.append("benchmark_kendall_tau_delta_below_threshold")
+        if metrics["benchmark_pairwise_order_agreement_delta"] < float(thresholds.get("benchmark_min_pairwise_order_agreement_delta", -999.0)):
+            failures.append("benchmark_pairwise_order_delta_below_threshold")
+        if metrics["benchmark_model_usage_ratio_delta"] < float(thresholds.get("benchmark_min_model_usage_ratio_delta", -999.0)):
+            failures.append("benchmark_model_usage_delta_below_threshold")
+        if metrics["benchmark_cost_usd_delta"] > float(thresholds.get("benchmark_max_cost_usd_delta", 999999.0)):
+            failures.append("benchmark_cost_delta_above_threshold")
+        if metrics["benchmark_latency_seconds_delta"] > float(thresholds.get("benchmark_max_latency_seconds_delta", 999999.0)):
+            failures.append("benchmark_latency_delta_above_threshold")
+        if metrics["benchmark_mean_student_level_variance_delta"] > float(thresholds.get("benchmark_max_mean_student_level_variance_delta", 999999.0)):
+            failures.append("benchmark_student_level_variance_delta_above_threshold")
+        if metrics["benchmark_mean_student_rank_variance_delta"] > float(thresholds.get("benchmark_max_mean_student_rank_variance_delta", 999999.0)):
+            failures.append("benchmark_student_rank_variance_delta_above_threshold")
+        if metrics["benchmark_mean_student_score_variance_delta"] > float(thresholds.get("benchmark_max_mean_student_score_variance_delta", 999999.0)):
+            failures.append("benchmark_student_score_variance_delta_above_threshold")
     return failures
 
 
@@ -155,6 +235,7 @@ def main() -> int:
     parser.add_argument("--publish-gate", default="outputs/publish_gate.json", help="Publish gate JSON")
     parser.add_argument("--pass1", default="assessments/pass1_individual", help="Pass1 assessor directory")
     parser.add_argument("--consistency", default="outputs/consistency_checks.json", help="Consistency checks JSON")
+    parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
     parser.add_argument("--gate-config", default="config/sota_gate.json", help="SOTA thresholds JSON")
     parser.add_argument("--output", default="outputs/sota_gate.json", help="SOTA result JSON")
     args = parser.parse_args()
@@ -166,6 +247,11 @@ def main() -> int:
     rows = load_pass1_rows(Path(args.pass1))
     consistency_total, swap_rate, low_conf_rate = consistency_metrics(Path(args.consistency))
     mean_sd, p95_sd = assessor_spread(rows)
+    benchmark = benchmark_comparison_metrics(
+        Path(args.benchmark_report),
+        str(thresholds.get("benchmark_candidate_mode", "")).strip(),
+        str(thresholds.get("benchmark_baseline_mode", "")).strip(),
+    )
 
     metrics = {
         "publish_gate_present": bool(publish),
@@ -181,6 +267,21 @@ def main() -> int:
         "consistency_checks": consistency_total,
         "consistency_swap_rate": swap_rate,
         "consistency_low_confidence_rate": low_conf_rate,
+        "benchmark_comparison_present": bool(benchmark.get("present", False)),
+        "benchmark_candidate_mode": benchmark.get("candidate_mode", ""),
+        "benchmark_baseline_mode": benchmark.get("baseline_mode", ""),
+        "benchmark_exact_level_hit_rate_delta": float(benchmark.get("delta", {}).get("exact_level_hit_rate", 0.0) or 0.0),
+        "benchmark_within_one_level_hit_rate_delta": float(benchmark.get("delta", {}).get("within_one_level_hit_rate", 0.0) or 0.0),
+        "benchmark_score_band_mae_delta": float(benchmark.get("delta", {}).get("score_band_mae", 0.0) or 0.0),
+        "benchmark_mean_rank_displacement_delta": float(benchmark.get("delta", {}).get("mean_rank_displacement", 0.0) or 0.0),
+        "benchmark_kendall_tau_delta": float(benchmark.get("delta", {}).get("kendall_tau", 0.0) or 0.0),
+        "benchmark_pairwise_order_agreement_delta": float(benchmark.get("delta", {}).get("pairwise_order_agreement", 0.0) or 0.0),
+        "benchmark_model_usage_ratio_delta": float(benchmark.get("delta", {}).get("model_usage_ratio", 0.0) or 0.0),
+        "benchmark_cost_usd_delta": float(benchmark.get("delta", {}).get("cost_usd", 0.0) or 0.0),
+        "benchmark_latency_seconds_delta": float(benchmark.get("delta", {}).get("latency_seconds", 0.0) or 0.0),
+        "benchmark_mean_student_level_variance_delta": float(benchmark.get("delta", {}).get("mean_student_level_variance", 0.0) or 0.0),
+        "benchmark_mean_student_rank_variance_delta": float(benchmark.get("delta", {}).get("mean_student_rank_variance", 0.0) or 0.0),
+        "benchmark_mean_student_score_variance_delta": float(benchmark.get("delta", {}).get("mean_student_score_variance", 0.0) or 0.0),
     }
     failures = evaluate(metrics, thresholds)
     payload = {
@@ -208,6 +309,14 @@ def main() -> int:
         "consistency_checks",
         "consistency_swap_rate",
         "consistency_low_confidence_rate",
+        "benchmark_candidate_mode",
+        "benchmark_baseline_mode",
+        "benchmark_exact_level_hit_rate_delta",
+        "benchmark_within_one_level_hit_rate_delta",
+        "benchmark_score_band_mae_delta",
+        "benchmark_mean_rank_displacement_delta",
+        "benchmark_kendall_tau_delta",
+        "benchmark_pairwise_order_agreement_delta",
     ):
         lines.append(f"- **{key}**: {metrics.get(key)}")
     if failures:

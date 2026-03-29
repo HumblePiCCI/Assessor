@@ -45,8 +45,8 @@ def _write_inputs(tmp_path):
     (tmp_path / "processing/submission_metadata.json").write_text(
         json.dumps(
             [
-                {"student_id": "s001", "display_name": "anchor_level_4"},
-                {"student_id": "s002", "display_name": "anchor_level_3"},
+                {"student_id": "s001", "display_name": "anchor_level_4", "gold_level": "4"},
+                {"student_id": "s002", "display_name": "anchor_level_3", "gold_level": "3"},
             ]
         ),
         encoding="utf-8",
@@ -118,9 +118,60 @@ def _write_inputs(tmp_path):
     )
 
 
+def _write_benchmark_report(path, exact=0.9, within_one=1.0, score_band_mae=1.5, rank_disp=0.5, kendall=0.9, pairwise=0.95):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "modes": {
+            "main": {
+                "summary": {
+                    "runs_attempted": 3,
+                    "runs_successful": 3,
+                    "exact_level_hit_rate_mean": exact,
+                    "within_one_level_hit_rate_mean": within_one,
+                    "score_band_mae_mean": score_band_mae,
+                    "mean_rank_displacement_mean": rank_disp,
+                    "kendall_tau_mean": kendall,
+                    "pairwise_order_agreement_mean": pairwise,
+                    "model_usage_ratio_mean": 0.9,
+                    "cost_usd_mean": 1.5,
+                    "latency_seconds_mean": 12.0,
+                    "stability": {
+                        "mean_student_level_variance": 0.02,
+                        "mean_student_rank_variance": 0.03,
+                        "mean_student_score_variance": 0.5,
+                    },
+                }
+            },
+            "fallback": {
+                "summary": {
+                    "runs_attempted": 3,
+                    "runs_successful": 3,
+                    "exact_level_hit_rate_mean": 0.7,
+                    "within_one_level_hit_rate_mean": 0.8,
+                    "score_band_mae_mean": 4.0,
+                    "mean_rank_displacement_mean": 1.5,
+                    "kendall_tau_mean": 0.6,
+                    "pairwise_order_agreement_mean": 0.8,
+                    "model_usage_ratio_mean": 0.0,
+                    "cost_usd_mean": 0.0,
+                    "latency_seconds_mean": 3.0,
+                    "stability": {
+                        "mean_student_level_variance": 0.1,
+                        "mean_student_rank_variance": 0.2,
+                        "mean_student_score_variance": 2.0,
+                    },
+                }
+            },
+        },
+        "comparison": {"candidate_mode": "main", "baseline_mode": "fallback"},
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_publish_gate_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_inputs(tmp_path)
+    _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
     (tmp_path / "config/accuracy_gate.json").write_text(
         json.dumps(
             {
@@ -137,6 +188,21 @@ def test_publish_gate_success(tmp_path, monkeypatch):
                     "calibration_min_pairwise_order": 0.8,
                     "calibration_min_repeat_level_consistency": 0.8,
                     "calibration_max_abs_bias": 6.0,
+                    "require_benchmark_report": True,
+                    "benchmark_mode": "main",
+                    "benchmark_min_runs_successful": 3,
+                    "benchmark_min_exact_level_hit_rate": 0.8,
+                    "benchmark_min_within_one_level_hit_rate": 0.95,
+                    "benchmark_max_score_band_mae": 2.0,
+                    "benchmark_max_mean_rank_displacement": 1.0,
+                    "benchmark_min_kendall_tau": 0.8,
+                    "benchmark_min_pairwise_order_agreement": 0.9,
+                    "benchmark_min_model_usage_ratio": 0.8,
+                    "benchmark_max_cost_usd": 2.0,
+                    "benchmark_max_latency_seconds": 20.0,
+                    "benchmark_max_mean_student_level_variance": 0.05,
+                    "benchmark_max_mean_student_rank_variance": 0.05,
+                    "benchmark_max_mean_student_score_variance": 1.0,
                 }
             }
         ),
@@ -155,6 +221,7 @@ def test_publish_gate_success(tmp_path, monkeypatch):
     assert pg.main() == 0
     result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
     assert result["ok"] is True
+    assert result["metrics"]["benchmark_mode"] == "main"
 
 
 def test_publish_gate_failure(tmp_path, monkeypatch):
@@ -180,6 +247,7 @@ def test_publish_gate_failure(tmp_path, monkeypatch):
                     "calibration_min_pairwise_order": 0.95,
                     "calibration_min_repeat_level_consistency": 0.95,
                     "calibration_max_abs_bias": 0.1,
+                    "require_benchmark_report": True,
                 }
             }
         ),
@@ -199,6 +267,7 @@ def test_publish_gate_failure(tmp_path, monkeypatch):
     result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
     assert result["ok"] is False
     assert "model_coverage_below_threshold" in result["failures"]
+    assert "benchmark_report_missing" in result["failures"]
 
 
 def test_publish_gate_helper_branches(tmp_path):
@@ -207,16 +276,19 @@ def test_publish_gate_helper_branches(tmp_path):
     bad.write_text("{broken", encoding="utf-8")
     assert pg.load_json(bad) == {}
     assert pg.load_rows(tmp_path / "missing.csv") == []
-    assert pg.parse_expected_level("x_level_4_plus") == "4+"
-    assert pg.parse_expected_level("plain") is None
     assert pg.boundary_count([], [], 1.0) == 0
     rows = [{"rubric_after_penalty_percent": "oops"}, {"rubric_after_penalty_percent": "79.5"}]
     bands = [{"min": 50}, {"min": 60}, {"min": 70}, {"min": 80}]
     assert pg.boundary_count(rows, bands, 1.0) == 1
     assert pg.anchor_metrics([], []) == (0, 0.0, 0.0)
+    assert pg.anchor_metrics([{"student_id": "s1", "adjusted_level": "4"}], [{"student_id": "s1", "gold_level": "4"}]) == (1, 1.0, 0.0)
     assert pg.scope_from_metadata(tmp_path / "missing-class.json") == ""
     cal = pg.calibration_metrics(tmp_path / "missing-cal.json", ["A"], "grade_8_10|argumentative")
     assert "assessor_A" in cal["missing_assessors"]
+    _write_benchmark_report(tmp_path / "benchmark.json")
+    bench = pg.benchmark_metrics(tmp_path / "benchmark.json", "main")
+    assert bench["present"] is True
+    assert bench["exact_level_hit_rate"] == 0.9
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():
@@ -234,6 +306,20 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "cal_pairwise_order": 0.1,
         "cal_repeat_consistency": 0.1,
         "cal_abs_bias": 20.0,
+        "benchmark_report_present": True,
+        "benchmark_runs_successful": 0,
+        "benchmark_exact_level_hit_rate": 0.1,
+        "benchmark_within_one_level_hit_rate": 0.2,
+        "benchmark_score_band_mae": 20.0,
+        "benchmark_mean_rank_displacement": 10.0,
+        "benchmark_kendall_tau": 0.1,
+        "benchmark_pairwise_order_agreement": 0.1,
+        "benchmark_model_usage_ratio": 0.1,
+        "benchmark_cost_usd": 50.0,
+        "benchmark_latency_seconds": 500.0,
+        "benchmark_mean_student_level_variance": 10.0,
+        "benchmark_mean_student_rank_variance": 10.0,
+        "benchmark_mean_student_score_variance": 10.0,
     }
     thresholds = {
         "min_rank_kendall_w": 0.7,
@@ -247,6 +333,20 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "calibration_min_pairwise_order": 0.8,
         "calibration_min_repeat_level_consistency": 0.8,
         "calibration_max_abs_bias": 6.0,
+        "require_benchmark_report": True,
+        "benchmark_min_runs_successful": 1,
+        "benchmark_min_exact_level_hit_rate": 0.8,
+        "benchmark_min_within_one_level_hit_rate": 0.95,
+        "benchmark_max_score_band_mae": 2.0,
+        "benchmark_max_mean_rank_displacement": 1.0,
+        "benchmark_min_kendall_tau": 0.8,
+        "benchmark_min_pairwise_order_agreement": 0.9,
+        "benchmark_min_model_usage_ratio": 0.8,
+        "benchmark_max_cost_usd": 5.0,
+        "benchmark_max_latency_seconds": 30.0,
+        "benchmark_max_mean_student_level_variance": 0.5,
+        "benchmark_max_mean_student_rank_variance": 0.5,
+        "benchmark_max_mean_student_score_variance": 1.0,
     }
     failures = pg.evaluate(metrics, thresholds)
     assert "kendall_w_below_threshold" in failures
@@ -261,6 +361,19 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "calibration_pairwise_below_threshold" in failures
     assert "calibration_repeat_consistency_below_threshold" in failures
     assert "calibration_abs_bias_above_threshold" in failures
+    assert "benchmark_runs_successful_below_threshold" in failures
+    assert "benchmark_exact_level_hit_rate_below_threshold" in failures
+    assert "benchmark_within_one_level_hit_rate_below_threshold" in failures
+    assert "benchmark_score_band_mae_above_threshold" in failures
+    assert "benchmark_mean_rank_displacement_above_threshold" in failures
+    assert "benchmark_kendall_tau_below_threshold" in failures
+    assert "benchmark_pairwise_order_below_threshold" in failures
+    assert "benchmark_model_usage_below_threshold" in failures
+    assert "benchmark_cost_above_threshold" in failures
+    assert "benchmark_latency_above_threshold" in failures
+    assert "benchmark_student_level_variance_above_threshold" in failures
+    assert "benchmark_student_rank_variance_above_threshold" in failures
+    assert "benchmark_student_score_variance_above_threshold" in failures
 
 
 def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):

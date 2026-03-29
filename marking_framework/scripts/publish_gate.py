@@ -2,7 +2,6 @@
 import argparse
 import csv
 import json
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,14 +29,6 @@ def load_rows(path: Path) -> list[dict]:
         return []
     with path.open("r", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
-
-
-def parse_expected_level(name: str) -> str | None:
-    token = str(name).lower()
-    if "level_4_plus" in token or "level4_plus" in token or "level4plus" in token or "level_4+" in token:
-        return "4+"
-    match = re.search(r"level[_\s-]?(1|2|3|4)(?:\b|_)", token)
-    return match.group(1) if match else None
 
 
 def boundary_count(rows: list[dict], level_bands: list[dict], margin: float) -> int:
@@ -75,7 +66,7 @@ def anchor_metrics(rows: list[dict], metadata: list[dict]) -> tuple[int, float, 
     anchors = []
     for entry in metadata:
         sid = entry.get("student_id")
-        expected = parse_expected_level(entry.get("display_name", ""))
+        expected = str(entry.get("gold_level") or entry.get("expected_level") or entry.get("anchor_level") or "").strip()
         if sid in by_id and expected:
             anchors.append((sid, expected, by_id[sid].get("adjusted_level", "")))
     if not anchors:
@@ -126,6 +117,50 @@ def calibration_metrics(calibration_bias: Path, assessor_ids: list[str], scope: 
     return means
 
 
+def benchmark_mode_summary(report: dict, preferred_mode: str = "") -> tuple[str, dict]:
+    modes = report.get("modes", {}) if isinstance(report, dict) else {}
+    if not isinstance(modes, dict) or not modes:
+        return "", {}
+    ordered_labels = []
+    if preferred_mode:
+        ordered_labels.append(preferred_mode)
+    comparison = report.get("comparison", {}) if isinstance(report, dict) else {}
+    candidate_mode = str(comparison.get("candidate_mode", "")).strip()
+    if candidate_mode and candidate_mode not in ordered_labels:
+        ordered_labels.append(candidate_mode)
+    ordered_labels.extend(label for label in sorted(modes) if label not in ordered_labels)
+    for label in ordered_labels:
+        payload = modes.get(label, {})
+        summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+        if isinstance(summary, dict) and summary:
+            return label, summary
+    return "", {}
+
+
+def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
+    report = load_json(report_path)
+    label, summary = benchmark_mode_summary(report, preferred_mode)
+    stability = summary.get("stability", {}) if isinstance(summary, dict) else {}
+    return {
+        "present": bool(summary),
+        "mode": label,
+        "runs_successful": int(summary.get("runs_successful", 0) or 0) if summary else 0,
+        "runs_attempted": int(summary.get("runs_attempted", 0) or 0) if summary else 0,
+        "exact_level_hit_rate": float(summary.get("exact_level_hit_rate_mean", 0.0) or 0.0) if summary else 0.0,
+        "within_one_level_hit_rate": float(summary.get("within_one_level_hit_rate_mean", 0.0) or 0.0) if summary else 0.0,
+        "score_band_mae": float(summary.get("score_band_mae_mean", 0.0) or 0.0) if summary else 0.0,
+        "mean_rank_displacement": float(summary.get("mean_rank_displacement_mean", 0.0) or 0.0) if summary else 0.0,
+        "kendall_tau": float(summary.get("kendall_tau_mean", 0.0) or 0.0) if summary else 0.0,
+        "pairwise_order_agreement": float(summary.get("pairwise_order_agreement_mean", 0.0) or 0.0) if summary else 0.0,
+        "model_usage_ratio": float(summary.get("model_usage_ratio_mean", 0.0) or 0.0) if summary else 0.0,
+        "cost_usd": float(summary.get("cost_usd_mean", 0.0) or 0.0) if summary else 0.0,
+        "latency_seconds": float(summary.get("latency_seconds_mean", 0.0) or 0.0) if summary else 0.0,
+        "mean_student_level_variance": float(stability.get("mean_student_level_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
+        "mean_student_rank_variance": float(stability.get("mean_student_rank_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
+        "mean_student_score_variance": float(stability.get("mean_student_score_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0,
+    }
+
+
 def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     failures = []
     if metrics["irr_rank_kendalls_w"] < float(thresholds.get("min_rank_kendall_w", 0.0)):
@@ -154,6 +189,35 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("calibration_repeat_consistency_below_threshold")
     if metrics["cal_abs_bias"] > float(thresholds.get("calibration_max_abs_bias", 999.0)):
         failures.append("calibration_abs_bias_above_threshold")
+    if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_report_present"]:
+        failures.append("benchmark_report_missing")
+    if metrics["benchmark_report_present"]:
+        if metrics["benchmark_runs_successful"] < int(thresholds.get("benchmark_min_runs_successful", 0)):
+            failures.append("benchmark_runs_successful_below_threshold")
+        if metrics["benchmark_exact_level_hit_rate"] < float(thresholds.get("benchmark_min_exact_level_hit_rate", 0.0)):
+            failures.append("benchmark_exact_level_hit_rate_below_threshold")
+        if metrics["benchmark_within_one_level_hit_rate"] < float(thresholds.get("benchmark_min_within_one_level_hit_rate", 0.0)):
+            failures.append("benchmark_within_one_level_hit_rate_below_threshold")
+        if metrics["benchmark_score_band_mae"] > float(thresholds.get("benchmark_max_score_band_mae", 999.0)):
+            failures.append("benchmark_score_band_mae_above_threshold")
+        if metrics["benchmark_mean_rank_displacement"] > float(thresholds.get("benchmark_max_mean_rank_displacement", 999.0)):
+            failures.append("benchmark_mean_rank_displacement_above_threshold")
+        if metrics["benchmark_kendall_tau"] < float(thresholds.get("benchmark_min_kendall_tau", 0.0)):
+            failures.append("benchmark_kendall_tau_below_threshold")
+        if metrics["benchmark_pairwise_order_agreement"] < float(thresholds.get("benchmark_min_pairwise_order_agreement", 0.0)):
+            failures.append("benchmark_pairwise_order_below_threshold")
+        if metrics["benchmark_model_usage_ratio"] < float(thresholds.get("benchmark_min_model_usage_ratio", 0.0)):
+            failures.append("benchmark_model_usage_below_threshold")
+        if metrics["benchmark_cost_usd"] > float(thresholds.get("benchmark_max_cost_usd", 999999.0)):
+            failures.append("benchmark_cost_above_threshold")
+        if metrics["benchmark_latency_seconds"] > float(thresholds.get("benchmark_max_latency_seconds", 999999.0)):
+            failures.append("benchmark_latency_above_threshold")
+        if metrics["benchmark_mean_student_level_variance"] > float(thresholds.get("benchmark_max_mean_student_level_variance", 999999.0)):
+            failures.append("benchmark_student_level_variance_above_threshold")
+        if metrics["benchmark_mean_student_rank_variance"] > float(thresholds.get("benchmark_max_mean_student_rank_variance", 999999.0)):
+            failures.append("benchmark_student_rank_variance_above_threshold")
+        if metrics["benchmark_mean_student_score_variance"] > float(thresholds.get("benchmark_max_mean_student_score_variance", 999999.0)):
+            failures.append("benchmark_student_score_variance_above_threshold")
     return failures
 
 
@@ -167,6 +231,7 @@ def main() -> int:
     parser.add_argument("--marking-config", default="config/marking_config.json", help="Marking config")
     parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Accuracy gate JSON config")
+    parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--output", default="outputs/publish_gate.json", help="Gate result JSON")
     args = parser.parse_args()
@@ -184,6 +249,7 @@ def main() -> int:
     scope = scope_from_metadata(Path(args.class_metadata))
     assessor_ids = [item.strip() for item in args.assessors.split(",") if item.strip()]
     cal = calibration_metrics(Path(args.calibration_bias), assessor_ids, scope)
+    benchmark = benchmark_metrics(Path(args.benchmark_report), str(thresholds.get("benchmark_mode", "")).strip())
 
     anchors_total, anchor_hit_rate, anchor_level_mae = anchor_metrics(rows, metadata)
     metrics = {
@@ -202,6 +268,22 @@ def main() -> int:
         "cal_pairwise_order": float(cal.get("pairwise_order_agreement", 0.0) or 0.0),
         "cal_repeat_consistency": float(cal.get("repeat_level_consistency", 0.0) or 0.0),
         "cal_abs_bias": float(cal.get("abs_bias", 0.0) or 0.0),
+        "benchmark_report_present": bool(benchmark.get("present", False)),
+        "benchmark_mode": benchmark.get("mode", ""),
+        "benchmark_runs_successful": int(benchmark.get("runs_successful", 0) or 0),
+        "benchmark_runs_attempted": int(benchmark.get("runs_attempted", 0) or 0),
+        "benchmark_exact_level_hit_rate": float(benchmark.get("exact_level_hit_rate", 0.0) or 0.0),
+        "benchmark_within_one_level_hit_rate": float(benchmark.get("within_one_level_hit_rate", 0.0) or 0.0),
+        "benchmark_score_band_mae": float(benchmark.get("score_band_mae", 0.0) or 0.0),
+        "benchmark_mean_rank_displacement": float(benchmark.get("mean_rank_displacement", 0.0) or 0.0),
+        "benchmark_kendall_tau": float(benchmark.get("kendall_tau", 0.0) or 0.0),
+        "benchmark_pairwise_order_agreement": float(benchmark.get("pairwise_order_agreement", 0.0) or 0.0),
+        "benchmark_model_usage_ratio": float(benchmark.get("model_usage_ratio", 0.0) or 0.0),
+        "benchmark_cost_usd": float(benchmark.get("cost_usd", 0.0) or 0.0),
+        "benchmark_latency_seconds": float(benchmark.get("latency_seconds", 0.0) or 0.0),
+        "benchmark_mean_student_level_variance": float(benchmark.get("mean_student_level_variance", 0.0) or 0.0),
+        "benchmark_mean_student_rank_variance": float(benchmark.get("mean_student_rank_variance", 0.0) or 0.0),
+        "benchmark_mean_student_score_variance": float(benchmark.get("mean_student_score_variance", 0.0) or 0.0),
     }
     failures = evaluate(metrics, thresholds)
     payload = {
@@ -221,6 +303,11 @@ def main() -> int:
         "irr_rank_kendalls_w", "irr_mean_rubric_sd", "model_coverage", "boundary_count",
         "anchor_hit_rate", "anchor_level_mae", "cal_level_hit_rate", "cal_mae",
         "cal_pairwise_order", "cal_repeat_consistency", "cal_abs_bias",
+        "benchmark_mode", "benchmark_runs_successful", "benchmark_exact_level_hit_rate",
+        "benchmark_within_one_level_hit_rate", "benchmark_score_band_mae",
+        "benchmark_mean_rank_displacement", "benchmark_kendall_tau",
+        "benchmark_pairwise_order_agreement", "benchmark_model_usage_ratio",
+        "benchmark_cost_usd", "benchmark_latency_seconds",
     ):
         lines.append(f"- **{key}**: {metrics.get(key)}")
     if failures:
