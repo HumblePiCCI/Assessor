@@ -10,9 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     from scripts.aggregate_helpers import get_level_bands
     from scripts.assessor_context import grade_band_for_level, load_class_metadata, normalize_genre, select_grade_level
+    from scripts.calibration_contract import build_run_scope, calibration_manifest_path
+    from scripts.calibration_gate import inspect_calibration_profile
 except ImportError:  # pragma: no cover
     from aggregate_helpers import get_level_bands  # pragma: no cover
     from assessor_context import grade_band_for_level, load_class_metadata, normalize_genre, select_grade_level  # pragma: no cover
+    from calibration_contract import build_run_scope, calibration_manifest_path  # pragma: no cover
+    from calibration_gate import inspect_calibration_profile  # pragma: no cover
 
 
 def load_json(path: Path) -> dict:
@@ -89,20 +93,70 @@ def scope_from_metadata(class_metadata: Path) -> str:
     return f"{band}|{genre}"
 
 
-def calibration_metrics(calibration_bias: Path, assessor_ids: list[str], scope: str) -> dict:
-    payload = load_json(calibration_bias)
-    assessors = payload.get("assessors", {}) if isinstance(payload, dict) else {}
+def run_scope_from_inputs(class_metadata: Path, routing: Path, rubric: Path) -> dict:
+    metadata = load_class_metadata(class_metadata)
+    routing_payload = load_json(routing)
+    return build_run_scope(metadata=metadata, routing=routing_payload, rubric_path=rubric)
+
+
+def calibration_metrics(
+    calibration_bias: Path,
+    calibration_manifest: Path | list[str],
+    assessor_ids: list[str] | dict | str | None = None,
+    run_scope: dict | None = None,
+    *,
+    routing_path: Path | None = None,
+    rubric_path: Path | None = None,
+    calibration_set_path: Path | None = None,
+    exemplars_path: Path | None = None,
+) -> dict:
+    if isinstance(calibration_manifest, list):
+        legacy_scope = assessor_ids
+        assessor_ids = calibration_manifest
+        calibration_manifest = calibration_manifest_path(calibration_bias)
+        resolved_scope = legacy_scope if isinstance(legacy_scope, dict) else {"key": str(legacy_scope or "")}
+    else:
+        resolved_scope = run_scope or {}
+    if isinstance(assessor_ids, str):
+        resolved_scope = {"key": assessor_ids}
+        assessor_ids = []
+    if isinstance(assessor_ids, dict) and not resolved_scope:
+        resolved_scope = assessor_ids
+        assessor_ids = []
+    assessor_ids = list(assessor_ids or [])
+    calibration_manifest = Path(calibration_manifest)
+    routing_path = routing_path or Path("config/llm_routing.json")
+    rubric_path = rubric_path or Path("inputs/rubric.md")
+    calibration_set_path = calibration_set_path or Path("config/calibration_set.json")
+    exemplars_path = exemplars_path or Path("inputs/exemplars")
+    report = inspect_calibration_profile(
+        bias_path=calibration_bias,
+        assessor_ids=assessor_ids,
+        run_scope=resolved_scope,
+        context={
+            "manifest_path": calibration_manifest,
+            "routing_path": routing_path,
+            "rubric_path": rubric_path,
+            "calibration_set_path": calibration_set_path,
+            "exemplars_path": exemplars_path,
+        },
+    )
+    assessors = load_json(calibration_bias).get("assessors", {})
     values = {
         "level_hit_rate": [],
         "mae": [],
         "pairwise_order_agreement": [],
         "repeat_level_consistency": [],
         "abs_bias": [],
+        "boundary_mae": [],
+        "rank_stability_sd": [],
+        "boundary_pairwise_disagreement": [],
+        "boundary_pairwise_disagreement_concentration": [],
     }
     missing = []
     for raw in assessor_ids:
         aid = raw if raw.startswith("assessor_") else f"assessor_{raw}"
-        scope_data = assessors.get(aid, {}).get("scopes", {}).get(scope, {})
+        scope_data = assessors.get(aid, {}).get("scopes", {}).get(resolved_scope.get("key", ""), {})
         if not scope_data:
             missing.append(aid)
             continue
@@ -111,9 +165,26 @@ def calibration_metrics(calibration_bias: Path, assessor_ids: list[str], scope: 
         values["pairwise_order_agreement"].append(float(scope_data.get("pairwise_order_agreement", 0.0) or 0.0))
         values["repeat_level_consistency"].append(float(scope_data.get("repeat_level_consistency", 0.0) or 0.0))
         values["abs_bias"].append(abs(float(scope_data.get("bias", 0.0) or 0.0)))
+        values["boundary_mae"].append(float(scope_data.get("boundary_mae", 0.0) or 0.0))
+        values["rank_stability_sd"].append(float(scope_data.get("rank_stability_sd", 0.0) or 0.0))
+        values["boundary_pairwise_disagreement"].append(float(scope_data.get("boundary_pairwise_disagreement", 0.0) or 0.0))
+        values["boundary_pairwise_disagreement_concentration"].append(
+            float(scope_data.get("boundary_pairwise_disagreement_concentration", 0.0) or 0.0)
+        )
     means = {k: (sum(v) / len(v) if v else 0.0) for k, v in values.items()}
     means["missing_assessors"] = missing
-    means["scope"] = scope
+    means["scope"] = resolved_scope.get("key", "")
+    means["scope_match"] = bool(report.get("scope_match", False))
+    means["scope_mismatch_fields"] = list(report.get("scope_mismatch_fields", []))
+    means["manifest_present"] = bool(report.get("manifest_present", False))
+    means["manifest_integrity_ok"] = bool(report.get("manifest_integrity_ok", True))
+    means["synthetic"] = bool(report.get("synthetic", False))
+    means["profile_type"] = str(report.get("profile_type", "") or "")
+    means["generated_at"] = str(report.get("generated_at", "") or "")
+    means["generated_age_hours"] = report.get("generated_age_hours")
+    means["freshness_window_hours"] = report.get("freshness_window_hours")
+    means["drift_failures"] = list(report.get("drift_failures", []))
+    means["coverage_scope"] = report.get("coverage_scope", {})
     return means
 
 
@@ -163,6 +234,8 @@ def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
 
 def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     failures = []
+    release_mode = str(thresholds.get("release_mode", "development") or "development").strip().lower()
+    strict_release = release_mode in {"candidate", "release", "production"}
     if metrics["irr_rank_kendalls_w"] < float(thresholds.get("min_rank_kendall_w", 0.0)):
         failures.append("kendall_w_below_threshold")
     if metrics["irr_mean_rubric_sd"] > float(thresholds.get("max_mean_rubric_sd", 999.0)):
@@ -179,6 +252,28 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("anchor_mae_above_threshold")
     if metrics["cal_missing_assessors"]:
         failures.append("calibration_scope_missing")
+    if thresholds.get("calibration_require_manifest", strict_release) and not metrics.get("calibration_manifest_present", False):
+        failures.append("calibration_manifest_missing")
+    if thresholds.get("calibration_require_manifest_integrity", strict_release) and not metrics.get("calibration_manifest_integrity_ok", True):
+        failures.append("calibration_manifest_integrity_failed")
+    if thresholds.get("calibration_require_scope_match", strict_release) and not metrics.get("calibration_scope_match", False):
+        failures.append("calibration_scope_mismatch")
+    if thresholds.get("calibration_require_production_profile", strict_release) and metrics.get("calibration_synthetic", False):
+        failures.append("calibration_synthetic_not_allowed")
+    if metrics.get("calibration_drift_failures", []) and thresholds.get("calibration_fail_on_drift", strict_release):
+        drift_map = {
+            "stale": "calibration_stale",
+            "routing_profile_mismatch": "calibration_routing_profile_mismatch",
+            "rubric_hash_mismatch": "calibration_rubric_mismatch",
+            "exemplar_set_mismatch": "calibration_exemplar_set_mismatch",
+            "scope_mismatch": "calibration_scope_mismatch",
+            "manifest_integrity": "calibration_manifest_integrity_failed",
+            "synthetic": "calibration_synthetic_not_allowed",
+        }
+        for item in metrics.get("calibration_drift_failures", []):
+            code = drift_map.get(str(item), f"calibration_drift_{item}")
+            if code not in failures:
+                failures.append(code)
     if metrics["cal_level_hit_rate"] < float(thresholds.get("calibration_min_level_hit_rate", 0.0)):
         failures.append("calibration_level_hit_rate_below_threshold")
     if metrics["cal_mae"] > float(thresholds.get("calibration_max_mae", 999.0)):
@@ -189,6 +284,16 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("calibration_repeat_consistency_below_threshold")
     if metrics["cal_abs_bias"] > float(thresholds.get("calibration_max_abs_bias", 999.0)):
         failures.append("calibration_abs_bias_above_threshold")
+    if metrics.get("cal_boundary_mae", 0.0) > float(thresholds.get("calibration_max_boundary_mae", 999.0)):
+        failures.append("calibration_boundary_mae_above_threshold")
+    if metrics.get("cal_rank_stability_sd", 0.0) > float(thresholds.get("calibration_max_rank_stability_sd", 999.0)):
+        failures.append("calibration_rank_stability_sd_above_threshold")
+    if metrics.get("cal_boundary_pairwise_disagreement", 0.0) > float(thresholds.get("calibration_max_boundary_pairwise_disagreement", 999.0)):
+        failures.append("calibration_boundary_pairwise_disagreement_above_threshold")
+    if metrics.get("cal_boundary_pairwise_disagreement_concentration", 0.0) > float(
+        thresholds.get("calibration_max_boundary_pairwise_disagreement_concentration", 999.0)
+    ):
+        failures.append("calibration_boundary_pairwise_concentration_above_threshold")
     if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_report_present"]:
         failures.append("benchmark_report_missing")
     if metrics["benchmark_report_present"]:
@@ -228,8 +333,13 @@ def main() -> int:
     parser.add_argument("--irr", default="outputs/irr_metrics.json", help="IRR metrics JSON")
     parser.add_argument("--pass1", default="assessments/pass1_individual", help="Pass1 output directory")
     parser.add_argument("--calibration-bias", default="outputs/calibration_bias.json", help="Calibration bias JSON")
+    parser.add_argument("--calibration-manifest", default="outputs/calibration_manifest.json", help="Calibration manifest JSON")
     parser.add_argument("--marking-config", default="config/marking_config.json", help="Marking config")
     parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
+    parser.add_argument("--routing", default="config/llm_routing.json", help="Routing config")
+    parser.add_argument("--rubric", default="inputs/rubric.md", help="Rubric file")
+    parser.add_argument("--calibration-set", default="config/calibration_set.json", help="Calibration set JSON")
+    parser.add_argument("--exemplars", default="inputs/exemplars", help="Exemplars root")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Accuracy gate JSON config")
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
@@ -246,9 +356,22 @@ def main() -> int:
     thresholds = gate_cfg.get("thresholds", gate_cfg)
     bands = get_level_bands(marking_cfg)
     boundary_margin = float(thresholds.get("boundary_margin_percent", 1.0) or 1.0)
-    scope = scope_from_metadata(Path(args.class_metadata))
+    run_scope = run_scope_from_inputs(Path(args.class_metadata), Path(args.routing), Path(args.rubric))
+    scope = run_scope.get("key", "")
     assessor_ids = [item.strip() for item in args.assessors.split(",") if item.strip()]
-    cal = calibration_metrics(Path(args.calibration_bias), assessor_ids, scope)
+    cal_manifest_path = Path(args.calibration_manifest)
+    if not cal_manifest_path.exists():
+        cal_manifest_path = calibration_manifest_path(Path(args.calibration_bias))
+    cal = calibration_metrics(
+        Path(args.calibration_bias),
+        cal_manifest_path,
+        assessor_ids,
+        run_scope,
+        routing_path=Path(args.routing),
+        rubric_path=Path(args.rubric),
+        calibration_set_path=Path(args.calibration_set),
+        exemplars_path=Path(args.exemplars),
+    )
     benchmark = benchmark_metrics(Path(args.benchmark_report), str(thresholds.get("benchmark_mode", "")).strip())
 
     anchors_total, anchor_hit_rate, anchor_level_mae = anchor_metrics(rows, metadata)
@@ -262,12 +385,29 @@ def main() -> int:
         "anchor_hit_rate": anchor_hit_rate,
         "anchor_level_mae": anchor_level_mae,
         "scope": scope,
+        "scope_descriptor": run_scope,
         "cal_missing_assessors": cal.get("missing_assessors", []),
+        "calibration_manifest_present": bool(cal.get("manifest_present", False)),
+        "calibration_manifest_integrity_ok": bool(cal.get("manifest_integrity_ok", True)),
+        "calibration_synthetic": bool(cal.get("synthetic", False)),
+        "calibration_scope_match": bool(cal.get("scope_match", False)),
+        "calibration_scope_mismatch_fields": cal.get("scope_mismatch_fields", []),
+        "calibration_profile_type": cal.get("profile_type", ""),
+        "calibration_generated_at": cal.get("generated_at", ""),
+        "calibration_generated_age_hours": cal.get("generated_age_hours"),
+        "calibration_freshness_window_hours": cal.get("freshness_window_hours"),
+        "calibration_drift_failures": cal.get("drift_failures", []),
         "cal_level_hit_rate": float(cal.get("level_hit_rate", 0.0) or 0.0),
         "cal_mae": float(cal.get("mae", 0.0) or 0.0),
         "cal_pairwise_order": float(cal.get("pairwise_order_agreement", 0.0) or 0.0),
         "cal_repeat_consistency": float(cal.get("repeat_level_consistency", 0.0) or 0.0),
         "cal_abs_bias": float(cal.get("abs_bias", 0.0) or 0.0),
+        "cal_boundary_mae": float(cal.get("boundary_mae", 0.0) or 0.0),
+        "cal_rank_stability_sd": float(cal.get("rank_stability_sd", 0.0) or 0.0),
+        "cal_boundary_pairwise_disagreement": float(cal.get("boundary_pairwise_disagreement", 0.0) or 0.0),
+        "cal_boundary_pairwise_disagreement_concentration": float(
+            cal.get("boundary_pairwise_disagreement_concentration", 0.0) or 0.0
+        ),
         "benchmark_report_present": bool(benchmark.get("present", False)),
         "benchmark_mode": benchmark.get("mode", ""),
         "benchmark_runs_successful": int(benchmark.get("runs_successful", 0) or 0),
@@ -302,7 +442,9 @@ def main() -> int:
     for key in (
         "irr_rank_kendalls_w", "irr_mean_rubric_sd", "model_coverage", "boundary_count",
         "anchor_hit_rate", "anchor_level_mae", "cal_level_hit_rate", "cal_mae",
-        "cal_pairwise_order", "cal_repeat_consistency", "cal_abs_bias",
+        "cal_pairwise_order", "cal_repeat_consistency", "cal_abs_bias", "cal_boundary_mae",
+        "cal_rank_stability_sd", "calibration_manifest_present", "calibration_scope_match",
+        "calibration_synthetic",
         "benchmark_mode", "benchmark_runs_successful", "benchmark_exact_level_hit_rate",
         "benchmark_within_one_level_hit_rate", "benchmark_score_band_mae",
         "benchmark_mean_rank_displacement", "benchmark_kendall_tau",

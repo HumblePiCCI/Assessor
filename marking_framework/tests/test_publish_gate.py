@@ -2,6 +2,7 @@ import csv
 import json
 
 import scripts.publish_gate as pg
+from scripts.calibration_contract import file_sha256
 
 
 def _write_csv(path, rows):
@@ -386,3 +387,63 @@ def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):
     assert code in (0, 2)
     result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
     assert result["metrics"]["scope"] == ""
+
+
+def test_publish_gate_release_mode_rejects_synthetic_calibration(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_inputs(tmp_path)
+    (tmp_path / "outputs/calibration_manifest.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-03-01T00:00:00+00:00",
+                "synthetic": True,
+                "scope_coverage": [
+                    {
+                        "key": "grade_8_10|argumentative",
+                        "grade_band": "grade_8_10",
+                        "genre": "argumentative",
+                        "rubric_family": "rubric_unknown",
+                        "model_family": "",
+                    }
+                ],
+                "artifact_hashes": {"calibration_bias_sha256": file_sha256(tmp_path / "outputs/calibration_bias.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config/accuracy_gate.json").write_text(
+        json.dumps(
+            {
+                "thresholds": {
+                    "release_mode": "candidate",
+                    "min_rank_kendall_w": 0.0,
+                    "max_mean_rubric_sd": 999.0,
+                    "min_model_coverage": 0.0,
+                    "max_boundary_students": 99,
+                    "calibration_min_level_hit_rate": 0.0,
+                    "calibration_max_mae": 999.0,
+                    "calibration_min_pairwise_order": 0.0,
+                    "calibration_min_repeat_level_consistency": 0.0,
+                    "calibration_max_abs_bias": 999.0,
+                    "require_benchmark_report": False,
+                    "calibration_require_manifest": True,
+                    "calibration_require_production_profile": True,
+                    "calibration_require_scope_match": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "publish_gate",
+            "--gate-config",
+            "config/accuracy_gate.json",
+            "--output",
+            "outputs/publish_gate.json",
+        ],
+    )
+    assert pg.main() == 2
+    result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
+    assert "calibration_synthetic_not_allowed" in result["failures"]

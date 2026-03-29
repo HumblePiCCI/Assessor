@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.calibration_contract import build_run_scope, calibration_manifest_path, load_json as load_contract_json
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
 from server.step_runner import (
     artifact_watch_roots,
@@ -41,6 +42,8 @@ GATE_CONFIG_PATHS = (
 PROMPTS_DIR = "prompts"
 EXEMPLARS_DIR = "inputs/exemplars"
 CALIBRATION_ARTIFACT = "outputs/calibration_bias.json"
+CALIBRATION_MANIFEST_ARTIFACT = f"outputs/{calibration_manifest_path(Path(CALIBRATION_ARTIFACT)).name}"
+CLASS_METADATA_ARTIFACT = "inputs/class_metadata.json"
 RUNTIME_SOURCE_PATHS = (
     "server/bootstrap.py",
     "server/pipeline_queue.py",
@@ -140,16 +143,18 @@ def _file_manifest(path: Path, label: str) -> dict:
     }
 
 
-def _collect_input_files(rubric_path: Path, outline_path: Path, submissions_dir: Path) -> dict:
+def _collect_input_files(root: Path, rubric_path: Path, outline_path: Path, submissions_dir: Path) -> dict:
     submissions = []
     if submissions_dir.exists():
         for item in sorted(submissions_dir.glob("*")):
             if not item.is_file():
                 continue
             submissions.append({"path": f"inputs/submissions/{item.name}", "sha256": _file_sha256(item)})
+    class_metadata_path = root / CLASS_METADATA_ARTIFACT
     return {
         "rubric": _file_manifest(rubric_path, f"inputs/{rubric_path.name}"),
         "outline": _file_manifest(outline_path, f"inputs/{outline_path.name}"),
+        "class_metadata": _file_manifest(class_metadata_path, CLASS_METADATA_ARTIFACT),
         "submissions": submissions,
     }
 
@@ -211,6 +216,7 @@ def _routing_summary(path: Path) -> dict:
     return {
         "path": "config/llm_routing.json",
         "sha256": _file_sha256(path),
+        "profile_hash": _file_sha256(path),
         "mode": payload.get("mode"),
         "task_models": task_models,
         "task_settings": task_settings,
@@ -287,6 +293,9 @@ def build_pipeline_manifest(
                 "required": bool(step.get("required", True)),
             }
         )
+    routing_payload = load_contract_json(root / "config" / "llm_routing.json")
+    class_metadata_payload = load_contract_json(root / CLASS_METADATA_ARTIFACT)
+    run_scope = build_run_scope(metadata=class_metadata_payload, routing=routing_payload, rubric_path=rubric_path)
     manifest = {
         "manifest_version": PIPELINE_MANIFEST_VERSION,
         "execution_engine": "pipeline_queue",
@@ -299,12 +308,14 @@ def build_pipeline_manifest(
             "hash": pipeline_step_graph_hash(),
             "steps": step_graph_steps,
         },
-        "uploaded_inputs": _collect_input_files(rubric_path, outline_path, submissions_dir),
+        "uploaded_inputs": _collect_input_files(root, rubric_path, outline_path, submissions_dir),
+        "run_scope": run_scope,
         "prompt_hashes": prompt_manifest,
         "config_hashes": config_hashes,
         "extra_hashes": extra_hashes,
         "exemplar_tree": exemplar_manifest,
         "calibration_artifact": _file_manifest(root / CALIBRATION_ARTIFACT, CALIBRATION_ARTIFACT),
+        "calibration_manifest": _file_manifest(root / CALIBRATION_MANIFEST_ARTIFACT, CALIBRATION_MANIFEST_ARTIFACT),
         "model_routing": _routing_summary(root / "config" / "llm_routing.json"),
         "grade_profile": _file_manifest(root / "config" / "grade_level_profiles.json", "config/grade_level_profiles.json"),
         "gate_threshold_hashes": gate_hashes,
@@ -592,6 +603,14 @@ class PipelineQueue:
             if item.is_file():
                 shutil.copy2(item, subs_dir / item.name)
 
+    def _copy_context_input(self, rel_path: str, dst_root: Path):
+        src = self.root / rel_path
+        if not src.exists() or not src.is_file():
+            return
+        dst = dst_root / rel_path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
     def _stage_workspace(self, job_id: str, job_dir: Path, manifest: dict, rubric_path: Path, outline_path: Path, submissions_dir: Path):
         workspace_dir = self._workspace_dir(job_id)
         if workspace_dir.exists():
@@ -603,11 +622,18 @@ class PipelineQueue:
         self.reset_workspace(workspace_dir)
         self._copy_upload_inputs(rubric_path, outline_path, submissions_dir, workspace_dir / "inputs")
         self._copy_upload_inputs(rubric_path, outline_path, submissions_dir, job_dir / "inputs")
+        self._copy_context_input(CLASS_METADATA_ARTIFACT, workspace_dir)
+        self._copy_context_input(CLASS_METADATA_ARTIFACT, job_dir)
         calibration_src = self.root / CALIBRATION_ARTIFACT
         if calibration_src.exists():
             calibration_dst = workspace_dir / CALIBRATION_ARTIFACT
             calibration_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(calibration_src, calibration_dst)
+        calibration_manifest_src = self.root / CALIBRATION_MANIFEST_ARTIFACT
+        if calibration_manifest_src.exists():
+            calibration_manifest_dst = workspace_dir / CALIBRATION_MANIFEST_ARTIFACT
+            calibration_manifest_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(calibration_manifest_src, calibration_manifest_dst)
         self._write_json(self._manifest_path(job_dir), manifest)
         self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
 
@@ -715,6 +741,15 @@ class PipelineQueue:
             baseline = self._artifact_snapshot(workspace_dir)
             metadata = ensure_class_metadata(workspace_dir / "inputs")
             bias_path = ensure_bootstrap_calibration(workspace_dir, metadata)
+            manifest["run_scope"] = build_run_scope(
+                metadata=metadata,
+                routing=load_contract_json(workspace_dir / "config" / "llm_routing.json"),
+                rubric_path=workspace_dir / "inputs" / "rubric.md",
+            )
+            manifest["calibration_artifact"] = _file_manifest(workspace_dir / CALIBRATION_ARTIFACT, CALIBRATION_ARTIFACT)
+            manifest["calibration_manifest"] = _file_manifest(workspace_dir / CALIBRATION_MANIFEST_ARTIFACT, CALIBRATION_MANIFEST_ARTIFACT)
+            self._write_json(self._manifest_path(job_dir), manifest)
+            self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
             after_bootstrap = self._artifact_snapshot(workspace_dir)
             bootstrap_artifacts = self._artifact_changes(baseline, after_bootstrap)
             self._append_event(job_dir, "bootstrap", "Bootstrap calibration ready", event="complete")

@@ -19,6 +19,7 @@ from scripts.llm_assessors_core import (
 )
 from scripts.fallback_assessor import deterministic_pass1_item
 from scripts.calibration_gate import calibration_gate_error
+from scripts.calibration_contract import build_run_scope
 from scripts.pass1_guard import stabilize_pass1_item
 from scripts.pass1_reconcile import guard_parameters, reconcile_pass1_item, strip_internal_fields
 from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ranking, pass2_text_format
@@ -111,8 +112,18 @@ def main() -> int:
     else:
         reqs = {}
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
-    scope = f"{grade_band_for_level(grade_level)}|{genre}" if grade_band_for_level(grade_level) and genre else ""
-    gate_error = calibration_gate_error(routing, assessors, scope)
+    run_scope = build_run_scope(metadata=metadata | {"grade_level": grade_level, "genre": genre}, routing=routing, rubric_path=rubric_path)
+    gate_error = calibration_gate_error(
+        routing,
+        assessors,
+        run_scope,
+        context={
+            "routing_path": args.routing,
+            "rubric_path": rubric_path,
+            "calibration_set_path": "config/calibration_set.json",
+            "exemplars_path": args.exemplars,
+        },
+    )
     if gate_error:
         print(gate_error)
         return 1

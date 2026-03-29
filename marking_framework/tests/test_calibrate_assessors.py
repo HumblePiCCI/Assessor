@@ -58,10 +58,15 @@ def test_calibrate_assessors(tmp_path, monkeypatch):
     ])
     assert calib.main() == 0
     data = json.loads(out_path.read_text(encoding="utf-8"))
+    manifest = json.loads((out_path.parent / "calibration_manifest.json").read_text(encoding="utf-8"))
     assert "assessor_A" in data["assessors"]
     assert "global" in data["assessors"]["assessor_A"]
     assert "scopes" in data["assessors"]["assessor_A"]
     assert "stability_sd" in data["assessors"]["assessor_A"]["global"]
+    assert "boundary_mae" in data["assessors"]["assessor_A"]["global"]
+    assert "rank_stability_sd" in data["assessors"]["assessor_A"]["global"]
+    assert manifest["synthetic"] is False
+    assert manifest["model_version"] == "gpt-5.2"
     assert call_count["n"] == 2
 
 

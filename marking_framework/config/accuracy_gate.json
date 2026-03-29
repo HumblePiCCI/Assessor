@@ -1,5 +1,6 @@
 {
   "thresholds": {
+    "release_mode": "development",
     "min_rank_kendall_w": 0.65,
     "max_mean_rubric_sd": 2.5,
     "min_model_coverage": 0.95,
@@ -12,6 +13,15 @@
     "calibration_min_pairwise_order": 0.55,
     "calibration_min_repeat_level_consistency": 0.8,
     "calibration_max_abs_bias": 6.0,
+    "calibration_max_boundary_mae": 999.0,
+    "calibration_max_rank_stability_sd": 999.0,
+    "calibration_max_boundary_pairwise_disagreement": 999.0,
+    "calibration_max_boundary_pairwise_disagreement_concentration": 999.0,
+    "calibration_require_manifest": false,
+    "calibration_require_manifest_integrity": false,
+    "calibration_require_scope_match": false,
+    "calibration_require_production_profile": false,
+    "calibration_fail_on_drift": false,
     "require_benchmark_report": false,
     "benchmark_mode": "main",
     "benchmark_min_runs_successful": 0,

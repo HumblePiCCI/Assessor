@@ -18,6 +18,16 @@ try:
         normalize_genre,
     )
     from scripts.assessor_utils import load_file_text, resolve_input_path
+    from scripts.calibration_contract import (
+        build_calibration_manifest,
+        build_run_scope,
+        build_scope_coverage_entry,
+        calibration_manifest_path,
+        file_sha256,
+        is_boundary_score,
+        routing_profile_hash_from_payload,
+        source_exemplar_set_hash,
+    )
     from scripts.levels import normalize_level
     from scripts.openai_client import extract_text, responses_create
     from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria, total_points
@@ -26,6 +36,16 @@ try:
 except ImportError:  # pragma: no cover - Running as script
     from assessor_context import build_grade_context, format_exemplars, load_exemplars, load_grade_profiles, normalize_genre  # pragma: no cover
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
+    from calibration_contract import (  # pragma: no cover
+        build_calibration_manifest,
+        build_run_scope,
+        build_scope_coverage_entry,
+        calibration_manifest_path,
+        file_sha256,
+        is_boundary_score,
+        routing_profile_hash_from_payload,
+        source_exemplar_set_hash,
+    )
     from levels import normalize_level  # pragma: no cover
     from openai_client import extract_text, responses_create  # pragma: no cover
     from rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria, total_points  # pragma: no cover
@@ -154,6 +174,51 @@ def _stdev(values: list[float]) -> float:
     return math.sqrt(sum((v - m) ** 2 for v in values) / len(values))
 
 
+def _repeat_rank_metrics(entries: list[dict]) -> tuple[float, float, float]:
+    grouped = {}
+    repeats = set()
+    for item in entries:
+        grouped.setdefault(item["name"], []).append(item)
+        repeats.add(int(item.get("repeat_index", 0) or 0))
+    if len(grouped) <= 1 or len(repeats) <= 1:
+        return 0.0, 0.0, 0.0
+    target_scores = {name: float(items[0]["target"]) for name, items in grouped.items()}
+    boundary_names = {
+        name
+        for name, items in grouped.items()
+        if bool(items[0].get("boundary_flag")) or is_boundary_score(items[0].get("target"))
+    }
+    rank_positions = {name: [] for name in grouped}
+    boundary_disagreements = 0
+    boundary_pairs = 0
+    total_disagreements = 0
+    ordered_names = sorted(grouped)
+    for repeat_index in sorted(repeats):
+        observed = {}
+        for name, items in grouped.items():
+            repeat_items = [entry for entry in items if int(entry.get("repeat_index", 0) or 0) == repeat_index]
+            series = repeat_items or items
+            observed[name] = sum(float(entry["observed"]) for entry in series) / len(series)
+        run_order = sorted(ordered_names, key=lambda name: (-observed[name], name.lower()))
+        positions = {name: idx for idx, name in enumerate(run_order)}
+        for name in ordered_names:
+            rank_positions[name].append(float(positions[name]))
+        for i, first in enumerate(ordered_names):
+            for second in ordered_names[i + 1:]:
+                tgt_sign = math.copysign(1, target_scores[first] - target_scores[second]) if target_scores[first] != target_scores[second] else 0
+                obs_sign = math.copysign(1, observed[first] - observed[second]) if observed[first] != observed[second] else 0
+                disagree = int(tgt_sign != obs_sign)
+                near_boundary = first in boundary_names or second in boundary_names
+                if near_boundary:
+                    boundary_pairs += 1
+                    boundary_disagreements += disagree
+                total_disagreements += disagree
+    rank_stability_sd = sum(_stdev(values) for values in rank_positions.values()) / len(rank_positions)
+    boundary_disagreement_rate = (boundary_disagreements / boundary_pairs) if boundary_pairs else 0.0
+    boundary_disagreement_concentration = (boundary_disagreements / total_disagreements) if total_disagreements else 0.0
+    return round(rank_stability_sd, 4), round(boundary_disagreement_rate, 4), round(boundary_disagreement_concentration, 4)
+
+
 def _collapse_entries(entries: list[dict]) -> tuple[list[dict], float, float]:
     grouped = {}
     for item in entries:
@@ -171,6 +236,7 @@ def _collapse_entries(entries: list[dict]) -> tuple[list[dict], float, float]:
                 "observed": sum(observed) / len(observed),
                 "target": target,
                 "target_level": level,
+                "boundary_flag": bool(items[0].get("boundary_flag")) or is_boundary_score(target),
             }
         )
         stability.append(_stdev(observed))
@@ -186,7 +252,20 @@ def _collapse_entries(entries: list[dict]) -> tuple[list[dict], float, float]:
 
 def compute_profile(entries: list[dict]) -> dict:
     if not entries:
-        return {"samples": 0, "observations": 0, "slope": 1.0, "intercept": 0.0, "bias": 0.0, "mae": 0.0, "weight": 1.0}
+        return {
+            "samples": 0,
+            "observations": 0,
+            "slope": 1.0,
+            "intercept": 0.0,
+            "bias": 0.0,
+            "mae": 0.0,
+            "boundary_mae": 0.0,
+            "boundary_samples": 0,
+            "weight": 1.0,
+            "rank_stability_sd": 0.0,
+            "boundary_pairwise_disagreement": 0.0,
+            "boundary_pairwise_disagreement_concentration": 0.0,
+        }
     collapsed, stability_sd, repeat_consistency = _collapse_entries(entries)
     pairs = [(float(e["observed"]), float(e["target"])) for e in collapsed]
     names = [e["name"] for e in collapsed]
@@ -195,12 +274,18 @@ def compute_profile(entries: list[dict]) -> dict:
     target = [float(e["target"]) for e in collapsed]
     raw_mae = sum(abs(o - t) for o, t in pairs) / len(pairs)
     corr_mae = sum(abs(c - t) for c, t in zip(corrected, target)) / len(collapsed)
+    boundary_errors = [
+        abs(c - t)
+        for c, t, item in zip(corrected, target, collapsed)
+        if bool(item.get("boundary_flag"))
+    ]
     level_hits = 0
     for value, item in zip(corrected, collapsed):
         if normalize_level(value) == normalize_level(item["target_level"]):
             level_hits += 1
     level_hit_rate = level_hits / len(collapsed)
     pos_hit, pairwise = _order_metrics(corrected, target, names)
+    rank_stability_sd, boundary_pairwise_disagreement, boundary_pairwise_concentration = _repeat_rank_metrics(entries)
     reliability = (
         (0.40 * level_hit_rate)
         + (0.30 * pairwise)
@@ -219,10 +304,15 @@ def compute_profile(entries: list[dict]) -> dict:
         "bias": round(sum(o - t for o, t in pairs) / len(pairs), 4),
         "mae_raw": round(raw_mae, 4),
         "mae": round(corr_mae if points else affine["mae"], 4),
+        "boundary_mae": round((sum(boundary_errors) / len(boundary_errors)) if boundary_errors else 0.0, 4),
+        "boundary_samples": len(boundary_errors),
         "level_hit_rate": round(level_hit_rate, 4),
         "order_position_hit_rate": pos_hit,
         "pairwise_order_agreement": pairwise,
         "stability_sd": round(stability_sd, 4),
+        "rank_stability_sd": rank_stability_sd,
+        "boundary_pairwise_disagreement": boundary_pairwise_disagreement,
+        "boundary_pairwise_disagreement_concentration": boundary_pairwise_concentration,
         "repeat_level_consistency": round(repeat_consistency, 4),
         "weight": round(weight, 4),
     }
@@ -255,7 +345,7 @@ def build_records(args, calibration, routing, rubric, outline, profiles, criteri
             prompt = build_pass1_prompt(
                 assessor, rubric, outline, essay_path.stem, essay, grade_context, exemplar_block, criteria_block, reqs
             )
-            for _ in range(repeats):
+            for repeat_index in range(repeats):
                 try:
                     response = responses_create(
                         model=pass1_model,
@@ -277,6 +367,8 @@ def build_records(args, calibration, routing, rubric, outline, profiles, criteri
                         "name": f"{band}/{genre_norm}/{sample['file']}",
                         "target": float(sample["target_pct"]),
                         "target_level": sample.get("target_level") or normalize_level(sample.get("target_pct")),
+                        "boundary_flag": bool(sample.get("boundary_flag")) or is_boundary_score(sample.get("target_pct")),
+                        "repeat_index": repeat_index,
                         "observed": float(observed),
                     }
                 )
@@ -294,6 +386,8 @@ def main() -> int:
     parser.add_argument("--grade-profiles", default="config/grade_level_profiles.json", help="Grade profiles")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
     parser.add_argument("--output", default="outputs/calibration_bias.json", help="Bias output")
+    parser.add_argument("--manifest-output", default="", help="Optional calibration manifest output")
+    parser.add_argument("--freshness-window-hours", type=float, default=0.0, help="Override calibration freshness window")
     parser.add_argument("--repeats", type=int, default=1, help="Calibration repeats per exemplar/assessor")
     args = parser.parse_args()
 
@@ -311,6 +405,11 @@ def main() -> int:
     points_possible = total_points(criteria_cfg) if criteria_cfg else None
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
     routing = load_json(Path(args.routing))
+    run_scope_template = build_run_scope(
+        metadata={"grade_level": BAND_GRADE_LEVEL.get("grade_8_10", 9), "genre": "literary_analysis"},
+        routing=routing,
+        rubric_path=Path(args.rubric),
+    )
 
     records = build_records(args, calibration, routing, rubric, outline, profiles, criteria_cfg, points_possible, assessors)
     grouped = {}
@@ -336,13 +435,47 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "method": calibration.get("bias_correction", {}).get("method", "piecewise_monotonic"),
+        "synthetic": False,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "scope_template": "<grade_band>|<genre>",
         "assessors": assessors_payload,
         "summary": summary,
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    manifest_path = Path(args.manifest_output) if args.manifest_output else calibration_manifest_path(out_path)
+    rubric_path = resolve_input_path(Path(args.rubric), "rubric")
+    scope_coverage = []
+    for scope_name, sample_count in sorted(summary["scope_coverage"].items()):
+        scope_parts = scope_name.split("|", 1)
+        coverage_scope = build_scope_coverage_entry(
+            {
+                **run_scope_template,
+                "key": scope_name,
+                "grade_band": scope_parts[0] if scope_parts else "",
+                "genre": scope_parts[1] if len(scope_parts) > 1 else "",
+            },
+            samples=int(sample_count or 0),
+            observations=int(sample_count or 0),
+            synthetic=False,
+        )
+        scope_coverage.append(coverage_scope)
+    manifest = build_calibration_manifest(
+        profile_type=str(payload["method"]),
+        synthetic=False,
+        scope_coverage=scope_coverage,
+        routing=routing,
+        routing_profile_hash=routing_profile_hash_from_payload(routing),
+        model_version=routing["tasks"]["pass1_assessor"]["model"],
+        rubric_path=rubric_path,
+        rubric_hash=file_sha256(rubric_path),
+        source_exemplar_set_hash_value=source_exemplar_set_hash(Path(args.calibration), Path(args.exemplars)),
+        freshness_window_hours=args.freshness_window_hours or float((routing.get("calibration_gate", {}) or {}).get("max_age_hours", 168) or 168),
+        generated_at=str(payload["generated_at"]),
+        artifact_hashes={"calibration_bias_sha256": file_sha256(out_path)},
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Calibration saved to {out_path}")
+    print(f"Calibration manifest saved to {manifest_path}")
     return 0
 
 

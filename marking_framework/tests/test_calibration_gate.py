@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from scripts.calibration_gate import _parse_iso8601, calibration_gate_error
+from scripts.calibration_gate import _parse_iso8601, calibration_gate_error, inspect_calibration_profile
 
 
 def test_calibration_gate_disabled():
@@ -275,3 +275,67 @@ def test_calibration_gate_quality_thresholds_success(tmp_path, monkeypatch):
         }
     }
     assert calibration_gate_error(routing, ["A"], "grade_8_10|literary_analysis") is None
+
+
+def test_calibration_gate_manifest_integrity_and_scope_mismatch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = Path("outputs")
+    out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "assessors": {
+            "assessor_A": {
+                "scopes": {
+                    "grade_8_10|literary_analysis": {
+                        "samples": 12,
+                        "weight": 0.9,
+                    }
+                }
+            }
+        },
+    }
+    bias_path = out / "calibration_bias.json"
+    bias_path.write_text(json.dumps(payload), encoding="utf-8")
+    (out / "calibration_manifest.json").write_text(
+        json.dumps(
+            {
+                "generated_at": payload["generated_at"],
+                "synthetic": False,
+                "scope_coverage": [
+                    {
+                        "key": "grade_8_10|literary_analysis",
+                        "grade_band": "grade_8_10",
+                        "genre": "literary_analysis",
+                        "rubric_family": "rubric_real",
+                        "model_family": "gpt-5.2",
+                    }
+                ],
+                "artifact_hashes": {"calibration_bias_sha256": "wrong"},
+                "routing_profile_hash": "abc",
+                "rubric_hash": "rubric",
+                "source_exemplar_set_hash": "ex",
+            }
+        ),
+        encoding="utf-8",
+    )
+    routing = {
+        "calibration_gate": {
+            "enabled": True,
+            "require_manifest": True,
+        }
+    }
+    err = calibration_gate_error(routing, ["A"], {"key": "grade_8_10|literary_analysis"})
+    assert "artifact hash" in err
+
+    report = inspect_calibration_profile(
+        bias_path,
+        ["A"],
+        {
+            "key": "grade_8_10|literary_analysis",
+            "grade_band": "grade_8_10",
+            "genre": "literary_analysis",
+            "rubric_family": "rubric_other",
+            "model_family": "gpt-5.2",
+        },
+    )
+    assert "rubric_family" in report["scope_mismatch_fields"]

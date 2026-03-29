@@ -24,9 +24,13 @@ def test_ensure_bootstrap_calibration_writes_once(tmp_path):
     path = ensure_bootstrap_calibration(root, metadata, assessors=["A", "B"])
     assert path.exists()
     payload = json.loads(path.read_text(encoding="utf-8"))
+    manifest = json.loads((root / "outputs" / "calibration_manifest.json").read_text(encoding="utf-8"))
     scope = "grade_6_7|literary_analysis"
     assert payload["assessors"]["assessor_A"]["scopes"][scope]["samples"] == 10
     assert payload["summary"]["scope_coverage"][scope] == 20
+    assert payload["synthetic"] is True
+    assert manifest["synthetic"] is True
+    assert manifest["scope_coverage"][0]["key"] == scope
     marker = path.read_text(encoding="utf-8")
     same = ensure_bootstrap_calibration(root, metadata, assessors=["A", "B"])
     assert same == path

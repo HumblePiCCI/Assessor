@@ -644,7 +644,7 @@ Use this section as the running status checkpoint.
 - Phase 1: completed
 - Phase 2: completed
 - Phase 3: completed
-- Phase 4: not started
+- Phase 4: completed
 - Phase 5: not started
 - Phase 6: not started
 
@@ -657,14 +657,14 @@ Use this section as the running status checkpoint.
 - queued execution now owns the authoritative production path with manifest-keyed artifacts
 - benchmark datasets now use explicit human gold and benchmark reports are gate-readable
 - pairwise consistency checks now feed a deterministic global reranker with explicit final-order artifacts
+- calibration now ships with a versioned manifest, explicit run scope, synthetic bootstrap marking, and drift-aware release checks
 
 ### Outstanding Architectural Risks
 
 - cache key coverage is still incomplete
-- calibration bootstrap can still overstate readiness
-- release gates still treat bootstrap calibration as potentially production-valid
+- release-gate policy still needs Phase 5 profile tightening across dev, candidate, and release modes
 - teacher adjudications are not yet feeding back into calibration and eval refresh
 
 ### Next Decision Point
 
-Start Phase 4 by versioning calibration artifacts, marking bootstrap profiles as synthetic, and rejecting synthetic-only calibration for release scope.
+Start Phase 5 by promoting publish and SOTA gates into explicit release contracts with stronger benchmark, reproducibility, and stability thresholds.

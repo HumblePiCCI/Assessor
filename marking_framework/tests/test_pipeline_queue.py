@@ -134,6 +134,8 @@ def test_snapshot_hash_changes_with_inputs_and_manifest_round_trip(tmp_path):
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest_hash(loaded) == manifest["manifest_hash"]
+    assert manifest["run_scope"]["grade_band"] == "grade_6_7"
+    assert "calibration_manifest" in manifest
     (subs / "s1.txt").write_text("essay changed", encoding="utf-8")
     changed = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
     assert changed != first
