@@ -1,246 +1,86 @@
-import json
-import types
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from server.app import app
 import server.app as appmod
 
 
-def test_pipeline_run_codex_success(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    appmod.API_KEY_OVERRIDE["value"] = None
-    subs_dir = tmp_path / "inputs" / "submissions"
-    subs_dir.mkdir(parents=True)
-    (subs_dir / "old.txt").write_text("old", encoding="utf-8")
-    (tmp_path / "processing").mkdir()
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    called = {}
+class FakeQueue:
+    def __init__(self):
+        self.calls = []
 
-    def fake_run(cmd, env=None, cwd=None, **kwargs):
-        called["cmd"] = cmd
-        called["env"] = env
-        called["cwd"] = cwd
-        out_dir = Path(cwd) / "outputs"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "dashboard_data.json").write_text("{}", encoding="utf-8")
-        return types.SimpleNamespace(returncode=0)
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths):
+        payload = {
+            "mode": mode,
+            "rubric": rubric_path.name,
+            "outline": outline_path.name,
+            "subs": sorted(item.name for item in submissions_dir.glob("*") if item.is_file()),
+            "extra": [str(path) for path in extra_paths],
+        }
+        self.calls.append(payload)
+        return {
+            "job_id": f"job-{len(self.calls)}",
+            "status": "queued",
+            "cached": False,
+            "snapshot_hash": "abc123",
+            "manifest_hash": "abc123",
+        }
 
-    monkeypatch.setattr(appmod, "run", fake_run)
-    client = TestClient(app)
-    files = [
+
+def _files():
+    return [
         ("rubric", ("rubric.md", b"rubric")),
         ("outline", ("outline.md", b"outline")),
         ("submissions", ("s1.txt", b"text1")),
         ("submissions", ("s2.txt", b"text2")),
     ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 200
-    assert (tmp_path / "inputs" / "rubric.md").exists()
-    assert (tmp_path / "inputs" / "assignment_outline.md").exists()
-    assert (tmp_path / "inputs" / "submissions" / "s1.txt").exists()
-    assert called["env"]["LLM_MODE"] == "codex_local"
-    assert called["cwd"] == str(tmp_path)
 
 
-def test_pipeline_run_openai_success(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+def test_pipeline_run_and_v2_delegate_to_same_queue(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
     appmod.API_KEY_OVERRIDE["value"] = "test-key"
-    called = {}
-
-    def fake_run(cmd, env=None, cwd=None, **kwargs):
-        called["env"] = env
-        out_dir = Path(cwd) / "outputs"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "dashboard_data.json").write_text("{}", encoding="utf-8")
-        return types.SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(appmod, "run", fake_run)
     client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "openai"}, files=files)
-    assert resp.status_code == 200
-    assert called["env"]["OPENAI_API_KEY"] == "test-key"
+    direct = client.post("/pipeline/run", data={"mode": "openai"}, files=_files())
+    queued = client.post("/pipeline/v2/run", data={"mode": "openai"}, files=_files())
+    assert direct.status_code == 200
+    assert queued.status_code == 200
+    assert direct.json()["status"] == "queued"
+    assert queued.json()["status"] == "queued"
+    assert direct.json()["snapshot_hash"] == queued.json()["snapshot_hash"]
+    assert len(fake.calls) == 2
+    assert fake.calls[0] == fake.calls[1]
+    assert fake.calls[0]["mode"] == "openai"
+    assert fake.calls[0]["subs"] == ["s1.txt", "s2.txt"]
+    assert any(path.endswith("config/accuracy_gate.json") for path in fake.calls[0]["extra"])
+    assert any(path.endswith("config/sota_gate.json") for path in fake.calls[0]["extra"])
 
 
-def test_pipeline_run_openai_missing_key(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_pipeline_run_openai_validation(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
     appmod.API_KEY_OVERRIDE["value"] = None
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "openai"}, files=files)
+    no_subs = client.post("/pipeline/run", data={"mode": "openai"}, files=[("rubric", ("r.md", b"r")), ("outline", ("o.md", b"o"))])
+    assert no_subs.status_code == 400
+    bad_mode = client.post("/pipeline/run", data={"mode": "bad"}, files=_files())
+    assert bad_mode.status_code == 400
+    no_key = client.post("/pipeline/run", data={"mode": "openai"}, files=_files())
+    assert no_key.status_code == 400
+    assert fake.calls == []
+
+
+def test_pipeline_run_codex_validation(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    client = TestClient(app)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": False, "connected": False})
+    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
     assert resp.status_code == 400
-
-
-def test_pipeline_run_codex_not_connected(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 400
-
-
-def test_pipeline_run_codex_not_available(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: None)
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 400
-
-
-def test_pipeline_run_invalid_mode(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "weird"}, files=files)
-    assert resp.status_code == 400
-
-
-def test_pipeline_run_missing_submissions(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 400
-
-
-def test_pipeline_run_failure(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    monkeypatch.setattr(appmod, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stderr="boom", stdout=""))
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 500
-
-
-def test_pipeline_run_failure_stdout_only(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    monkeypatch.setattr(appmod, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stderr="", stdout="boom"))
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 500
-
-
-def test_pipeline_run_missing_dashboard(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-    monkeypatch.setattr(appmod, "run", lambda *a, **k: types.SimpleNamespace(returncode=0, stderr="", stdout=""))
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 500
-
-
-def test_pipeline_run_unhandled_exception_logs(tmp_path, monkeypatch):
-    server_dir = tmp_path / "server"
-    server_dir.mkdir()
-    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
-
-    def boom(_root):
-        raise RuntimeError("kaboom")
-
-    monkeypatch.setattr(appmod, "reset_workspace", boom)
-    client = TestClient(app)
-    files = [
-        ("rubric", ("rubric.md", b"rubric")),
-        ("outline", ("outline.md", b"outline")),
-        ("submissions", ("s1.txt", b"text1")),
-    ]
-    resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=files)
-    assert resp.status_code == 500
-    log_path = tmp_path / "logs" / "pipeline.log"
-    assert log_path.exists()
-    content = log_path.read_text(encoding="utf-8")
-    assert "ERROR unhandled" in content
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False})
+    resp2 = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
+    assert resp2.status_code == 400
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
+    ok = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
+    assert ok.status_code == 200
+    assert fake.calls[-1]["mode"] == "codex_local"

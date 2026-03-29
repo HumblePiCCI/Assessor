@@ -1,6 +1,8 @@
 .DS_Store
 *.docx
+buttontail-manuscript-12-21-25.pages
 marking_framework/inputs/submissions/
+marking_framework/inputs/class_metadata.json
 marking_framework/processing/
 marking_framework/assessments/
 marking_framework/outputs/

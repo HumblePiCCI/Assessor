@@ -207,6 +207,8 @@ def test_codex_status_missing_auth_file(tmp_path, monkeypatch):
 def test_codex_login_starts(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False})
+    monkeypatch.setattr(appmod, "codex_login_supported", lambda: True)
     started = {}
 
     def fake_popen(cmd, stdout=None, stderr=None):
@@ -228,6 +230,25 @@ def test_codex_login_missing(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_codex_login_unsupported(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False})
+    monkeypatch.setattr(appmod, "codex_login_supported", lambda: False)
+    resp = client.post("/codex/login")
+    assert resp.status_code == 400
+
+
+def test_codex_login_already_connected(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
+    monkeypatch.setattr(appmod, "codex_login_supported", lambda: False)
+    resp = client.post("/codex/login")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "already_connected"
+
+
 def test_ui_routes(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -235,6 +256,8 @@ def test_ui_routes(tmp_path, monkeypatch):
     ui_dir.mkdir()
     (ui_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
     (ui_dir / "app.js").write_text("console.log('hi')", encoding="utf-8")
+    (ui_dir / "grade_adjust.js").write_text("window.gradeAdjust={};", encoding="utf-8")
+    (ui_dir / "feedback_generate.js").write_text("window.feedbackGenerate={};", encoding="utf-8")
     (ui_dir / "style.css").write_text("body {}", encoding="utf-8")
     monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(appmod, "UI_DIR", ui_dir)
@@ -244,6 +267,10 @@ def test_ui_routes(tmp_path, monkeypatch):
     assert resp.status_code == 200
     resp_js = client.get("/app.js")
     assert resp_js.status_code == 200
+    resp_grade = client.get("/grade_adjust.js")
+    assert resp_grade.status_code == 200
+    resp_feedback = client.get("/feedback_generate.js")
+    assert resp_feedback.status_code == 200
     resp_css = client.get("/style.css")
     assert resp_css.status_code == 200
     data_resp = client.get("/data.json")
@@ -293,9 +320,12 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     clear_file = tmp_path / "outputs"
     clear_file.mkdir()
     (clear_file / "x.txt").write_text("x", encoding="utf-8")
+    current_path.write_text(json.dumps({"id": project_id, "name": "Class A"}), encoding="utf-8")
     clear_resp = client.post("/projects/clear")
     assert clear_resp.json()["status"] == "cleared"
+    assert clear_resp.json()["current"] is None
     assert not (tmp_path / "outputs").exists()
+    assert not current_path.exists()
     assert (tmp_path / "inputs" / "exemplars" / "level_3.md").exists()
     proj_dir = projects_dir / project_id
     (proj_dir / "outputs").mkdir(parents=True)

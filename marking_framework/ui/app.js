@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -16,9 +16,9 @@ function computeGrades(top, bottom, count) { if (count <= 0) return []; if (coun
 function baseName(name) { return name.replace(/\.[^.]+$/, ''); }
 function labelFor(s) { return (s && (s.display_name || s.student_id)) ? (s.display_name || s.student_id) : ''; }
 function getStudents() { return previewStudents.length ? previewStudents : ((data && data.students && data.students.length) ? data.students : []); }
-async function refreshAuthStatus() { const status = document.getElementById('authStatus'); if (!status) return; try { const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const codex = codexRes.ok ? await codexRes.json() : null; const api = apiRes.ok ? await apiRes.json() : null; if (codex && codex.available && codex.connected) status.textContent = 'Codex connected'; else if (api && api.connected) status.textContent = 'API key connected'; else if (codex && codex.available) status.textContent = 'Codex not connected'; else status.textContent = 'Offline'; } catch (err) { status.textContent = 'Offline'; } }
+async function refreshAuthStatus() { const status = document.getElementById('authStatus'); if (!status) return; const codexBtn = document.getElementById('codexLogin'); try { const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const codex = codexRes.ok ? await codexRes.json() : null; const api = apiRes.ok ? await apiRes.json() : null; if (codex && codex.available && codex.connected) { status.textContent = 'Codex connected'; if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; } } else if (api && api.connected) { status.textContent = 'API key connected'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } else if (codex && codex.available) { status.textContent = 'Codex not connected'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } else { status.textContent = 'Offline'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } } catch (err) { status.textContent = 'Offline'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } }
 async function connectApiKey() { const input = document.getElementById('apiKeyInput'); const status = document.getElementById('authStatus'); if (!input || !status) return; const key = input.value.trim(); if (!key) return; try { const res = await fetch(apiUrl('/auth'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key }) }); if (!res.ok) { status.textContent = 'Invalid key'; return; } input.value = ''; status.textContent = 'API key connected'; } catch (err) { status.textContent = 'Offline'; } }
-async function startCodexLogin() { const status = document.getElementById('authStatus'); if (!status) return; try { const res = await fetch(apiUrl('/codex/login'), { method: 'POST' }); status.textContent = res.ok ? 'Codex login started' : 'Codex login failed'; if (res.ok) setTimeout(refreshAuthStatus, 1500); } catch (err) { status.textContent = 'Offline'; } }
+async function startCodexLogin() { const status = document.getElementById('authStatus'); if (!status) return; try { const res = await fetch(apiUrl('/codex/login'), { method: 'POST' }); if (!res.ok) { let msg = 'Codex login failed'; try { const err = await res.json(); if (err.detail) msg = err.detail; } catch (_) {} status.textContent = msg; return; } const payload = await res.json().catch(() => ({})); status.textContent = payload.status === 'already_connected' ? 'Codex connected' : 'Codex login started'; setTimeout(refreshAuthStatus, 1500); } catch (err) { status.textContent = 'Offline'; } }
 async function loadProjects() { const select = document.getElementById('projectSelect'); if (!select) return; try { const res = await fetch(apiUrl('/projects')); if (!res.ok) return; const payload = await res.json(); projects = payload.projects || []; currentProject = payload.current || null; select.innerHTML = ''; if (!projects.length) { const opt = document.createElement('option'); opt.textContent = 'No saved projects'; opt.value = ''; opt.disabled = true; opt.selected = true; select.appendChild(opt); } else { projects.forEach(p => { const opt = document.createElement('option'); opt.textContent = p.name || p.id; opt.value = p.id; if (currentProject && p.id === currentProject.id) opt.selected = true; select.appendChild(opt); }); } const status = document.getElementById('projectStatus'); if (status) status.textContent = currentProject ? `Current: ${currentProject.name}` : 'No project loaded'; } catch (_) {} }
 async function saveProject() { const name = currentProject ? null : prompt('Project name', '') || ''; if (!currentProject && !name) return; try { const res = await fetch(apiUrl('/projects/save'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(name ? { name } : {}) }); if (!res.ok) return; currentProject = await res.json(); await loadProjects(); } catch (_) {} }
 async function newProject() { const name = prompt('New project name', '') || ''; if (!name) return; try { const res = await fetch(apiUrl('/projects/new'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); if (!res.ok) return; currentProject = await res.json(); location.reload(); } catch (_) {} }
@@ -40,12 +40,12 @@ function clearLocalState() {
   adjustments = {};
   feedbackDrafts = {};
   grades = [];
-  currentIndex = 0;
+  currentIndex = 0; sliderStudentId = null; focusLock = false;
   resetUploadLabels();
   const status = document.getElementById('pipelineStatus'); if (status) status.textContent = 'Idle';
   renderRail(); renderDetail();
 }
-async function clearProject() { if (!confirm('Clear the current session?')) return; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) return; clearLocalState(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) {} }
+async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error('clear failed'); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) { if (status) status.textContent = 'Server unavailable: local view cleared only'; } }
 async function loadProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; try { const res = await fetch(apiUrl('/projects/load'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: select.value }) }); if (!res.ok) return; location.reload(); } catch (_) {} }
 async function deleteProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; if (!confirm('Delete this project?')) return; try { const res = await fetch(apiUrl(`/projects/${select.value}`), { method: 'DELETE' }); if (!res.ok) return; await loadProjects(); } catch (_) {} }
 function getCompareIndex() { if (!data || data.students.length < 2) return null; const target = currentIndex + compareDirection; if (target >= 0 && target < data.students.length) return target; const fallback = currentIndex - compareDirection; if (fallback >= 0 && fallback < data.students.length) return fallback; return null; }
@@ -109,6 +109,7 @@ function findCenteredIndex() {
   return best;
 }
 function updateFromScroll() {
+  if (focusLock) return;
   if (scrollTicking) return;
   scrollTicking = true;
   requestAnimationFrame(() => {
@@ -136,12 +137,7 @@ function parseFeedback(text) {
     wish: grab('## One Wish', null),
   };
 }
-function feedbackForStudent(studentId, feedbackText) {
-  if (!feedbackDrafts[studentId]) {
-    feedbackDrafts[studentId] = parseFeedback(feedbackText);
-  }
-  return feedbackDrafts[studentId];
-}
+function feedbackForStudent(studentId, feedbackText) { if (!feedbackDrafts[studentId]) feedbackDrafts[studentId] = parseFeedback(feedbackText); return feedbackDrafts[studentId]; }
 function renderSummary(student) {
   const summary = document.getElementById('summaryList');
   summary.innerHTML = '';
@@ -229,8 +225,11 @@ function renderDetail() {
   const gradeInput = document.getElementById('gradeOverride');
   const override = overrides[student.student_id];
   gradeInput.value = override !== undefined ? override : getGradeForIndex(currentIndex);
+  const gradeSlider = document.getElementById('overallGradeSlider'); if (gradeSlider) gradeSlider.value = gradeInput.value || getGradeForIndex(currentIndex);
 }
-function applyAdjustment(studentId, key, delta) { const adj = getAdjustment(studentId); adj[key] += delta; updateRail(); renderDetail(); }
+function applyAdjustment(studentId, key, delta) { const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0); currentIndex = sidx; const adj = getAdjustment(studentId); adj[key] += delta; const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null; if (data?.students?.length && window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId)); if (target === null) break; const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
+function applyOverallTarget(target) { if (!data?.students?.length) return; const sid = sliderStudentId || data.students[currentIndex]?.student_id; const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex]; currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const curr = getGradeForIndex(currentIndex); const delta = target - curr; const adj = getAdjustment(s.student_id); const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 }; adj.rubric += num(spread.rubric, 0); adj.conventions += num(spread.conventions, 0); adj.comparative += num(spread.comparative, 0); adj.overall += delta; delete overrides[s.student_id]; const inp = document.getElementById('gradeOverride'); if (inp) inp.value = Math.round(target); const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = Math.round(target); if (window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
+function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true); renderDetail(); }
 function updateGradesFromCurve() { if (!data || !data.students || !data.students.length) return; const top = num(document.getElementById('topGrade').value, 92); const bottom = num(document.getElementById('bottomGrade').value, 58); if (top <= bottom) return; grades = computeGrades(top, bottom, data.students.length); updateRail(); renderDetail(); }
 function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; }
 function pipelineLog(msg) { const log = document.getElementById('pipelineLog'); if (!log) return; const line = document.createElement('div'); line.textContent = msg; log.appendChild(line); log.scrollTop = log.scrollHeight; }
@@ -275,6 +274,7 @@ function setupUploads() {
   });
 }
 function setupControls() {
+  if (window.__heroControlsBound) return; window.__heroControlsBound = true;
   document.getElementById('prevBtn').addEventListener('click', () => {
     if (currentIndex > 0) scrollToIndex(currentIndex - 1, true);
   });
@@ -283,15 +283,15 @@ function setupControls() {
   });
   document.getElementById('topGrade').addEventListener('input', updateGradesFromCurve);
   document.getElementById('bottomGrade').addEventListener('input', updateGradesFromCurve);
+  const slider = document.getElementById('overallGradeSlider'); if (slider) { const pin = () => { sliderStudentId = data?.students?.[currentIndex]?.student_id || null; }; const unpin = () => { sliderStudentId = null; }; slider.addEventListener('focus', pin); slider.addEventListener('pointerdown', pin); slider.addEventListener('blur', unpin); slider.addEventListener('pointerup', unpin); slider.addEventListener('change', unpin); slider.addEventListener('input', (e) => applyOverallTarget(clamp(num(e.target.value, 0), 0, 100))); }
   document.getElementById('gradeOverride').addEventListener('change', (e) => {
-    const value = e.target.value.trim(); const studentId = data.students[currentIndex].student_id;
-    if (!value) delete overrides[studentId]; else overrides[studentId] = clamp(num(value, 0), 0, 100);
-    updateRail(); renderDetail();
+    const value = e.target.value.trim(); if (!value) return; applyOverallTarget(clamp(num(value, 0), 0, 100));
   });
   document.getElementById('copyFeedback').addEventListener('click', () => {
     const student = data.students[currentIndex]; const draft = feedbackForStudent(student.student_id, student.feedback_text || '');
     const payload = [`Two Stars and a Wish — ${student.student_id}`, `Star 1: ${draft.star1 || '—'}`, `Star 2: ${draft.star2 || '—'}`, `Wish: ${draft.wish || '—'}`].join('\n'); navigator.clipboard.writeText(payload);
   });
+  const genBtn = document.getElementById('generateFeedback'); if (genBtn) genBtn.addEventListener('click', generateFeedbackDrafts);
   document.getElementById('themeToggle').addEventListener('click', () => { const body = document.body; body.dataset.theme = body.dataset.theme === 'dark' ? 'light' : 'dark'; });
   const connectBtn = document.getElementById('connectKey');
   if (connectBtn) connectBtn.addEventListener('click', connectApiKey);
@@ -342,7 +342,6 @@ async function boot(payload) {
   scrollToIndex(0, false);
   refreshAuthStatus();
 }
-
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })
   .then(res => res.ok ? res.text() : '')
   .then(text => { try { return text ? JSON.parse(text) : { students: [] }; } catch (_) { return { students: [] }; } })

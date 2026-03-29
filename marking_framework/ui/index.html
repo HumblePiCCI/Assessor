@@ -62,10 +62,15 @@
           <div class="label">Wish</div>
           <div id="wish" class="editable" contenteditable="true" data-placeholder="Highest‑leverage fix + quote."></div>
         </div>
+        <button id="generateFeedback" class="ghost">Generate feedback</button>
         <button id="copyFeedback" class="ghost">Copy to clipboard</button>
       </div>
 
       <div class="controls">
+        <div class="control">
+          <label for="overallGradeSlider">Overall slider</label>
+          <input id="overallGradeSlider" type="range" min="0" max="100" step="1" value="75" />
+        </div>
         <div class="control">
           <label for="topGrade">Top mark</label>
           <input id="topGrade" type="number" value="92" />
@@ -133,7 +138,9 @@
       <div id="pipelineLog" class="pipeline-log"></div>
     </div>
   </div>
-  <script src="app.js?v=2"></script>
-  <script src="progress_stream.js?v=1"></script>
+  <script src="grade_adjust.js?v=2"></script>
+  <script src="feedback_generate.js?v=1"></script>
+  <script src="app.js?v=6"></script>
+  <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

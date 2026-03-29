@@ -21,7 +21,7 @@ class FakeQueue:
             "subs": sorted(p.name for p in submissions_dir.glob("*")),
             "extra": [str(p) for p in extra_paths],
         }
-        return {"job_id": "j1", "status": "queued", "cached": False, "snapshot_hash": "abc"}
+        return {"job_id": "j1", "status": "queued", "cached": False, "snapshot_hash": "abc", "manifest_hash": "abc"}
 
     def get_job(self, job_id):
         if self.job and self.job.get("id") == job_id:

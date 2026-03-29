@@ -66,6 +66,7 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"Wrote cost report: {out_path}")
+    print(f"Total API cost ({report['currency']}): ${report['grand_total']:.4f}")
     return 0
 
 

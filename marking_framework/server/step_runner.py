@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import hashlib
+import json
 import queue
 import subprocess
 import threading
 from pathlib import Path
 
+RUNTIME_ASSET_DIRS = ("scripts", "config", "prompts", "templates", "docs", "ui")
+ARTIFACT_WATCH_ROOTS = ("inputs", "processing", "assessments", "outputs")
 
 def pipeline_steps() -> list[dict]:
     return [
@@ -59,6 +63,38 @@ def pipeline_steps() -> list[dict]:
         {"id": "grade", "label": "Applying level-aware bell curve", "cmd": ["python3", "scripts/review_and_grade.py", "--non-interactive"]},
         {"id": "dashboard", "label": "Building dashboard output", "cmd": ["python3", "scripts/build_dashboard_data.py"]},
     ]
+
+
+def pipeline_step_map() -> dict[str, dict]:
+    return {step["id"]: step for step in pipeline_steps()}
+
+
+def pipeline_step_command(step_id: str) -> list[str]:
+    step = pipeline_step_map()[step_id]
+    return list(step["cmd"])
+
+
+def pipeline_step_graph_hash() -> str:
+    payload = []
+    for step in pipeline_steps():
+        payload.append(
+            {
+                "id": step["id"],
+                "label": step["label"],
+                "cmd": list(step["cmd"]),
+                "required": bool(step.get("required", True)),
+            }
+        )
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def workspace_asset_dirs() -> tuple[str, ...]:
+    return RUNTIME_ASSET_DIRS
+
+
+def artifact_watch_roots() -> tuple[str, ...]:
+    return ARTIFACT_WATCH_ROOTS
 
 
 def _can_stream_subprocess(run_fn) -> bool:

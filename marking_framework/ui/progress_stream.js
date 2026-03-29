@@ -7,11 +7,13 @@
     conventions: 'Scanning conventions',
     calibrate: 'Calibrating assessors',
     assess: 'Running assessor passes',
+    cost: 'Tracking API cost',
     aggregate_1: 'Building initial consensus',
     boundary: 'Rechecking boundary essays',
     aggregate_2: 'Rebuilding consensus',
     consistency: 'Verifying order consistency',
     quality_gate: 'Running publish quality gate',
+    sota_gate: 'Enforcing SOTA readiness gate',
     pairwise: 'Preparing pairwise review',
     dashboard: 'Building dashboard',
     completed: 'Complete',
@@ -19,6 +21,7 @@
 
   let eventCursor = -1;
   let lastEventKey = '';
+  let latestCost = '';
 
   function clearNarrativeTimer() {
     if (typeof pipelineTimer !== 'undefined' && pipelineTimer) {
@@ -58,6 +61,25 @@
     return total > 0 ? `${current}/${total}` : '…';
   }
 
+  function elapsedText(job) {
+    const createdAt = job && job.created_at ? Date.parse(job.created_at) : NaN;
+    const updatedAt = job && job.updated_at ? Date.parse(job.updated_at) : NaN;
+    const end = job && job.status === 'completed' && Number.isFinite(updatedAt) ? updatedAt : Date.now();
+    if (!Number.isFinite(createdAt) || end <= createdAt) return '';
+    const totalSec = Math.max(0, Math.round((end - createdAt) / 1000));
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}m ${String(sec).padStart(2, '0')}s`;
+  }
+
+  function statusText(job) {
+    const parts = [`Running ${progressText(job)}`, stageText(job)];
+    const elapsed = elapsedText(job);
+    if (elapsed) parts.push(elapsed);
+    if (latestCost) parts.push(latestCost);
+    return parts.join(' • ');
+  }
+
   function eventLine(evt) {
     const stage = evt && evt.stage ? evt.stage : '';
     const source = evt && evt.source ? evt.source : 'system';
@@ -83,6 +105,8 @@
       const key = `${evt.index || 0}:${line}`;
       if (key === lastEventKey) continue;
       lastEventKey = key;
+      const costMatch = line.match(/\$[0-9]+(?:\.[0-9]{2,6})?/);
+      if (costMatch && line.toLowerCase().includes('cost')) latestCost = costMatch[0];
       appendLine(line);
     }
     if (typeof payload.next_after === 'number') {
@@ -95,6 +119,7 @@
     clearNarrativeTimer();
     eventCursor = -1;
     lastEventKey = '';
+    latestCost = '';
     const log = document.getElementById('pipelineLog');
     if (log) log.innerHTML = '';
     appendLine('Pipeline started. Preparing files and checks…');
@@ -114,10 +139,11 @@
       const statusRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`), { cache: 'no-store' });
       if (!statusRes.ok) throw new Error('Run status unavailable');
       const job = await statusRes.json();
-      setPipelineStatus(`Running ${progressText(job)} • ${stageText(job)}`);
+      setPipelineStatus(statusText(job));
       await fetchEvents(jobId);
       if (job.status === 'completed') {
-        setPipelineStatus('Complete');
+        const elapsed = elapsedText(job);
+        setPipelineStatus(elapsed ? `Complete • ${elapsed}${latestCost ? ` • ${latestCost}` : ''}` : 'Complete');
         await fetchEvents(jobId);
         return job;
       }

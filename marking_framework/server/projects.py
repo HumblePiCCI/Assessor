@@ -147,7 +147,8 @@ async def projects_new(payload: ProjectPayload):
 async def projects_clear():
     root = workspace_root()
     clear_workspace(root)
-    return {"status": "cleared"}
+    set_current_project(None)
+    return {"status": "cleared", "current": None}
 
 
 @router.post("/projects/load")
