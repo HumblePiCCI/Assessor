@@ -31,7 +31,10 @@ The original eight implementation phases are now in the repo:
 - Phase 8: aggregate review learning governance
 - Phase 9: production hardening and launch contract
 
-That is necessary progress, but it is not the same thing as production readiness.
+The next planned implementation phase is:
+- Phase 10: rubric ingestion, normalization, and verification
+
+The production-hardening track is complete in-repo. The next product-quality gap is rubric input variability.
 
 The current system can:
 - run through one authoritative queue-backed execution path
@@ -49,10 +52,13 @@ The current system can:
 - validate launch readiness with `scripts/validate_production_launch.py`
 - produce manifest-aware rollback plans with `scripts/release_rollback.py`
 
-The remaining work before a real rollout is no longer architectural. It is environmental and operational:
+The remaining work before a real rollout is environmental and operational:
 - wire the strict identity headers to the real auth provider
 - run the launch validator against the real release candidate
 - rehearse the rollback flow against the deployment environment
+
+The next in-repo product-quality phase is architectural:
+- normalize arbitrary teacher rubric files into a verified runtime rubric contract before scoring
 
 ## Working Definition Of SOTA For This Repo
 
@@ -154,6 +160,17 @@ The repo now defines the production contract. The remaining gap is applying it i
 - upstream identity provider integration
 - deployment-time secret management
 - live release rehearsal with real ops surfaces
+
+### Gap 2: Rubric Variability Still Enters The Pipeline Too Raw
+
+Uploaded rubrics can vary widely in structure, wording, file type, and explicitness.
+
+The current system can consume rubric text, but it still relies too heavily on:
+- raw rubric text in assessor prompts
+- static canonical criteria config
+- rubric-family inference by metadata or hash
+
+The next major quality improvement is to convert arbitrary teacher rubrics into a normalized, teacher-confirmed internal rubric contract before scoring.
 
 ## Target Architecture
 
@@ -777,43 +794,117 @@ Test plan
 Exit condition
 - the product is technically launchable, supportable, and governable
 
+### Phase 10: Rubric Ingestion, Normalization, And Verification
+
+Goal
+- make arbitrary teacher rubric uploads usable, inspectable, and safe for the scoring pipeline
+
+Primary files
+- `scripts/run_llm_assessors.py`
+- `scripts/assessor_context.py`
+- `scripts/calibration_contract.py`
+- `server/step_runner.py`
+- `server/pipeline_queue.py`
+- `scripts/build_dashboard_data.py`
+- `ui/app.js`
+- new rubric ingestion and verification scripts
+
+Build tasks
+
+1. Add multi-format rubric ingestion
+   - support `md`, `txt`, `docx`, `pdf`, `rtf`, and image-backed rubric uploads
+   - prefer native extraction first, then OCR/image analysis as fallback
+
+2. Normalize rubric content into a canonical schema
+   - criteria
+   - weights
+   - level descriptors
+   - score bands
+   - genre cues
+   - evidence requirements
+
+3. Add rubric verification artifacts
+   - `normalized_rubric.json`
+   - `rubric_manifest.json`
+   - `rubric_validation_report.json`
+   - `rubric_verification.json`
+
+4. Add a lightweight teacher confirmation loop
+   - show the system's interpreted rubric in plain language
+   - allow one-click confirm
+   - allow small edits to level mapping, weights, criteria labels, or genre
+
+5. Freeze confirmed rubric into the runtime contract
+   - the confirmed normalized rubric becomes the authoritative rubric for the run
+   - the original uploaded rubric remains attached for auditability
+   - confirmed rubric hash must flow into the pipeline manifest and cache key
+
+6. Gate the pipeline on parse confidence
+   - high-confidence rubric parse can proceed automatically
+   - medium-confidence parse proceeds with visible warnings
+   - low-confidence parse cannot silently proceed and must require confirmation or repair
+
+7. Feed the confirmed rubric into downstream systems
+   - assessor prompting
+   - calibration scope and rubric-family resolution
+   - publish and SOTA gates
+   - dashboard review context
+
+Acceptance criteria
+- arbitrary rubric formats no longer go straight into scoring prompts without normalization
+- every run can name the original rubric, normalized rubric, confirmation state, and rubric manifest hash
+- low-confidence rubric parses cannot silently drive the ranking pipeline
+- small teacher edits correct the normalized rubric without requiring a long setup flow
+
+Test plan
+- extraction fixtures for `docx`, `pdf`, `rtf`, plain text, and image-backed rubrics
+- malformed and underspecified rubric fixtures
+- manifest hash bust tests when confirmed rubric changes
+- confirmation-flow tests for confirm, edit, and reject paths
+- regression tests proving confirmed rubric artifacts reach assessment, calibration, and gates
+
+Exit condition
+- the runtime consumes a verified normalized rubric contract rather than raw rubric text alone
+
 ## Sequencing
 
-The remaining production-readiness order is:
+The remaining implementation order is:
 
-1. Phase 9: production hardening and launch contract
+1. Live rollout rehearsal against the production contract
+2. Phase 10: rubric ingestion, normalization, and verification
 
 Why this order:
-- Phase 9 is required before any of the above can be launched as a real product
+- live rollout rehearsal closes the environment-specific deployment gap
+- Phase 10 closes the next major input-quality gap in the scoring pipeline
 
 ## Immediate Next Sprint
 
-The next sprint should start the production hardening contract.
+The next sprint should start the rubric contract layer.
 
 ### Sprint Goal
 
-Make the current governed learning system launchable, supportable, and privacy-defensible.
+Convert messy real teacher rubric uploads into a normalized, teacher-confirmed runtime rubric contract.
 
 ### Sprint Scope
 
-1. Define tenant and teacher isolation boundaries across queued jobs, review stores, and promoted learning assets
-2. Add retention, deletion, and audit reconciliation checks across local review and ingested aggregate stores
-3. Define production auth and policy configuration requirements
-4. Add queue-health, backpressure, and rollback observability
-5. Write go/no-go launch checks and incident runbooks
+1. Add multi-format rubric extraction and OCR fallback
+2. Define the canonical normalized-rubric schema
+3. Emit validation and verification artifacts
+4. Add teacher confirm/edit UI for interpreted rubrics
+5. Feed confirmed rubric manifests into the queue, cache key, and assessor/calibration path
 
 ### Sprint Deliverables
 
-- operational config contract
-- retention and deletion audit tooling
-- queue-health and rollback diagnostics
-- production launch checklist and enforcement hooks
+- normalized rubric schema and manifests
+- rubric verification summary and confirmation state
+- queue-integrated rubric manifest hashing
+- teacher-facing confirm/edit surface for interpreted rubrics
 
 ### Sprint Exit Criteria
 
-- the governed learning path is operationally supportable
-- privacy and deletion semantics are testable end to end
-- launch readiness can be evaluated from code and artifacts, not prose
+- rubric variability is bounded before scoring begins
+- teacher confirmation is fast and low-friction
+- rubric interpretation is inspectable, versioned, and testable
 
 ## Engineering Rules While Executing This Plan
 
@@ -856,6 +947,7 @@ Use this section as the running status checkpoint.
 - Phase 7: completed
 - Phase 8: completed
 - Phase 9: completed
+- Phase 10: pending
 
 ### Latest Confirmed Improvements
 
@@ -876,7 +968,8 @@ Use this section as the running status checkpoint.
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
+- rubric input variability can still weaken scoring quality until Phase 10 is implemented
 
 ### Next Decision Point
 
-Run `scripts/validate_production_launch.py` against the intended release candidate and complete the live rollout rehearsal.
+Start Phase 10 by introducing the normalized-rubric contract and teacher confirmation flow before assessor execution.

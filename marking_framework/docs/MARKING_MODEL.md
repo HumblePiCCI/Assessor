@@ -21,6 +21,7 @@ Model Components
 - Assessors score each rubric criterion on the rubric's scale.
 - Scores are converted to points and totaled per essay.
 - Rubric scores are normalized to 0-100 for aggregation.
+- Current runtime note: rubric text is consumed directly plus the canonical `rubric_criteria.json` scaffold. Planned Phase 10 adds explicit rubric ingestion, normalization, and teacher verification before scoring.
 - Board level bands are applied to rubric percent:
   - Level 1 = 50-59% (D)
   - Level 2 = 60-69% (C)
