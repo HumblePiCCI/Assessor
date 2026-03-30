@@ -243,13 +243,19 @@ body[data-theme="dark"] .editable {
   color: var(--muted);
   margin-bottom: 4px;
 }
-.control input {
+.control input,
+.control select,
+.control textarea {
   width: 100%;
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--ink);
+}
+.control textarea {
+  resize: vertical;
+  min-height: 84px;
 }
 .auth {
   display: grid;
@@ -280,6 +286,28 @@ body[data-theme="dark"] .editable {
   color: var(--ink);
 }
 .projects { margin-top: 16px; }
+.review-section {
+  margin-top: 12px;
+}
+.review-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(74, 106, 107, 0.08);
+  color: var(--accent);
+  font-size: 12px;
+}
+.review-pairwise {
+  display: grid;
+  gap: 8px;
+}
 .project-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .auth-status {
   font-size: 12px;

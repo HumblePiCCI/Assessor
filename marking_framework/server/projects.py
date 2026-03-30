@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from server import review_store
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECTS_DIR = BASE_DIR.parent / "projects"
@@ -19,6 +21,13 @@ router = APIRouter()
 class ProjectPayload(BaseModel):
     name: str | None = None
     project_id: str | None = None
+
+
+class ProjectReviewPayload(BaseModel):
+    project_id: str | None = None
+    students: list[dict] = Field(default_factory=list)
+    pairwise: list[dict] = Field(default_factory=list)
+    review_notes: str | None = None
 
 
 def workspace_root() -> Path:
@@ -72,9 +81,28 @@ def list_projects() -> list:
         if not meta_path.exists():
             continue
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["review_summary"] = review_store.review_scope_summary(BASE_DIR, str(meta.get("id", "") or path.name))
         projects.append(meta)
     projects.sort(key=lambda p: p.get("updated_at", ""), reverse=True)
     return projects
+
+
+def current_project_with_review() -> dict | None:
+    current = get_current_project()
+    if not current:
+        return None
+    enriched = dict(current)
+    enriched["review_summary"] = review_store.review_scope_summary(BASE_DIR, str(current.get("id", "") or "workspace"))
+    return enriched
+
+
+def project_meta_for_review(project_id: str | None) -> dict | None:
+    if project_id:
+        meta_path = PROJECTS_DIR / project_id / "project.json"
+        if meta_path.exists():
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        return {"id": project_id, "name": project_id}
+    return get_current_project()
 
 
 def copy_tree(src: Path, dst: Path):
@@ -118,7 +146,7 @@ def save_project_snapshot(root: Path, project_id: str, name: str, include_logs: 
 
 @router.get("/projects")
 async def projects_list():
-    return {"current": get_current_project(), "projects": list_projects()}
+    return {"current": current_project_with_review(), "projects": list_projects()}
 
 
 @router.post("/projects/save")
@@ -165,6 +193,8 @@ async def projects_load(payload: ProjectPayload):
     meta_path = project_dir / "project.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {"id": payload.project_id}
     set_current_project(meta)
+    bundle = review_store.load_review_bundle(BASE_DIR, root, meta)
+    review_store.materialize_workspace_review_state(root, bundle)
     return {"status": "ok", "project": meta}
 
 
@@ -174,7 +204,19 @@ async def projects_delete(project_id: str):
     if not project_dir.exists():
         raise HTTPException(status_code=404, detail="Project not found")
     shutil.rmtree(project_dir)
+    review_store.delete_review_scope(BASE_DIR, project_id)
     current = get_current_project()
     if current and current.get("id") == project_id:
         set_current_project(None)
     return {"status": "deleted"}
+
+
+@router.get("/projects/review")
+async def projects_review():
+    return review_store.load_review_bundle(BASE_DIR, workspace_root(), get_current_project())
+
+
+@router.post("/projects/review")
+async def projects_review_save(payload: ProjectReviewPayload):
+    project = project_meta_for_review(payload.project_id)
+    return review_store.save_review_bundle(BASE_DIR, workspace_root(), project, payload.model_dump(exclude_none=True))

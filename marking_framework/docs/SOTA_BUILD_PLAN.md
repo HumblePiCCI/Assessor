@@ -646,7 +646,7 @@ Use this section as the running status checkpoint.
 - Phase 3: completed
 - Phase 4: completed
 - Phase 5: completed
-- Phase 6: not started
+- Phase 6: completed
 
 ### Latest Confirmed Improvements
 
@@ -659,12 +659,13 @@ Use this section as the running status checkpoint.
 - pairwise consistency checks now feed a deterministic global reranker with explicit final-order artifacts
 - calibration now ships with a versioned manifest, explicit run scope, synthetic bootstrap marking, and drift-aware release checks
 - publish and SOTA gates now evaluate explicit `dev`, `candidate`, and `release` contracts with benchmark, reproducibility, calibration freshness, and budget thresholds
+- teacher review now persists as versioned structured data, emits replay artifacts for benchmark/boundary/calibration refresh, and produces both a local learning profile and an anonymized aggregate feedback log
 
 ### Outstanding Architectural Risks
 
 - cache key coverage is still incomplete
-- teacher adjudications are not yet feeding back into calibration and eval refresh
+- local learning profiles are not yet consumed directly inside the scoring/reranking runtime
 
 ### Next Decision Point
 
-Start Phase 6 by wiring teacher adjudications and overrides back into benchmark gold, calibration refresh, and scoped drift control.
+Start the next improvement cycle by consuming the local learning profile inside runtime ranking/grading decisions and defining the secure upload path for anonymized aggregate review telemetry.

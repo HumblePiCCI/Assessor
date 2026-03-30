@@ -197,3 +197,61 @@ def test_build_dashboard_prefers_consistency_adjusted_when_primary_missing(tmp_p
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["rank_key"] == "consistency_rank"
     assert payload["rank_source"].endswith("outputs/consistency_adjusted.csv")
+
+
+def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, monkeypatch):
+    primary = tmp_path / "outputs" / "final_order.csv"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(
+        primary,
+        [
+            {
+                "student_id": "s1",
+                "final_rank": "1",
+                "seed_rank": "2",
+                "rubric_after_penalty_percent": "79.4",
+                "rerank_displacement": "-1",
+                "rerank_displacement_cap_label": "low",
+                "rerank_notes": "moved_up_1;low_confidence_cap",
+                "rerank_support_weight": "1.2",
+                "rerank_opposition_weight": "1.0",
+                "rerank_incident_weight": "2.2",
+            }
+        ],
+        [
+            "student_id",
+            "final_rank",
+            "seed_rank",
+            "rubric_after_penalty_percent",
+            "rerank_displacement",
+            "rerank_displacement_cap_label",
+            "rerank_notes",
+            "rerank_support_weight",
+            "rerank_opposition_weight",
+            "rerank_incident_weight",
+        ],
+    )
+    (tmp_path / "outputs" / "consistency_report.json").write_text(
+        json.dumps({"movements": [{"student_id": "s1", "support_weight": 1.2, "opposition_weight": 1.0}]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "outputs" / "local_learning_profile.json").write_text(json.dumps({"review_count": 2}), encoding="utf-8")
+    (tmp_path / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-xyz"}), encoding="utf-8")
+    (tmp_path / "outputs" / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4"}), encoding="utf-8")
+    texts = tmp_path / "texts"
+    texts.mkdir()
+    (texts / "s1.txt").write_text("Essay", encoding="utf-8")
+    out = tmp_path / "dash.json"
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["bdd", "--input", str(primary), "--fallback", str(tmp_path / "missing.csv"), "--output", str(out), "--texts", str(texts)],
+    )
+    assert bdd.main() == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    student = payload["students"][0]
+    assert set(student["uncertainty_flags"]) == {"boundary_case", "high_disagreement", "low_confidence_rerank_move"}
+    assert payload["review_context"]["pipeline_manifest"]["manifest_hash"] == "manifest-xyz"
+    assert payload["local_learning_profile"]["review_count"] == 2
+    assert payload["uncertainty_summary"]["counts"]["boundary_cases"] == 1

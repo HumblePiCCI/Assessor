@@ -339,6 +339,84 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     assert not proj_dir.exists()
 
 
+def test_projects_review_endpoints(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    current_path = projects_dir / "current.json"
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (tmp_path / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-1"}), encoding="utf-8")
+    (outputs / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4"}), encoding="utf-8")
+    (outputs / "dashboard_data.json").write_text(
+        json.dumps(
+            {
+                "students": [
+                    {
+                        "student_id": "s1",
+                        "display_name": "Student One",
+                        "source_file": "student_one.txt",
+                        "level_with_modifier": "3",
+                        "rank": 2,
+                        "uncertainty_flags": ["boundary_case"],
+                    },
+                    {
+                        "student_id": "s2",
+                        "display_name": "Student Two",
+                        "source_file": "student_two.txt",
+                        "level_with_modifier": "4",
+                        "rank": 1,
+                        "uncertainty_flags": ["high_disagreement"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    save_resp = client.post("/projects/save", json={"name": "Class A"})
+    assert save_resp.status_code == 200
+    project_id = save_resp.json()["id"]
+    review_resp = client.post(
+        "/projects/review",
+        json={
+            "students": [
+                {
+                    "student_id": "s1",
+                    "level_override": "4",
+                    "desired_rank": 1,
+                    "evidence_quality": "thin",
+                    "evidence_comment": "Student One needs clearer evidence.",
+                }
+            ],
+            "pairwise": [
+                {
+                    "student_id": "s1",
+                    "other_student_id": "s2",
+                    "preferred_student_id": "s1",
+                    "confidence": "high",
+                    "rationale": "Student One should be above Student Two.",
+                }
+            ],
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["scope_id"] == project_id
+    assert payload["latest_review"]["students"][0]["level_override"] == "4"
+    assert payload["replay_exports"]["benchmark_gold_count"] == 1
+    get_resp = client.get("/projects/review")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["local_learning_profile"]["student_review_count"] == 1
+    list_resp = client.get("/projects")
+    assert list_resp.json()["current"]["review_summary"]["student_review_count"] == 1
+
+
 def test_projects_load_errors(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()

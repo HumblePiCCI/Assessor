@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -39,6 +40,21 @@ def load_json(path: Path) -> dict:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def file_sha256(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_hash(payload) -> str:
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 def load_submission_metadata(path: Path) -> dict:
@@ -141,6 +157,97 @@ def load_rank_rows(primary_path: Path, fallback_path: Path) -> tuple[list[dict],
     return [], None
 
 
+def level_boundaries(config_path: Path) -> list[float]:
+    config = load_json(config_path)
+    bands = (((config or {}).get("levels", {}) or {}).get("bands", []) if isinstance(config, dict) else [])
+    mins = []
+    for band in bands if isinstance(bands, list) else []:
+        try:
+            mins.append(float(band.get("min", 0.0) or 0.0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    ordered = sorted(value for value in mins if value > 0)
+    return ordered[1:] if len(ordered) > 1 else [60.0, 70.0, 80.0, 90.0]
+
+
+def movement_map(consistency_report: dict) -> dict[str, dict]:
+    moves = consistency_report.get("movements", []) if isinstance(consistency_report, dict) else []
+    return {str(item.get("student_id")): item for item in moves if isinstance(item, dict) and item.get("student_id")}
+
+
+def student_uncertainty(row: dict, movement: dict, boundaries: list[float], margin: float = 1.0) -> tuple[list[str], list[str]]:
+    flags = []
+    reasons = []
+    score = num(row.get("rubric_after_penalty_percent") or row.get("rubric_mean_percent"), None)
+    if score is not None and boundaries:
+        nearest = min((abs(score - edge), edge) for edge in boundaries)
+        if nearest[0] <= margin:
+            flags.append("boundary_case")
+            reasons.append(f"Within {margin:.1f} points of the {nearest[1]:.0f}% level boundary.")
+    support = num(row.get("rerank_support_weight"), num(movement.get("support_weight"), 0.0))
+    opposition = num(row.get("rerank_opposition_weight"), num(movement.get("opposition_weight"), 0.0))
+    incident = num(row.get("rerank_incident_weight"), 0.0)
+    if support > 0.0 and opposition > 0.0:
+        ratio = min(support, opposition) / max(support, opposition)
+        if ratio >= 0.6:
+            flags.append("high_disagreement")
+            reasons.append(
+                f"Pairwise evidence is split: support {support:.2f}, opposition {opposition:.2f}, incident weight {incident:.2f}."
+            )
+    displacement = abs(int(num(row.get("rerank_displacement"), 0)))
+    cap_label = str(row.get("rerank_displacement_cap_label") or movement.get("displacement_cap_label") or "").strip().lower()
+    notes = str(row.get("rerank_notes", "") or "")
+    if displacement > 0 and (cap_label == "low" or "low_confidence" in notes):
+        flags.append("low_confidence_rerank_move")
+        reasons.append(f"Moved {displacement} ranks on low-confidence evidence.")
+    deduped_flags = []
+    deduped_reasons = []
+    for item in flags:
+        if item not in deduped_flags:
+            deduped_flags.append(item)
+    for item in reasons:
+        if item not in deduped_reasons:
+            deduped_reasons.append(item)
+    return deduped_flags, deduped_reasons
+
+
+def review_context(root: Path, rows_source: Path | None) -> dict:
+    pipeline_path = root / "pipeline_manifest.json"
+    if not pipeline_path.exists():
+        pipeline_path = root / "outputs" / "pipeline_manifest.json"
+    calibration_path = root / "outputs" / "calibration_manifest.json"
+    pipeline_manifest = load_json(pipeline_path)
+    calibration_manifest = load_json(calibration_path)
+    artifact_hashes = {}
+    for name, path in {
+        "rank_source": rows_source,
+        "final_order": root / "outputs" / "final_order.csv",
+        "grade_curve": root / "outputs" / "grade_curve.csv",
+        "consistency_report": root / "outputs" / "consistency_report.json",
+        "pairwise_matrix": root / "outputs" / "pairwise_matrix.json",
+    }.items():
+        if path and Path(path).exists():
+            artifact_hashes[name] = file_sha256(Path(path))
+    return {
+        "pipeline_manifest": {
+            "path": str(pipeline_path),
+            "manifest_hash": str(pipeline_manifest.get("manifest_hash", "") or ""),
+            "generated_at": str(pipeline_manifest.get("generated_at", "") or ""),
+            "sha256": file_sha256(pipeline_path),
+        },
+        "calibration_manifest": {
+            "path": str(calibration_path),
+            "generated_at": str(calibration_manifest.get("generated_at", "") or ""),
+            "model_version": str(calibration_manifest.get("model_version", "") or ""),
+            "sha256": file_sha256(calibration_path),
+        },
+        "final_artifact_set": {
+            "artifact_hashes": artifact_hashes,
+            "artifact_set_hash": canonical_hash(artifact_hashes) if artifact_hashes else "",
+        },
+    }
+
+
 def build_distribution(students: list[dict]) -> dict:
     grade_histogram = {}
     level_counts = {}
@@ -169,6 +276,25 @@ def build_distribution(students: list[dict]) -> dict:
         "grade_histogram": dict(sorted(grade_histogram.items(), key=lambda item: int(item[0]), reverse=True)),
         "level_counts": dict(sorted(level_counts.items(), key=lambda item: item[0])),
     }
+
+
+def build_uncertainty_summary(students: list[dict]) -> dict:
+    summary = {
+        "boundary_cases": [],
+        "high_disagreement_cases": [],
+        "low_confidence_rerank_moves": [],
+    }
+    for student in students:
+        sid = student.get("student_id")
+        flags = set(student.get("uncertainty_flags", []) or [])
+        if "boundary_case" in flags:
+            summary["boundary_cases"].append(sid)
+        if "high_disagreement" in flags:
+            summary["high_disagreement_cases"].append(sid)
+        if "low_confidence_rerank_move" in flags:
+            summary["low_confidence_rerank_moves"].append(sid)
+    summary["counts"] = {key: len(value) for key, value in summary.items() if isinstance(value, list)}
+    return summary
 
 
 def main() -> int:
@@ -202,6 +328,11 @@ def main() -> int:
     meta = load_submission_metadata(Path("processing/submission_metadata.json"))
     cost_report = load_json(cost_path)
     consistency_report = load_json(Path("outputs/consistency_report.json"))
+    pairwise_matrix = load_json(Path("outputs/pairwise_matrix.json"))
+    review_feedback = load_json(Path("outputs/review_feedback_latest.json"))
+    local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
+    uncertainty_by_student = movement_map(consistency_report)
+    boundaries = level_boundaries(Path("config/marking_config.json"))
 
     # Determine rank key
     rank_key = select_rank_key(rows) or "consensus_rank"
@@ -215,6 +346,7 @@ def main() -> int:
         rank = int(row.get(rank_key, row.get("consensus_rank", 0)) or 0)
         student_text = texts.get(sid, "")
         feedback_text = load_feedback_text(feedback_dir, sid)
+        flags, reasons = student_uncertainty(row, uncertainty_by_student.get(sid, {}), boundaries)
         data.append(
             {
                 "student_id": sid,
@@ -243,6 +375,14 @@ def main() -> int:
                 "final_grade": grade_row.get("final_grade"),
                 "text": student_text,
                 "feedback_text": feedback_text,
+                "rerank_support_weight": row.get("rerank_support_weight"),
+                "rerank_opposition_weight": row.get("rerank_opposition_weight"),
+                "rerank_incident_weight": row.get("rerank_incident_weight"),
+                "rerank_displacement_cap": row.get("rerank_displacement_cap"),
+                "rerank_displacement_cap_label": row.get("rerank_displacement_cap_label"),
+                "uncertainty_flags": flags,
+                "uncertainty_reasons": reasons,
+                "uncertainty_score": len(flags),
             }
         )
 
@@ -266,9 +406,14 @@ def main() -> int:
         "curve_bottom": curve_bottom,
         "curve_profile": grades_rows[0].get("curve_profile") if grades_rows else None,
         "distribution": build_distribution(data),
+        "uncertainty_summary": build_uncertainty_summary(data),
         "class_metadata": class_metadata,
         "cost_report": cost_report,
         "consistency_report": consistency_report,
+        "pairwise_matrix": pairwise_matrix,
+        "review_feedback": review_feedback,
+        "local_learning_profile": local_learning_profile,
+        "review_context": review_context(Path("."), rows_source),
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
