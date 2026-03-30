@@ -28,3 +28,6 @@ Notes:
 - `gold_rank` is `1` for the strongest submission in the cohort.
 - `gold_neighbors` should be a JSON array in `gold.jsonl`, or a JSON array string in `gold.csv`.
 - Datasets without explicit gold are not valid release benchmarks and should not be used for gating.
+- Governed review-learning promotions stage benchmark assets under `bench/promoted/benchmark_gold/<proposal_id>/gold.jsonl`.
+- Governed review-learning promotions stage boundary challenge assets under `bench/promoted/boundary_challenges/<proposal_id>/boundary_challenges.jsonl`.
+- Promoted assets require a proposal manifest plus human adjudication metadata before they should be treated as official candidate data.

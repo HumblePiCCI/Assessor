@@ -68,13 +68,16 @@ Key Outputs
 - `outputs/dashboard_data.json` (UI data)
 - `outputs/review_feedback_latest.json` (latest persisted teacher review snapshot)
 - `outputs/local_learning_profile.json` (local review summary and future runtime-prior seed)
+- `outputs/aggregate_learning_summary.json` (governed aggregate-learning eligibility and retention summary)
 - `outputs/usage_log.jsonl` (LLM token usage, if enabled)
 - `outputs/usage_costs.json` (cost report, if enabled)
 
 Notes
 - The conventions scan is a heuristic baseline. For high-stakes marking, replace with a dedicated grammar engine.
 - The consensus step is required before curve-based grading.
-- Teacher review feedback is now split into draft and finalized state. Only finalized reviews feed the local runtime teacher prior; aggregate cross-teacher learning and governance remain future work.
+- Teacher review feedback is split into draft and finalized state. Only finalized reviews feed learning.
+- Local personalization stays scoped and runtime-bounded through the local teacher prior.
+- Product-wide learning now uses anonymized finalized-only records, project-level opt-in or policy-compliant collection, governed export/ingestion packages, and adjudication-required promotion staging under `bench/promoted/` and `inputs/exemplars/promoted/`.
 - See `docs/LEGAL_NOTES.md` before production use.
 - LLM routing: `config/llm_routing.json`
 - Pricing config: `config/pricing.json`

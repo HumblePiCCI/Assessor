@@ -75,7 +75,8 @@ Optional cost report:
 - Serve UI: `python3 scripts/serve_ui.py`
 - Save exploratory edits as draft state
 - Finalize the review only when the curve is settled
-- Only finalized reviews feed the local runtime teacher prior; product-wide aggregate learning remains a later phase
+- Only finalized reviews feed the local runtime teacher prior
+- Product-wide aggregate learning uses governed anonymized exports and adjudication-required promotion staging
 
 12) Final Outputs
 - `outputs/ranked_list.md`

@@ -24,7 +24,8 @@ Notes
 - Pricing is set in `config/pricing.json` and must be kept in sync with model pricing.
 - The cost calculator uses input/output token usage returned by the API.
 - Cost caps are configured in `config/cost_limits.json`.
-- Teacher review feedback can be persisted as draft or finalized state. Only finalized reviews feed the local runtime teacher prior; aggregate cross-teacher learning remains a later governed feature.
+- Teacher review feedback can be persisted as draft or finalized state. Only finalized reviews feed learning.
+- Aggregate cross-teacher learning now requires anonymized finalized-only records plus project-level opt-in or policy-compliant collection before export.
 
 Minimal server (optional)
 - `server/app.py` provides a minimal FastAPI endpoint for synchronous jobs.

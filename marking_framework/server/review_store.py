@@ -3,11 +3,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.aggregate_review_learning import (
+    AGGREGATE_SCHEMA_VERSION,
+    canonical_hash as aggregate_canonical_hash,
+    collection_eligibility,
+    default_aggregate_learning_policy,
+    eligible_record_path,
+    expires_at as aggregate_expires_at,
+    hash_identifier,
+    list_eligible_records,
+    list_tombstones,
+    normalize_aggregate_learning_policy,
+    normalize_reason_tags,
+    now_iso as aggregate_now_iso,
+    prune_expired_records,
+    reason_count_summary,
+    redact_text,
+    tombstone_path,
+    write_json as write_aggregate_json,
+)
 from scripts.local_teacher_prior import build_local_teacher_prior, write_json as write_prior_json
 
 
@@ -59,12 +77,6 @@ def reviews_root(base_dir: Path) -> Path:
     return path
 
 
-def analytics_root(base_dir: Path) -> Path:
-    path = base_dir / "data" / "review_analytics"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def scope_dir(base_dir: Path, scope_id: str) -> Path:
     path = reviews_root(base_dir) / scope_id
     path.mkdir(parents=True, exist_ok=True)
@@ -103,17 +115,15 @@ def local_teacher_prior_path(base_dir: Path, scope_id: str) -> Path:
     return scope_dir(base_dir, scope_id) / "local_teacher_prior.json"
 
 
-def analytics_log_path(base_dir: Path) -> Path:
-    return analytics_root(base_dir) / "anonymized_feedback.jsonl"
+def aggregate_learning_summary_path(base_dir: Path, scope_id: str) -> Path:
+    return scope_dir(base_dir, scope_id) / "aggregate_learning_summary.json"
 
 
-def analytics_salt(base_dir: Path) -> str:
-    salt_path = analytics_root(base_dir) / "salt.txt"
-    if salt_path.exists():
-        return salt_path.read_text(encoding="utf-8").strip()
-    salt = uuid.uuid4().hex
-    salt_path.write_text(salt, encoding="utf-8")
-    return salt
+def aggregate_learning_policy(current_project: dict | None) -> dict:
+    raw = {}
+    if isinstance(current_project, dict):
+        raw = current_project.get("aggregate_learning", {}) if isinstance(current_project.get("aggregate_learning"), dict) else {}
+    return normalize_aggregate_learning_policy(raw or default_aggregate_learning_policy())
 
 
 def load_dashboard(root: Path) -> dict:
@@ -190,11 +200,12 @@ def normalize_student_reviews(raw_reviews: list[dict], students: dict[str, dict]
         if evidence_quality and evidence_quality not in EVIDENCE_QUALITY:
             evidence_quality = "unclear"
         evidence_comment = str((raw or {}).get("evidence_comment", "") or "").strip()
+        reason_tags = normalize_reason_tags((raw or {}).get("reason_tags", []))
         try:
             desired_rank = int((raw or {}).get("desired_rank")) if (raw or {}).get("desired_rank") not in (None, "", "null") else None
         except (TypeError, ValueError):
             desired_rank = None
-        if not any([level_override, evidence_quality, evidence_comment, desired_rank is not None]):
+        if not any([level_override, evidence_quality, evidence_comment, desired_rank is not None, reason_tags]):
             continue
         machine_level = _student_machine_level(machine)
         machine_rank = _student_machine_rank(machine)
@@ -214,6 +225,7 @@ def normalize_student_reviews(raw_reviews: list[dict], students: dict[str, dict]
                 "rank_delta": (desired_rank - machine_rank) if desired_rank is not None and machine_rank is not None else None,
                 "evidence_quality": evidence_quality,
                 "evidence_comment": evidence_comment,
+                "reason_tags": reason_tags,
                 "uncertainty_flags": list(machine.get("uncertainty_flags", []) or []),
                 "uncertainty_reasons": list(machine.get("uncertainty_reasons", []) or []),
             }
@@ -251,6 +263,7 @@ def normalize_pairwise_adjudications(raw_pairs: list[dict], students: dict[str, 
                 "reversed_machine_order": preferred != machine_preferred,
                 "confidence": str((raw or {}).get("confidence", "") or "").strip().lower(),
                 "rationale": str((raw or {}).get("rationale", "") or "").strip(),
+                "reason_tags": normalize_reason_tags((raw or {}).get("reason_tags", [])),
                 "uncertainty_flags": sorted(uncertainty),
             }
         )
@@ -588,27 +601,86 @@ def build_local_learning_profile(scope_id: str, records: list[dict]) -> dict:
     }
 
 
-def _redact_text(text: str, replacements: list[str]) -> str:
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    for candidate in sorted({item for item in replacements if item}, key=len, reverse=True):
-        value = re.sub(re.escape(candidate), "[student]", value, flags=re.IGNORECASE)
-    value = re.sub(r"https?://\S+", "[url]", value)
-    value = re.sub(r"\b[\w.+-]+@[\w.-]+\.\w+\b", "[email]", value)
-    value = re.sub(r"\b\d{4,}\b", "[number]", value)
-    value = re.sub(r'"[^"]+"', "[quote]", value)
-    value = re.sub(r"\s+", " ", value).strip()
-    return value[:500]
+def _redact_text(text: str, replacements: list[str], *, limit: int = 500) -> str:
+    return redact_text(text, replacements, limit=limit)
 
 
-def anonymized_entries(base_dir: Path, scope_id: str, record: dict, students: dict[str, dict]) -> list[dict]:
-    salt = analytics_salt(base_dir)
+def _reason_codes_from_uncertainty(flags: list[str]) -> list[str]:
+    mapped = []
+    lookup = {
+        "boundary_case": "boundary_case",
+        "high_disagreement": "high_disagreement",
+        "low_confidence_rerank_move": "low_confidence_move",
+    }
+    for flag in flags or []:
+        code = lookup.get(str(flag or "").strip())
+        if code and code not in mapped:
+            mapped.append(code)
+    return mapped
 
-    def hashed(value: str) -> str:
-        return hashlib.sha256(f"{salt}:{scope_id}:{value}".encode("utf-8")).hexdigest()[:16]
 
-    entries = []
+def _reason_codes_for_student(student: dict) -> list[str]:
+    evidence_quality = str(student.get("evidence_quality", "") or "").strip().lower()
+    evidence_map = {
+        "strong": "evidence_strong",
+        "thin": "evidence_thin",
+        "misaligned": "evidence_misaligned",
+        "unclear": "evidence_unclear",
+    }
+    codes = list(student.get("reason_tags", []) or [])
+    if student.get("level_override") and student.get("level_override") != student.get("machine_level"):
+        codes.append("level_override")
+    if student.get("rank_delta") not in (None, 0):
+        codes.append("rank_reorder")
+    mapped = evidence_map.get(evidence_quality)
+    if mapped:
+        codes.append(mapped)
+    codes.extend(_reason_codes_from_uncertainty(list(student.get("uncertainty_flags", []) or [])))
+    from_text = []
+    low = str(student.get("evidence_comment", "") or "").strip().lower()
+    keyword_map = {
+        "analysis_depth": ("analysis", "interpret", "depth"),
+        "eloquence": ("eloquent", "elegant", "style", "phrasing"),
+        "insight": ("insight", "nuance", "perceptive"),
+        "completeness": ("complete", "thorough", "fully developed"),
+        "concision": ("concise", "succinct", "tighten"),
+        "organization": ("organization", "structure", "coherence", "flow"),
+        "voice": ("voice", "tone", "authentic"),
+        "evidence_fit": ("evidence", "support", "example", "because", "quote"),
+    }
+    for code, keywords in keyword_map.items():
+        if any(keyword in low for keyword in keywords):
+            from_text.append(code)
+    return sorted({code for code in codes + from_text if code})
+
+
+def _reason_codes_for_pair(pair: dict) -> list[str]:
+    codes = list(pair.get("reason_tags", []) or [])
+    if pair.get("reversed_machine_order"):
+        codes.append("pairwise_reversal")
+    codes.extend(_reason_codes_from_uncertainty(list(pair.get("uncertainty_flags", []) or [])))
+    low = str(pair.get("rationale", "") or "").strip().lower()
+    keyword_map = {
+        "analysis_depth": ("analysis", "interpret", "depth"),
+        "eloquence": ("eloquent", "elegant", "style", "phrasing"),
+        "insight": ("insight", "nuance", "perceptive"),
+        "completeness": ("complete", "thorough", "fully developed"),
+        "concision": ("concise", "succinct", "tighten"),
+        "organization": ("organization", "structure", "coherence", "flow"),
+        "voice": ("voice", "tone", "authentic"),
+        "evidence_fit": ("evidence", "support", "example", "because", "quote"),
+    }
+    for code, keywords in keyword_map.items():
+        if any(keyword in low for keyword in keywords):
+            codes.append(code)
+    return sorted({code for code in codes if code})
+
+
+def _student_hash(base_dir: Path, scope_id: str, student_id: str) -> str:
+    return hash_identifier(base_dir, "student", str(student_id or ""), scope_id=scope_id)
+
+
+def _replacement_markers(students: dict[str, dict]) -> list[str]:
     replacements = []
     for item in students.values():
         replacements.extend(
@@ -618,51 +690,209 @@ def anonymized_entries(base_dir: Path, scope_id: str, record: dict, students: di
                 Path(str(item.get("source_file", "") or "")).stem,
             ]
         )
-    version_context = record.get("version_context", {})
-    pipeline_hash = str(version_context.get("pipeline_manifest", {}).get("manifest_hash", "") or "")
-    calibration_hash = str(version_context.get("calibration_manifest", {}).get("sha256", "") or "")
-    artifact_set_hash = str(version_context.get("final_artifact_set", {}).get("artifact_set_hash", "") or "")
-    project_hash = hashed(scope_id)
+    return replacements
+
+
+def build_aggregate_learning_record(base_dir: Path, scope_id: str, record: dict, students: dict[str, dict], current_project: dict | None) -> dict | None:
+    policy = aggregate_learning_policy(current_project)
+    eligible, reason = collection_eligibility(policy)
+    if str(record.get("review_state", "") or "") != "final" or not eligible:
+        return None
+
+    replacements = _replacement_markers(students)
+    version_context = record.get("version_context", {}) if isinstance(record.get("version_context"), dict) else {}
+    delta = derive_review_delta(record)
+    replay = replay_exports(record)
+    review_hash = hash_identifier(base_dir, "review", str(record.get("review_id", "") or ""), scope_id=scope_id)
+    project_hash = hash_identifier(base_dir, "project", str(scope_id or "workspace"), scope_id=scope_id)
+    scope_hash = hash_identifier(base_dir, "scope", str(scope_id or "workspace"), scope_id=scope_id)
+    aggregate_record_id = aggregate_canonical_hash(
+        {
+            "review_hash": review_hash,
+            "delta_hash": str(delta.get("delta_hash", "") or ""),
+            "saved_at": str(record.get("saved_at", "") or ""),
+            "scope_hash": scope_hash,
+        }
+    )[:24]
+    student_code_map = {}
+    student_actions = []
     for student in record.get("students", []):
-        entries.append(
+        sid = str(student.get("student_id", "") or "")
+        if not sid:
+            continue
+        codes = _reason_codes_for_student(student)
+        student_code_map[sid] = codes
+        student_actions.append(
             {
-                "review_id": record.get("review_id"),
-                "saved_at": record.get("saved_at"),
-                "project_hash": project_hash,
-                "student_hash": hashed(student.get("student_id", "")),
-                "action_type": "student_review",
+                "student_hash": _student_hash(base_dir, scope_id, sid),
                 "machine_level": student.get("machine_level", ""),
-                "level_override": student.get("level_override", ""),
+                "final_level": student.get("level_override") or student.get("machine_level", ""),
                 "machine_rank": student.get("machine_rank"),
                 "desired_rank": student.get("desired_rank"),
+                "rank_delta": student.get("rank_delta"),
+                "level_delta": student.get("level_delta"),
                 "evidence_quality": student.get("evidence_quality", ""),
-                "comment_redacted": _redact_text(student.get("evidence_comment", ""), replacements),
                 "uncertainty_flags": list(student.get("uncertainty_flags", []) or []),
-                "pipeline_manifest_hash": pipeline_hash,
-                "calibration_manifest_hash": calibration_hash,
-                "artifact_set_hash": artifact_set_hash,
+                "reason_tags": list(student.get("reason_tags", []) or []),
+                "normalized_reason_codes": codes,
+                "comment_secondary": _redact_text(student.get("evidence_comment", ""), replacements),
             }
         )
+
+    pairwise_actions = []
     for pair in record.get("pairwise", []):
-        entries.append(
+        higher = str(pair.get("preferred_student_id", "") or "")
+        lower = str(pair.get("lower_student_id", "") or "")
+        codes = _reason_codes_for_pair(pair)
+        pairwise_actions.append(
             {
-                "review_id": record.get("review_id"),
-                "saved_at": record.get("saved_at"),
-                "project_hash": project_hash,
-                "student_hash": hashed(pair.get("preferred_student_id", "")),
-                "action_type": "pairwise_adjudication",
-                "preferred_student_hash": hashed(pair.get("preferred_student_id", "")),
-                "other_student_hash": hashed(pair.get("lower_student_id", "")),
+                "preferred_student_hash": _student_hash(base_dir, scope_id, higher),
+                "other_student_hash": _student_hash(base_dir, scope_id, lower),
                 "reversed_machine_order": bool(pair.get("reversed_machine_order", False)),
                 "confidence": pair.get("confidence", ""),
-                "rationale_redacted": _redact_text(pair.get("rationale", ""), replacements),
                 "uncertainty_flags": list(pair.get("uncertainty_flags", []) or []),
-                "pipeline_manifest_hash": pipeline_hash,
-                "calibration_manifest_hash": calibration_hash,
-                "artifact_set_hash": artifact_set_hash,
+                "reason_tags": list(pair.get("reason_tags", []) or []),
+                "normalized_reason_codes": codes,
+                "rationale_secondary": _redact_text(pair.get("rationale", ""), replacements),
             }
         )
-    return entries
+
+    anonymized_replay = {"benchmark_gold": [], "boundary_challenges": [], "calibration_exemplars": []}
+    for row in replay.get("benchmark_gold", []):
+        sid = str(row.get("student_id", "") or "")
+        anonymized_replay["benchmark_gold"].append(
+            {
+                "student_id": _student_hash(base_dir, scope_id, sid),
+                "gold_level": row.get("gold_level", ""),
+                "gold_band_min": row.get("gold_band_min", ""),
+                "gold_band_max": row.get("gold_band_max", ""),
+                "gold_rank": row.get("gold_rank"),
+                "gold_neighbors": [_student_hash(base_dir, scope_id, str(item or "")) for item in row.get("gold_neighbors", []) or [] if str(item or "").strip()],
+                "boundary_flag": bool(row.get("boundary_flag", False)),
+                "normalized_reason_codes": list(student_code_map.get(sid, [])),
+                "adjudication_notes_secondary": _redact_text(row.get("adjudication_notes", ""), replacements),
+            }
+        )
+    for row in replay.get("boundary_challenges", []):
+        sid = str(row.get("student_id", "") or "")
+        anonymized_replay["boundary_challenges"].append(
+            {
+                "student_id": _student_hash(base_dir, scope_id, sid),
+                "machine_level": row.get("machine_level", ""),
+                "teacher_level": row.get("teacher_level", ""),
+                "machine_rank": row.get("machine_rank"),
+                "teacher_rank": row.get("teacher_rank"),
+                "uncertainty_flags": list(row.get("uncertainty_flags", []) or []),
+                "normalized_reason_codes": list(student_code_map.get(sid, [])),
+                "comment_secondary": _redact_text(row.get("comment", ""), replacements),
+            }
+        )
+    for row in replay.get("calibration_exemplars", []):
+        sid = str(row.get("student_id", "") or "")
+        machine = students.get(sid, {})
+        anonymized_replay["calibration_exemplars"].append(
+            {
+                "student_id": _student_hash(base_dir, scope_id, sid),
+                "target_level": row.get("target_level", ""),
+                "evidence_quality": row.get("evidence_quality", ""),
+                "normalized_reason_codes": list(student_code_map.get(sid, [])),
+                "teacher_comment_secondary": _redact_text(row.get("teacher_comment", ""), replacements),
+                "submission_text_redacted": _redact_text(machine.get("text", ""), replacements, limit=4000),
+            }
+        )
+
+    all_reason_rows = student_actions + pairwise_actions
+    secondary_review_notes = _redact_text(record.get("review_notes", ""), replacements)
+    record_level_codes = sorted(
+        {
+            code
+            for row in all_reason_rows
+            for code in row.get("normalized_reason_codes", []) or []
+        }
+    )
+    local_payload = {
+        "schema_version": AGGREGATE_SCHEMA_VERSION,
+        "aggregate_record_id": aggregate_record_id,
+        "review_hash": review_hash,
+        "review_state": "final",
+        "scope_id": scope_id,
+        "scope_hash": scope_hash,
+        "project_hash": project_hash,
+        "saved_at": str(record.get("saved_at", "") or ""),
+        "retention": {
+            "retention_days": int(policy.get("retention_days", 365) or 365),
+            "expires_at": aggregate_expires_at(str(record.get("saved_at", "") or ""), int(policy.get("retention_days", 365) or 365)),
+        },
+        "collection_policy": {
+            **policy,
+            "eligible": True,
+            "eligibility_reason": reason,
+            "collected_at": aggregate_now_iso(),
+        },
+        "provenance": {
+            "pipeline_manifest_hash": str(version_context.get("pipeline_manifest", {}).get("manifest_hash", "") or ""),
+            "calibration_manifest_hash": str(version_context.get("calibration_manifest", {}).get("sha256", "") or ""),
+            "artifact_set_hash": str(version_context.get("final_artifact_set", {}).get("artifact_set_hash", "") or ""),
+            "source_rank_artifact_hash": str(record.get("review_session", {}).get("source_rank_artifact_hash", "") or ""),
+            "run_scope": version_context.get("pipeline_manifest", {}).get("run_scope", {}) if isinstance(version_context.get("pipeline_manifest", {}), dict) else {},
+            "delta_hash": str(delta.get("delta_hash", "") or ""),
+        },
+        "normalized_reason_codes": record_level_codes,
+        "normalized_reason_counts": reason_count_summary(all_reason_rows),
+        "secondary_evidence": {
+            "review_notes_secondary": secondary_review_notes,
+        },
+        "student_actions": student_actions,
+        "pairwise_actions": pairwise_actions,
+        "replay_candidates": anonymized_replay,
+    }
+    return local_payload
+
+
+def write_aggregate_learning_record(base_dir: Path, scope_id: str, record: dict) -> dict:
+    path = eligible_record_path(base_dir, scope_id, str(record.get("aggregate_record_id", "") or ""))
+    write_aggregate_json(path, record)
+    return {"path": str(path), "aggregate_record_id": record.get("aggregate_record_id", "")}
+
+
+def aggregate_learning_summary(base_dir: Path, scope_id: str, current_project: dict | None) -> dict:
+    policy = aggregate_learning_policy(current_project)
+    eligible_rows = list_eligible_records(base_dir, scope_id=scope_id)
+    tombstones = list_tombstones(base_dir)
+    return {
+        "mode": policy.get("mode", "local_only"),
+        "policy_reference": policy.get("policy_reference", ""),
+        "retention_days": int(policy.get("retention_days", 365) or 365),
+        "collection_allowed": bool(policy.get("eligible", False)),
+        "collection_reason": str(policy.get("eligibility_reason", "") or ""),
+        "scope_record_count": len(eligible_rows),
+        "global_record_count": len(list_eligible_records(base_dir)),
+        "tombstone_count": len(tombstones),
+        "latest_saved_at": max((str(row.get("saved_at", "") or "") for row in eligible_rows), default=""),
+    }
+
+
+def retire_aggregate_scope_records(base_dir: Path, scope_id: str, *, reason: str) -> dict:
+    removed = []
+    for record in list_eligible_records(base_dir, scope_id=scope_id):
+        record_id = str(record.get("aggregate_record_id", "") or "")
+        if not record_id:
+            continue
+        path = eligible_record_path(base_dir, scope_id, record_id)
+        if path.exists():
+            path.unlink()
+        write_aggregate_json(
+            tombstone_path(base_dir, record_id),
+            {
+                "aggregate_record_id": record_id,
+                "deleted_at": aggregate_now_iso(),
+                "reason": reason,
+                "scope_hash": str(record.get("scope_hash", "") or ""),
+                "project_hash": str(record.get("project_hash", "") or ""),
+            },
+        )
+        removed.append(record_id)
+    return {"removed_count": len(removed), "removed_record_ids": removed}
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -769,10 +999,12 @@ def materialize_workspace_review_state(root: Path, bundle: dict) -> None:
     write_json(outputs / "local_learning_profile.json", bundle.get("local_learning_profile", {}))
     write_json(outputs / "local_teacher_prior.json", bundle.get("local_teacher_prior", {}))
     write_json(outputs / "review_replay_exports.json", bundle.get("replay_exports", {}))
+    write_json(outputs / "aggregate_learning_summary.json", bundle.get("aggregate_learning", {}))
 
 
 def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None) -> dict:
     scope_id = review_scope_id(current_project)
+    prune_expired_records(base_dir, scope_id=scope_id)
     draft_payload = load_json(draft_review_path(base_dir, scope_id))
     draft = (
         migrate_review_record(draft_payload)
@@ -812,7 +1044,8 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
             "calibration_exemplars_path": str(export_dir / "calibration_exemplars.jsonl"),
             "calibration_exemplars_count": line_count(export_dir / "calibration_exemplars.jsonl"),
         }
-    analytics_log = analytics_log_path(base_dir)
+    aggregate_summary = aggregate_learning_summary(base_dir, scope_id, current_project)
+    write_json(aggregate_learning_summary_path(base_dir, scope_id), aggregate_summary)
     return {
         "scope_id": scope_id,
         "project": current_project or {"id": scope_id, "name": "Workspace"},
@@ -822,9 +1055,14 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
         "local_learning_profile": profile,
         "local_teacher_prior": prior,
         "replay_exports": replay,
+        "aggregate_learning": aggregate_summary,
         "anonymized_aggregate": {
-            "path": str(analytics_log),
-            "record_count": line_count(analytics_log),
+            "mode": aggregate_summary.get("mode", "local_only"),
+            "collection_allowed": bool(aggregate_summary.get("collection_allowed", False)),
+            "collection_reason": aggregate_summary.get("collection_reason", ""),
+            "record_count": int(aggregate_summary.get("scope_record_count", 0) or 0),
+            "global_record_count": int(aggregate_summary.get("global_record_count", 0) or 0),
+            "tombstone_count": int(aggregate_summary.get("tombstone_count", 0) or 0),
         },
     }
 
@@ -909,17 +1147,16 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
     prior = build_local_teacher_prior(scope_id, records)
     write_prior_json(local_teacher_prior_path(base_dir, scope_id), prior)
     replay = write_replay_exports(base_dir, scope_id, record)
-    analytics_path = analytics_log_path(base_dir)
-    analytics_path.parent.mkdir(parents=True, exist_ok=True)
-    with analytics_path.open("a", encoding="utf-8") as handle:
-        for item in anonymized_entries(base_dir, scope_id, record, students):
-            handle.write(json.dumps(item, ensure_ascii=True) + "\n")
+    aggregate_record = build_aggregate_learning_record(base_dir, scope_id, record, students, current_project)
+    if aggregate_record:
+        write_aggregate_learning_record(base_dir, scope_id, aggregate_record)
     bundle = load_review_bundle(base_dir, root, current_project)
     materialize_workspace_review_state(root, bundle)
     return bundle
 
 
 def delete_review_scope(base_dir: Path, scope_id: str) -> None:
+    retire_aggregate_scope_records(base_dir, scope_id, reason="scope_deleted")
     target = reviews_root(base_dir) / scope_id
     if target.exists():
         for path in sorted(target.rglob("*"), reverse=True):
@@ -930,12 +1167,15 @@ def delete_review_scope(base_dir: Path, scope_id: str) -> None:
         target.rmdir()
 
 
-def review_scope_summary(base_dir: Path, scope_id: str) -> dict:
-    bundle = load_review_bundle(base_dir, base_dir.parent, {"id": scope_id, "name": scope_id})
+def review_scope_summary(base_dir: Path, scope_id: str, current_project: dict | None = None) -> dict:
+    bundle = load_review_bundle(base_dir, base_dir.parent, current_project or {"id": scope_id, "name": scope_id})
     latest = bundle.get("latest_review", {})
     profile = bundle.get("local_learning_profile", {})
+    aggregate_summary = bundle.get("aggregate_learning", {})
     return {
         "latest_saved_at": latest.get("saved_at", ""),
         "student_review_count": int(profile.get("student_review_count", 0) or 0),
         "pairwise_adjudication_count": int(profile.get("pairwise_adjudication_count", 0) or 0),
+        "aggregate_collection_mode": aggregate_summary.get("mode", "local_only"),
+        "aggregate_record_count": int(aggregate_summary.get("scope_record_count", 0) or 0),
     }

@@ -20,13 +20,15 @@ If future work resumes after context compaction, start here.
 
 ## Current Status
 
-The original six foundation phases are implemented in the repo:
+The original eight implementation phases are now in the repo:
 - Phase 1: execution unification and reproducibility
 - Phase 2: explicit-gold benchmark harness
 - Phase 3: global reranker
 - Phase 4: versioned calibration
 - Phase 5: profile-based release gates
 - Phase 6: teacher review persistence and replay exports
+- Phase 7: finalized-review-only local preference prior
+- Phase 8: aggregate review learning governance
 
 That is necessary progress, but it is not the same thing as production readiness.
 
@@ -37,10 +39,11 @@ The current system can:
 - rerank globally from pairwise evidence
 - enforce calibration and gate contracts
 - distinguish draft review from finalized review
-- persist finalized teacher deltas, local learning summaries, scoped local teacher priors, and anonymized aggregate logs
+- persist finalized teacher deltas, local learning summaries, scoped local teacher priors, and governed anonymized aggregate records
+- export and ingest anonymized finalized-only aggregate packages with provenance and retention metadata
+- promote approved benchmark, boundary, and calibration candidates into adjudicated staging assets
 
 The current system does not yet:
-- promote aggregate review traffic into product updates through a governed data path
 - satisfy the operational, privacy, and launch requirements of a production product
 
 ## Working Definition Of SOTA For This Repo
@@ -135,44 +138,9 @@ The repo already has the right major layers. The work is to harden and unify the
 
 ## Remaining Production-Ready Gaps
 
-These are the real blockers between the current branch state and a production-ready product.
+These are now the real blockers between the current branch state and a production-ready product.
 
-### Gap 1: Review Sessions Are Not Yet Split Into Draft And Final
-
-Today the UI can save structured review state, but the system does not yet formalize the distinction between:
-- exploratory draft sorting
-- finalized teacher judgment
-
-That matters because production learning must be based on the final settled curve, not on intermediate drag-and-drop behavior.
-
-### Gap 2: Local Learning Profiles Are Descriptive, Not Yet Operational
-
-`server/review_store.py` produces useful summaries and replay exports, but the runtime ranking path does not yet consume a bounded teacher prior.
-
-That means the system can observe teacher behavior but cannot yet learn from it safely inside `scripts/global_rerank.py`.
-
-### Gap 3: Teacher Preference Reasons Are Not Yet Normalized
-
-The system stores comments and evidence-quality flags, but it does not yet convert teacher adjustments into a stable reason vocabulary such as:
-- eloquence
-- insight
-- completeness
-- concision
-- organization
-- voice
-- evidence fit
-
-Without that layer, the product risks learning from raw movement without understanding why the teacher made the move.
-
-### Gap 4: Aggregate Review Learning Is Not Yet Governed End To End
-
-The repo can write anonymized local aggregate logs, but it does not yet define:
-- finalized-only export rules
-- consent and opt-out behavior
-- secure upload and ingestion
-- human adjudication before promotion into benchmark or calibration assets
-
-### Gap 5: Production Ops, Privacy, And Launch Controls Are Still Missing
+### Gap 1: Production Ops, Privacy, And Launch Controls Are Still Missing
 
 The branch does not yet define the operational contract for:
 - teacher and tenant isolation
@@ -808,45 +776,39 @@ Exit condition
 
 The remaining production-readiness order is:
 
-1. Phase 7: finalized review promotion and local preference prior
-2. Phase 8: aggregate review learning and governance
-3. Phase 9: production hardening and launch contract
+1. Phase 9: production hardening and launch contract
 
 Why this order:
-- Phase 7 is required before teacher feedback can safely affect runtime behavior
-- Phase 8 is required before product-wide learning can use real review traffic
 - Phase 9 is required before any of the above can be launched as a real product
 
 ## Immediate Next Sprint
 
-The next sprint should start the finalized-review boundary.
+The next sprint should start the production hardening contract.
 
 ### Sprint Goal
 
-Let teachers sort and resort freely, but only let finalized landing spots become learning signal.
+Make the current governed learning system launchable, supportable, and privacy-defensible.
 
 ### Sprint Scope
 
-1. Add review session IDs and persist draft state separately from final state
-2. Store the source machine-order artifact hash at session start
-3. Add explicit finalize action in the review API and UI
-4. Derive `review_delta.json` from machine order versus finalized teacher order
-5. Make `local_learning_profile.json` depend on finalized reviews only
-6. Expose delta summaries in dashboard data for auditability
+1. Define tenant and teacher isolation boundaries across queued jobs, review stores, and promoted learning assets
+2. Add retention, deletion, and audit reconciliation checks across local review and ingested aggregate stores
+3. Define production auth and policy configuration requirements
+4. Add queue-health, backpressure, and rollback observability
+5. Write go/no-go launch checks and incident runbooks
 
 ### Sprint Deliverables
 
-- separate draft and final review artifacts
-- explicit finalized-review delta artifact
-- finalized-only local learning profile
-- updated review API and UI state flow
-- tests proving intermediate edits do not become learning data
+- operational config contract
+- retention and deletion audit tooling
+- queue-health and rollback diagnostics
+- production launch checklist and enforcement hooks
 
 ### Sprint Exit Criteria
 
-- a teacher can sort repeatedly without generating learning records
-- finalize produces a deterministic net-delta artifact
-- only finalized reviews contribute to local learning summaries
+- the governed learning path is operationally supportable
+- privacy and deletion semantics are testable end to end
+- launch readiness can be evaluated from code and artifacts, not prose
 
 ## Engineering Rules While Executing This Plan
 
@@ -887,7 +849,7 @@ Use this section as the running status checkpoint.
 - Phase 5: completed
 - Phase 6: completed
 - Phase 7: completed
-- Phase 8: pending
+- Phase 8: completed
 - Phase 9: pending
 
 ### Latest Confirmed Improvements
@@ -901,14 +863,14 @@ Use this section as the running status checkpoint.
 - pairwise consistency checks now feed a deterministic global reranker with explicit final-order artifacts
 - calibration now ships with a versioned manifest, explicit run scope, synthetic bootstrap marking, and drift-aware release checks
 - publish and SOTA gates now evaluate explicit `dev`, `candidate`, and `release` contracts with benchmark, reproducibility, calibration freshness, and budget thresholds
-- teacher review now persists as versioned structured data, emits replay artifacts for benchmark/boundary/calibration refresh, and produces both a local learning profile and an anonymized aggregate feedback log
+- teacher review now persists as versioned structured data, emits replay artifacts for benchmark/boundary/calibration refresh, and produces both a local learning profile and governed anonymized aggregate records
 - teacher review now uses draft-versus-final state, derives finalized net-delta artifacts, and feeds a bounded scoped local teacher prior back into runtime reranking
+- aggregate review learning now enforces finalized-only anonymized eligibility, project-level collection policy, provenance/retention manifests, governed export and ingestion packages, and adjudication-required promotion staging for benchmark, boundary, and calibration candidates
 
 ### Outstanding Architectural Risks
 
-- aggregate review telemetry is not yet governed, transported, or promoted through a formal product-improvement workflow
 - production auth, privacy, retention, and operational launch controls are not yet defined in the codebase
 
 ### Next Decision Point
 
-Start Phase 8 by governing anonymized aggregate review learning, promotion workflows, and privacy-safe upload/retention contracts.
+Start Phase 9 by hardening production auth, isolation, retention reconciliation, audit, and launch controls.

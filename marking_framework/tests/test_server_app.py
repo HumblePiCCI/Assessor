@@ -305,9 +305,10 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     (tmp_path / "inputs" / "exemplars").mkdir()
     (tmp_path / "inputs" / "exemplars" / "level_3.md").write_text("X", encoding="utf-8")
     (tmp_path / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
-    save_resp = client.post("/projects/save", json={"name": "Class A"})
+    save_resp = client.post("/projects/save", json={"name": "Class A", "aggregate_learning_mode": "opt_in", "aggregate_retention_days": 90})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
+    assert save_resp.json()["aggregate_learning"]["mode"] == "opt_in"
     assert not (projects_dir / project_id / "inputs" / "exemplars").exists()
     save_resp2 = client.post("/projects/save", json={"project_id": project_id, "name": "Class A"})
     assert save_resp2.status_code == 200
@@ -379,7 +380,7 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     client = TestClient(app)
-    save_resp = client.post("/projects/save", json={"name": "Class A"})
+    save_resp = client.post("/projects/save", json={"name": "Class A", "aggregate_learning_mode": "opt_in", "aggregate_retention_days": 120})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
     review_resp = client.post(
@@ -411,6 +412,7 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     assert payload["scope_id"] == project_id
     assert payload["draft_review"]["students"][0]["level_override"] == "4"
     assert payload["latest_review"]["students"] == []
+    assert payload["aggregate_learning"]["mode"] == "opt_in"
     get_resp = client.get("/projects/review")
     assert get_resp.status_code == 200
     assert get_resp.json()["draft_review"]["review_state"] == "draft"
@@ -444,8 +446,10 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     assert finalize_payload["latest_review"]["students"][0]["level_override"] == "4"
     assert finalize_payload["replay_exports"]["benchmark_gold_count"] == 2
     assert finalize_payload["latest_delta"]["summary"]["rank_movement_count"] >= 1
+    assert finalize_payload["aggregate_learning"]["scope_record_count"] == 1
     list_resp = client.get("/projects")
     assert list_resp.json()["current"]["review_summary"]["student_review_count"] == 1
+    assert list_resp.json()["current"]["review_summary"]["aggregate_record_count"] == 1
 
 
 def test_projects_load_errors(tmp_path, monkeypatch):

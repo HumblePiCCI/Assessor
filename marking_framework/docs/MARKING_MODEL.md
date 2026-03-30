@@ -79,7 +79,8 @@ Model Components
 - Each saved review is versioned against the pipeline manifest, calibration manifest, and final artifact set.
 - Exploratory edits are saved as draft state; only finalized review becomes learning signal.
 - Finalized review feedback feeds replay exports, local learning summaries, and a bounded scoped local teacher prior used during future reranks in the same scope.
-- Product-wide aggregate learning from teacher feedback remains a governed follow-on stage.
+- Product-wide aggregate learning consumes only anonymized finalized records that pass project-level eligibility policy.
+- Aggregate feedback is exported and ingested through governed package manifests, then promoted into benchmark or exemplar staging only after human adjudication.
 
 6) Two Stars and a Wish (Post-Curve)
 - Generated only after consensus ranking and curve-based grades are finalized.

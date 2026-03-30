@@ -171,9 +171,11 @@ function applyReviewBundle(bundle) {
     const prior = (bundle && bundle.local_teacher_prior) ? bundle.local_teacher_prior : {};
     const delta = (bundle && bundle.latest_delta) ? bundle.latest_delta : {};
     const replay = (bundle && bundle.replay_exports) ? bundle.replay_exports : {};
+    const aggregate = (bundle && bundle.aggregate_learning) ? bundle.aggregate_learning : {};
     const anon = (bundle && bundle.anonymized_aggregate) ? bundle.anonymized_aggregate : {};
     const activeLabel = prior.active ? 'active' : (prior.activation && prior.activation.reason) ? prior.activation.reason.replaceAll('_', ' ') : 'inactive';
-    learningSummary.textContent = `Local profile: ${profile.review_count || 0} finalized reviews, ${profile.student_review_count || 0} student decisions, ${profile.pairwise_adjudication_count || 0} pairwise adjudications. Latest delta: ${delta.summary ? (delta.summary.rank_movement_count || 0) : 0} rank moves, ${delta.summary ? (delta.summary.level_override_count || 0) : 0} level overrides. Local prior: ${activeLabel}. Replay exports: ${replay.benchmark_gold_count || 0} benchmark rows, ${replay.calibration_exemplars_count || 0} exemplar candidates. Anonymous aggregate: ${anon.record_count || 0} records.`;
+    const aggregateMode = aggregate.mode || anon.mode || 'local_only';
+    learningSummary.textContent = `Local profile: ${profile.review_count || 0} finalized reviews, ${profile.student_review_count || 0} student decisions, ${profile.pairwise_adjudication_count || 0} pairwise adjudications. Latest delta: ${delta.summary ? (delta.summary.rank_movement_count || 0) : 0} rank moves, ${delta.summary ? (delta.summary.level_override_count || 0) : 0} level overrides. Local prior: ${activeLabel}. Replay exports: ${replay.benchmark_gold_count || 0} benchmark rows, ${replay.calibration_exemplars_count || 0} exemplar candidates. Aggregate learning: ${aggregateMode} (${anon.record_count || 0} scope records, ${anon.global_record_count || 0} total).`;
   }
 }
 async function loadReviewBundle() {

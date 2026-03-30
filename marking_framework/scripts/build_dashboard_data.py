@@ -335,6 +335,7 @@ def main() -> int:
     review_delta = load_json(Path("outputs/review_delta_latest.json"))
     local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
     local_teacher_prior = load_json(Path("outputs/local_teacher_prior.json"))
+    aggregate_learning = load_json(Path("outputs/aggregate_learning_summary.json"))
     uncertainty_by_student = movement_map(consistency_report)
     boundaries = level_boundaries(Path("config/marking_config.json"))
 
@@ -423,6 +424,7 @@ def main() -> int:
         "review_delta": review_delta,
         "local_learning_profile": local_learning_profile,
         "local_teacher_prior": local_teacher_prior,
+        "aggregate_learning": aggregate_learning,
         "review_context": review_context(Path("."), rows_source),
     }
 

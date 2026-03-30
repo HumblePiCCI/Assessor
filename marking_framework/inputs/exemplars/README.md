@@ -22,3 +22,5 @@ inputs/exemplars/
 Notes
 - These samples avoid copyrighted source texts. Any quoted lines are fictional and part of the sample itself.
 - Teachers can replace or add exemplars by dropping their own files alongside these, using the same filenames.
+- Governed aggregate-learning promotions stage approved calibration candidates under `inputs/exemplars/promoted/<proposal_id>/calibration_exemplars.jsonl`.
+- Promoted calibration candidates remain adjudicated staging assets until they are manually curated into the live exemplar bank.
