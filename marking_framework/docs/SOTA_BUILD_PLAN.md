@@ -30,11 +30,11 @@ The original eight implementation phases are now in the repo:
 - Phase 7: finalized-review-only local preference prior
 - Phase 8: aggregate review learning governance
 - Phase 9: production hardening and launch contract
-
-The next planned implementation phase is:
 - Phase 10: rubric ingestion, normalization, and verification
 
-The production-hardening track is complete in-repo. The next product-quality gap is rubric input variability.
+The planned in-repo implementation phases are now complete.
+
+The production-hardening track is complete in-repo, including the rubric-contract layer that bounds rubric variability before scoring.
 
 The current system can:
 - run through one authoritative queue-backed execution path
@@ -51,14 +51,16 @@ The current system can:
 - expose queue ops summaries, cache validation health, retention maintenance, and gate-failure summaries
 - validate launch readiness with `scripts/validate_production_launch.py`
 - produce manifest-aware rollback plans with `scripts/release_rollback.py`
+- normalize uploaded rubric files into a versioned rubric contract with validation and verification artifacts
+- pause low-confidence rubric parses for teacher confirmation before scoring continues
+- feed confirmed rubric manifests into assessor prompting, calibration scope resolution, dashboard context, and manifest-keyed caching
 
 The remaining work before a real rollout is environmental and operational:
 - wire the strict identity headers to the real auth provider
 - run the launch validator against the real release candidate
 - rehearse the rollback flow against the deployment environment
 
-The next in-repo product-quality phase is architectural:
-- normalize arbitrary teacher rubric files into a verified runtime rubric contract before scoring
+The remaining in-repo work is no longer a missing product-quality phase; it is release execution against the production contract.
 
 ## Working Definition Of SOTA For This Repo
 
@@ -947,7 +949,7 @@ Use this section as the running status checkpoint.
 - Phase 7: completed
 - Phase 8: completed
 - Phase 9: completed
-- Phase 10: pending
+- Phase 10: completed
 
 ### Latest Confirmed Improvements
 
@@ -964,12 +966,13 @@ Use this section as the running status checkpoint.
 - teacher review now uses draft-versus-final state, derives finalized net-delta artifacts, and feeds a bounded scoped local teacher prior back into runtime reranking
 - aggregate review learning now enforces finalized-only anonymized eligibility, project-level collection policy, provenance/retention manifests, governed export and ingestion packages, and adjudication-required promotion staging for benchmark, boundary, and calibration candidates
 - production runtime now enforces strict identity-aware auth in staging/production, isolates projects and teacher workspaces, emits queue ops and retention reports, validates launch readiness, and generates rollback plans
+- rubric ingestion now supports multi-format extraction, normalized rubric manifests, verification artifacts, paused low-confidence confirmation, teacher edits, and runtime consumption of the verified rubric contract
 
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
-- rubric input variability can still weaken scoring quality until Phase 10 is implemented
+- OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
 
 ### Next Decision Point
 
-Start Phase 10 by introducing the normalized-rubric contract and teacher confirmation flow before assessor execution.
+Run the production launch validator and release rehearsal against the live environment, including real rubric uploads across the supported file formats.

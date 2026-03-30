@@ -13,6 +13,7 @@ from scripts.assessor_context import (
 )
 from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria
 from scripts.assessor_utils import extract_docx_text, load_file_text, normalize_ranking_ids, resolve_input_path, summarize_text
+from scripts.rubric_contract import load_json as load_rubric_json, runtime_rubric_context
 from scripts.llm_assessors_core import (
     build_pass1_prompt, build_pass1_repair_prompt, build_pass2_prompt, ensure_dir, json_from_text, load_json, load_routing,
     load_texts, looks_like_prompt_echo, parse_pass1_item, pass1_text_format, preflight_costs,
@@ -56,6 +57,9 @@ def main() -> int:
     parser.add_argument("--exemplars", default="inputs/exemplars", help="Exemplars directory")
     parser.add_argument("--genre", default=None, help="Assignment genre for exemplar selection")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
+    parser.add_argument("--normalized-rubric", default="outputs/normalized_rubric.json", help="Normalized rubric contract JSON")
+    parser.add_argument("--rubric-manifest", default="outputs/rubric_manifest.json", help="Rubric manifest JSON")
+    parser.add_argument("--rubric-verification", default="outputs/rubric_verification.json", help="Rubric verification JSON")
     parser.add_argument("--fallback", choices=["none", "deterministic"], default="deterministic", help="Fallback strategy when model output is invalid")
     parser.add_argument("--require-model-usage", action="store_true", help="Fail if no model outputs are accepted")
     args = parser.parse_args()
@@ -81,7 +85,12 @@ def main() -> int:
     texts = load_texts(Path(args.texts))
     rubric_path = resolve_input_path(Path(args.rubric), "rubric")
     outline_path = resolve_input_path(Path(args.outline), "assignment_outline")
-    rubric = load_file_text(rubric_path)
+    rubric_context = runtime_rubric_context(
+        rubric_path,
+        normalized_path=Path(args.normalized_rubric),
+        verification_path=Path(args.rubric_verification),
+    )
+    rubric = rubric_context["rubric_text"]
     outline = load_file_text(outline_path)
     if not rubric.strip():
         print(f"Rubric text is empty. Check file at {rubric_path}.")
@@ -90,9 +99,11 @@ def main() -> int:
     profiles = load_grade_profiles(Path(args.grade_profiles))
     grade_level = select_grade_level(args.grade_level, metadata)
     grade_context = build_grade_context(grade_level, profiles)
-    genre = args.genre or metadata.get("genre") or metadata.get("assignment_genre")
+    normalized_rubric = rubric_context.get("normalized_rubric", {}) if isinstance(rubric_context.get("normalized_rubric", {}), dict) else {}
+    rubric_manifest = load_rubric_json(Path(args.rubric_manifest))
+    genre = args.genre or metadata.get("genre") or metadata.get("assignment_genre") or normalized_rubric.get("genre")
     if not genre:
-        genre = infer_genre_from_text(rubric, outline)
+        genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
     genre = normalize_genre(genre)
     base_exemplars = Path(args.exemplars)
     exemplars_dir = base_exemplars
@@ -112,7 +123,12 @@ def main() -> int:
     else:
         reqs = {}
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
-    run_scope = build_run_scope(metadata=metadata | {"grade_level": grade_level, "genre": genre}, routing=routing, rubric_path=rubric_path)
+    run_scope = build_run_scope(
+        metadata=metadata | {"grade_level": grade_level, "genre": genre},
+        routing=routing,
+        rubric_path=rubric_path,
+        rubric_manifest=rubric_manifest,
+    )
     gate_error = calibration_gate_error(
         routing,
         assessors,

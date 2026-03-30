@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -53,10 +53,13 @@ function clearLocalState() {
   reviewStudents = {};
   reviewPairs = {};
   reviewSessionId = '';
+  activeJobId = '';
+  rubricReview = null;
   grades = [];
   currentIndex = 0; sliderStudentId = null; focusLock = false;
   resetUploadLabels();
   const status = document.getElementById('pipelineStatus'); if (status) status.textContent = 'Idle';
+  renderRubricReview(null);
   renderRail(); renderDetail();
 }
 async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error('clear failed'); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) { if (status) status.textContent = 'Server unavailable: local view cleared only'; } }
@@ -126,7 +129,175 @@ function ensureReviewPanel() {
   else actions.appendChild(section);
   return section;
 }
+function ensureRubricPanel() {
+  let section = document.getElementById('rubricSection');
+  if (section) return section;
+  const actions = document.getElementById('actions');
+  if (!actions) return null;
+  section = document.createElement('div');
+  section.id = 'rubricSection';
+  section.className = 'auth review-section';
+  section.innerHTML = `
+    <div class="label">Rubric Contract</div>
+    <div id="rubricStatus" class="auth-status">No rubric review pending.</div>
+    <div id="rubricSummary" class="auth-status"></div>
+    <div id="rubricWarnings" class="review-flags"></div>
+    <div class="controls">
+      <div class="control">
+        <label for="rubricGenre">Genre</label>
+        <input id="rubricGenre" type="text" placeholder="literary_analysis" />
+      </div>
+      <div class="control">
+        <label for="rubricFamily">Rubric family</label>
+        <input id="rubricFamily" type="text" placeholder="rubric family" />
+      </div>
+      <div class="control">
+        <label for="rubricCriteria">Criteria (JSON)</label>
+        <textarea id="rubricCriteria" rows="6" placeholder='[{"name":"Ideas and Analysis","weight":0.25}]'></textarea>
+      </div>
+      <div class="control">
+        <label for="rubricLevels">Levels (JSON)</label>
+        <textarea id="rubricLevels" rows="6" placeholder='[{"label":"4","band_min":80,"band_max":100}]'></textarea>
+      </div>
+      <div class="control">
+        <label for="rubricNotes">Verification notes</label>
+        <textarea id="rubricNotes" rows="3" placeholder="Only add notes if our interpretation needs a correction."></textarea>
+      </div>
+    </div>
+    <div class="project-actions">
+      <button id="confirmRubric" class="ghost">Confirm rubric</button>
+      <button id="saveRubricEdits" class="ghost">Save edits & continue</button>
+      <button id="rejectRubric" class="ghost">Reject rubric</button>
+    </div>
+  `;
+  const review = document.getElementById('reviewSection');
+  if (review) actions.insertBefore(section, review);
+  else actions.appendChild(section);
+  return section;
+}
+function safeStringify(value) {
+  if (!value || (Array.isArray(value) && !value.length)) return '[]';
+  try { return JSON.stringify(value, null, 2); } catch (_) { return '[]'; }
+}
+function parseRubricJson(id) {
+  const node = document.getElementById(id);
+  if (!node) return [];
+  const text = (node.value || '').trim();
+  if (!text) return [];
+  return JSON.parse(text);
+}
+function renderRubricReview(bundle) {
+  ensureRubricPanel();
+  rubricReview = bundle || null;
+  const status = document.getElementById('rubricStatus');
+  const summary = document.getElementById('rubricSummary');
+  const warnings = document.getElementById('rubricWarnings');
+  const genre = document.getElementById('rubricGenre');
+  const family = document.getElementById('rubricFamily');
+  const criteria = document.getElementById('rubricCriteria');
+  const levels = document.getElementById('rubricLevels');
+  const notes = document.getElementById('rubricNotes');
+  const confirmBtn = document.getElementById('confirmRubric');
+  const editBtn = document.getElementById('saveRubricEdits');
+  const rejectBtn = document.getElementById('rejectRubric');
+  if (!status || !summary || !warnings || !genre || !family || !criteria || !levels || !notes) return;
+  if (!bundle) {
+    status.textContent = 'No rubric review pending.';
+    summary.textContent = '';
+    warnings.innerHTML = '';
+    genre.value = '';
+    family.value = '';
+    criteria.value = '[]';
+    levels.value = '[]';
+    notes.value = '';
+    [confirmBtn, editBtn, rejectBtn].forEach(btn => { if (btn) btn.disabled = true; });
+    return;
+  }
+  const verification = bundle.rubric_verification || {};
+  const validation = bundle.rubric_validation_report || {};
+  const manifest = bundle.rubric_manifest || {};
+  const projection = verification.editable_projection || {};
+  const pending = bundle.status === 'awaiting_rubric_confirmation' || verification.required_confirmation;
+  const verificationLabel = verification.status ? verification.status.replaceAll('_', ' ') : 'unknown';
+  const confidence = validation.confidence || {};
+  status.textContent = pending
+    ? `Rubric review required before scoring continues. Status: ${verificationLabel}.`
+    : `Rubric status: ${verificationLabel}. Confidence: ${confidence.status || manifest.confidence_status || 'unknown'}.`;
+  summary.textContent = (verification.summary || []).join(' ') || 'No rubric interpretation summary available.';
+  warnings.innerHTML = '';
+  [...(verification.errors || []), ...(verification.warnings || [])].forEach(item => {
+    const badge = document.createElement('span');
+    badge.className = 'review-badge';
+    badge.textContent = String(item || '').replaceAll('_', ' ');
+    warnings.appendChild(badge);
+  });
+  genre.value = projection.genre || '';
+  family.value = projection.rubric_family || '';
+  criteria.value = safeStringify(projection.criteria || []);
+  levels.value = safeStringify(projection.levels || []);
+  notes.value = ((verification.teacher_edits || {}).teacher_notes || '');
+  [confirmBtn, editBtn, rejectBtn].forEach(btn => { if (btn) btn.disabled = !pending; });
+}
+async function fetchRubricReview(jobId) {
+  const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/rubric`));
+  if (!res.ok) throw new Error('Rubric review unavailable');
+  const payload = await res.json();
+  renderRubricReview(payload);
+  return payload;
+}
+async function continueJobAfterRubric(result) {
+  const status = document.getElementById('pipelineStatus');
+  if (result.status === 'failed') {
+    if (status) status.textContent = 'Rubric review rejected.';
+    stopShuffle();
+    stopPipelineNarrative('Rubric review rejected.');
+    return;
+  }
+  if (status) status.textContent = 'Rubric confirmed. Running...';
+  setRunning(true);
+  startPipelineNarrative();
+  startShuffle();
+  const job = await waitForJob(activeJobId);
+  if (job.status === 'awaiting_rubric_confirmation') {
+    await fetchRubricReview(activeJobId);
+    return;
+  }
+  const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
+  if (!dataRes.ok) throw new Error('Dashboard data unavailable');
+  previewStudents = [];
+  await boot(await dataRes.json());
+  if (status) status.textContent = 'Complete';
+  stopShuffle();
+  stopPipelineNarrative('Done. Review is ready.');
+}
+async function submitRubricReview(action) {
+  if (!activeJobId) return;
+  const status = document.getElementById('rubricStatus');
+  if (status) status.textContent = action === 'reject' ? 'Rejecting rubric...' : 'Submitting rubric confirmation...';
+  try {
+    const payload = { action };
+    if (action === 'edit') {
+      payload.genre = (document.getElementById('rubricGenre')?.value || '').trim();
+      payload.rubric_family = (document.getElementById('rubricFamily')?.value || '').trim();
+      payload.teacher_notes = (document.getElementById('rubricNotes')?.value || '').trim();
+      payload.criteria = parseRubricJson('rubricCriteria');
+      payload.levels = parseRubricJson('rubricLevels');
+    }
+    const res = await fetch(apiUrl(`/pipeline/v2/jobs/${activeJobId}/rubric`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('Rubric confirmation failed');
+    const result = await res.json();
+    renderRubricReview(result);
+    await continueJobAfterRubric(result);
+  } catch (err) {
+    if (status) status.textContent = `Rubric confirmation failed: ${err.message || 'unknown error'}`;
+  }
+}
 function applyReviewBundle(bundle) {
+  ensureRubricPanel();
   reviewBundle = bundle || null;
   reviewStudents = {};
   reviewPairs = {};
@@ -179,6 +350,7 @@ function applyReviewBundle(bundle) {
   }
 }
 async function loadReviewBundle() {
+  ensureRubricPanel();
   ensureReviewPanel();
   try {
     const res = await fetch(apiUrl('/projects/review'));
@@ -457,7 +629,7 @@ function startShuffle() { if (shuffleTimer || !previewStudents.length) return; s
 function stopShuffle() { if (shuffleTimer) clearInterval(shuffleTimer); shuffleTimer = null; }
 function updatePreviewFromUploads() { const essays = document.getElementById('uploadEssays'); if (!essays || !essays.files || !essays.files.length) return; previewStudents = Array.from(essays.files).map((f, idx) => ({ student_id: baseName(f.name), rank: idx + 1, text: '' })); currentIndex = 0; renderRail(true); }
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
+async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
 async function runPipeline() {
   const status = document.getElementById('pipelineStatus'); if (!status) return;
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
@@ -468,7 +640,7 @@ async function runPipeline() {
   if (!mode) { status.textContent = 'Connect Codex or API key'; return; }
   const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode);
   status.textContent = 'Running...'; setRunning(true); startPipelineNarrative(); startShuffle();
-  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); const jobId = submit.job_id; const job = submit.status === 'completed' ? submit : await waitForJob(jobId); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || jobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); status.textContent = 'Complete'; stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); }
+  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { status.textContent = 'Rubric confirmation needed'; stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { status.textContent = 'Rubric confirmation needed'; stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); status.textContent = 'Complete'; stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); }
 }
 function setupUploads() {
   document.querySelectorAll('.upload').forEach(zone => {
@@ -493,6 +665,7 @@ function setupUploads() {
 }
 function setupControls() {
   if (window.__heroControlsBound) return; window.__heroControlsBound = true;
+  ensureRubricPanel();
   ensureReviewPanel();
   document.getElementById('prevBtn').addEventListener('click', () => {
     if (currentIndex > 0) scrollToIndex(currentIndex - 1, true);
@@ -584,6 +757,9 @@ function setupControls() {
   const clearBtn = document.getElementById('clearProject'); if (clearBtn) clearBtn.addEventListener('click', clearProject);
   const loadBtn = document.getElementById('loadProject'); if (loadBtn) loadBtn.addEventListener('click', loadProject);
   const delBtn = document.getElementById('deleteProject'); if (delBtn) delBtn.addEventListener('click', deleteProject);
+  const confirmRubric = document.getElementById('confirmRubric'); if (confirmRubric) confirmRubric.addEventListener('click', () => submitRubricReview('confirm'));
+  const saveRubricEdits = document.getElementById('saveRubricEdits'); if (saveRubricEdits) saveRubricEdits.addEventListener('click', () => submitRubricReview('edit'));
+  const rejectRubric = document.getElementById('rejectRubric'); if (rejectRubric) rejectRubric.addEventListener('click', () => submitRubricReview('reject'));
 }
 async function boot(payload) {
   data = payload;
@@ -599,6 +775,17 @@ async function boot(payload) {
   document.getElementById('viewToggle').textContent = document.body.dataset.view === 'split' ? 'Single' : 'Split';
   await detectApiBase();
   setupControls();
+  renderRubricReview(
+    payload && (payload.rubric_verification || payload.normalized_rubric || payload.rubric_manifest)
+      ? {
+          status: 'completed',
+          normalized_rubric: payload.normalized_rubric || {},
+          rubric_manifest: payload.rubric_manifest || {},
+          rubric_validation_report: payload.rubric_validation_report || {},
+          rubric_verification: payload.rubric_verification || {},
+        }
+      : null,
+  );
   await loadReviewBundle();
   renderRail();
   scrollToIndex(0, false);

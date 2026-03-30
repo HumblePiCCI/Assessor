@@ -8,10 +8,12 @@ from server import step_runner
 def test_pipeline_steps_structure():
     steps = step_runner.pipeline_steps()
     ids = [item["id"] for item in steps]
-    assert ids[0] == "extract"
+    assert ids[0] == "rubric"
     assert ids[-1] == "dashboard"
-    assert {"assess", "consistency", "rerank", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
+    assert {"rubric", "assess", "consistency", "rerank", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
     assert all("cmd" in item and "label" in item for item in steps)
+    rubric = next(item for item in steps if item["id"] == "rubric")
+    assert "normalize_rubric.py" in " ".join(str(part) for part in rubric["cmd"])
     extract = next(item for item in steps if item["id"] == "extract")
     assert "--inputs" in extract["cmd"]
     assert "inputs/submissions" in extract["cmd"]

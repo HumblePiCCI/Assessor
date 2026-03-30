@@ -225,6 +225,8 @@ def review_context(root: Path, rows_source: Path | None) -> dict:
         "grade_curve": root / "outputs" / "grade_curve.csv",
         "consistency_report": root / "outputs" / "consistency_report.json",
         "pairwise_matrix": root / "outputs" / "pairwise_matrix.json",
+        "rubric_manifest": root / "outputs" / "rubric_manifest.json",
+        "rubric_verification": root / "outputs" / "rubric_verification.json",
     }.items():
         if path and Path(path).exists():
             artifact_hashes[name] = file_sha256(Path(path))
@@ -336,6 +338,10 @@ def main() -> int:
     local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
     local_teacher_prior = load_json(Path("outputs/local_teacher_prior.json"))
     aggregate_learning = load_json(Path("outputs/aggregate_learning_summary.json"))
+    normalized_rubric = load_json(Path("outputs/normalized_rubric.json"))
+    rubric_manifest = load_json(Path("outputs/rubric_manifest.json"))
+    rubric_validation_report = load_json(Path("outputs/rubric_validation_report.json"))
+    rubric_verification = load_json(Path("outputs/rubric_verification.json"))
     uncertainty_by_student = movement_map(consistency_report)
     boundaries = level_boundaries(Path("config/marking_config.json"))
 
@@ -425,6 +431,10 @@ def main() -> int:
         "local_learning_profile": local_learning_profile,
         "local_teacher_prior": local_teacher_prior,
         "aggregate_learning": aggregate_learning,
+        "normalized_rubric": normalized_rubric,
+        "rubric_manifest": rubric_manifest,
+        "rubric_validation_report": rubric_validation_report,
+        "rubric_verification": rubric_verification,
         "review_context": review_context(Path("."), rows_source),
     }
 

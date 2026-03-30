@@ -3,6 +3,11 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+try:
+    from scripts.document_extract import extract_document_text
+except ImportError:  # pragma: no cover - Support running as a script
+    from document_extract import extract_document_text  # pragma: no cover
+
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
@@ -23,10 +28,11 @@ def load_file_text(path: Path) -> str:
     if not path.exists():
         return ""
     if path.suffix.lower() == ".pages":
-        raise ValueError(f"Unsupported file format for {path.name}. Export as .docx or .txt.")
+        raise ValueError(f"Unsupported file format for {path.name}. Export as PDF, DOCX, RTF, TXT, or Markdown.")
     if path.suffix.lower() == ".docx":
         return extract_docx_text(path)
-    return path.read_text(encoding="utf-8", errors="ignore")
+    text, _meta = extract_document_text(path)
+    return text
 
 
 def resolve_input_path(path: Path, stem: str) -> Path:
@@ -36,7 +42,7 @@ def resolve_input_path(path: Path, stem: str) -> Path:
     candidates = [p for p in search_dir.glob(f"{stem}.*") if p.is_file()]
     if not candidates:
         return path
-    preferred = {".md": 0, ".txt": 1, ".docx": 2}
+    preferred = {".md": 0, ".txt": 1, ".docx": 2, ".rtf": 3, ".pdf": 4, ".png": 5, ".jpg": 6, ".jpeg": 7}
     candidates.sort(key=lambda p: (preferred.get(p.suffix.lower(), 99), p.name))
     return candidates[0]
 

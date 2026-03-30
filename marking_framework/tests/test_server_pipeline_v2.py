@@ -12,6 +12,8 @@ class FakeQueue:
         self.job = None
         self.data = None
         self.events = None
+        self.rubric = None
+        self.confirmed = None
 
     def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
         self.submitted = {
@@ -41,6 +43,17 @@ class FakeQueue:
         payload = self.events or {"events": [], "next_after": after, "done": False, "status": "running"}
         payload["job_id"] = job_id
         return payload
+
+    def rubric_status(self, job_id, identity=None):
+        if job_id != "j1":
+            return None
+        return self.rubric or {"job_id": job_id, "status": "awaiting_rubric_confirmation", "rubric_verification": {"status": "needs_confirmation"}}
+
+    def confirm_rubric(self, job_id, action, teacher_edits=None, identity=None):
+        if job_id != "j1":
+            return None
+        self.confirmed = {"action": action, "teacher_edits": teacher_edits or {}, "identity": dict(identity or {})}
+        return self.rubric_status(job_id, identity=identity) | {"status": "queued"}
 
 
 def _files():
@@ -123,3 +136,25 @@ def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     assert missing.status_code == 404
     asset = client.get("/progress_stream.js")
     assert asset.status_code == 200
+
+
+def test_pipeline_v2_rubric_endpoints(monkeypatch):
+    fake = FakeQueue()
+    fake.rubric = {
+        "job_id": "j1",
+        "status": "awaiting_rubric_confirmation",
+        "rubric_manifest": {"rubric_family": "rubric_a"},
+        "rubric_verification": {"status": "needs_confirmation", "editable_projection": {"criteria": [], "levels": []}},
+    }
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    client = TestClient(app)
+    status = client.get("/pipeline/v2/jobs/j1/rubric")
+    assert status.status_code == 200
+    assert status.json()["rubric_manifest"]["rubric_family"] == "rubric_a"
+    confirm = client.post(
+        "/pipeline/v2/jobs/j1/rubric",
+        json={"action": "edit", "genre": "argumentative", "criteria": [{"name": "Insight", "weight": 1.0}], "levels": [{"label": "4", "band_min": 80, "band_max": 100}]},
+    )
+    assert confirm.status_code == 200
+    assert fake.confirmed["action"] == "edit"
+    assert fake.confirmed["teacher_edits"]["genre"] == "argumentative"

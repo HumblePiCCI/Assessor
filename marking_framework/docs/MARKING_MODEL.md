@@ -21,7 +21,15 @@ Model Components
 - Assessors score each rubric criterion on the rubric's scale.
 - Scores are converted to points and totaled per essay.
 - Rubric scores are normalized to 0-100 for aggregation.
-- Current runtime note: rubric text is consumed directly plus the canonical `rubric_criteria.json` scaffold. Planned Phase 10 adds explicit rubric ingestion, normalization, and teacher verification before scoring.
+- The runtime now normalizes uploaded rubrics into a verified rubric contract before scoring.
+- Supported rubric sources include plain text, Markdown, DOCX, RTF, PDF, and image-backed files with OCR fallback when available.
+- The authoritative runtime artifacts are:
+  - `outputs/normalized_rubric.json`
+  - `outputs/rubric_manifest.json`
+  - `outputs/rubric_validation_report.json`
+  - `outputs/rubric_verification.json`
+- High-confidence parses auto-confirm, medium-confidence parses proceed with visible warnings, and low-confidence parses pause for teacher confirmation or small edits before scoring continues.
+- Assessors and calibration consume the normalized rubric contract plus the original rubric text, rather than relying on raw rubric text alone.
 - Board level bands are applied to rubric percent:
   - Level 1 = 50-59% (D)
   - Level 2 = 60-69% (C)

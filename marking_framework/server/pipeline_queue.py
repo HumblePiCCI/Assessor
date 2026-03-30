@@ -11,7 +11,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.calibration_contract import build_run_scope, calibration_manifest_path, load_json as load_contract_json
+from scripts.calibration_contract import build_run_scope, calibration_manifest_path, canonical_json_hash, load_json as load_contract_json
+from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
+from scripts.assessor_utils import resolve_input_path
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
 from server.runtime_context import identity_can_access, identity_token, launch_contract
 from server.step_runner import (
@@ -36,6 +38,7 @@ CORE_CONFIG_PATHS = (
     "config/rubric_criteria.json",
     "config/sota_gate.json",
 )
+RUBRIC_CRITERIA_CONFIG = "config/rubric_criteria.json"
 GATE_CONFIG_PATHS = (
     "config/accuracy_gate.json",
     "config/sota_gate.json",
@@ -143,6 +146,15 @@ def _file_manifest(path: Path, label: str) -> dict:
         "path": label,
         "exists": path.exists(),
         "sha256": _file_sha256(path),
+    }
+
+
+def _json_artifact_manifest(payload: dict | None, label: str) -> dict:
+    normalized = payload if isinstance(payload, dict) else {}
+    return {
+        "path": label,
+        "exists": bool(normalized),
+        "sha256": stable_contract_hash(normalized) if normalized else None,
     }
 
 
@@ -270,6 +282,7 @@ def build_pipeline_manifest(
     outline_path: Path,
     submissions_dir: Path,
     extra_paths: list[Path] | None = None,
+    rubric_artifacts: dict | None = None,
 ) -> dict:
     root = root.resolve()
     extra_paths = extra_paths or []
@@ -298,7 +311,14 @@ def build_pipeline_manifest(
         )
     routing_payload = load_contract_json(root / "config" / "llm_routing.json")
     class_metadata_payload = load_contract_json(root / CLASS_METADATA_ARTIFACT)
-    run_scope = build_run_scope(metadata=class_metadata_payload, routing=routing_payload, rubric_path=rubric_path)
+    rubric_artifacts = rubric_artifacts or {}
+    rubric_manifest_payload = rubric_artifacts.get("rubric_manifest", {}) if isinstance(rubric_artifacts.get("rubric_manifest", {}), dict) else {}
+    run_scope = build_run_scope(
+        metadata=class_metadata_payload,
+        routing=routing_payload,
+        rubric_path=rubric_path,
+        rubric_manifest=rubric_manifest_payload,
+    )
     manifest = {
         "manifest_version": PIPELINE_MANIFEST_VERSION,
         "execution_engine": "pipeline_queue",
@@ -313,6 +333,16 @@ def build_pipeline_manifest(
         },
         "uploaded_inputs": _collect_input_files(root, rubric_path, outline_path, submissions_dir),
         "run_scope": run_scope,
+        "rubric_contract": {
+            "summary": rubric_contract_summary(rubric_artifacts),
+            "normalized_rubric": _json_artifact_manifest(rubric_artifacts.get("normalized_rubric"), RUBRIC_ARTIFACTS["normalized_rubric"]),
+            "rubric_manifest": _json_artifact_manifest(rubric_artifacts.get("rubric_manifest"), RUBRIC_ARTIFACTS["rubric_manifest"]),
+            "rubric_validation_report": _json_artifact_manifest(
+                rubric_artifacts.get("rubric_validation_report"),
+                RUBRIC_ARTIFACTS["rubric_validation_report"],
+            ),
+            "rubric_verification": _json_artifact_manifest(rubric_artifacts.get("rubric_verification"), RUBRIC_ARTIFACTS["rubric_verification"]),
+        },
         "prompt_hashes": prompt_manifest,
         "config_hashes": config_hashes,
         "extra_hashes": extra_hashes,
@@ -340,6 +370,7 @@ def snapshot_hash(
     submissions_dir: Path,
     extra_paths: list[Path],
     root: Path | None = None,
+    rubric_artifacts: dict | None = None,
 ) -> str:
     manifest = build_pipeline_manifest(
         root=(root or _infer_root(rubric_path, outline_path, submissions_dir, extra_paths)),
@@ -348,6 +379,7 @@ def snapshot_hash(
         outline_path=outline_path,
         submissions_dir=submissions_dir,
         extra_paths=extra_paths,
+        rubric_artifacts=rubric_artifacts,
     )
     return manifest["manifest_hash"]
 
@@ -447,6 +479,39 @@ class PipelineQueue:
     def _artifact_dir(self, manifest_hash_value: str, tenant_id: str) -> Path:
         return self.artifacts_dir / self._tenant_token(tenant_id or "local-dev-tenant") / manifest_hash_value
 
+    def _job_inputs_dir(self, job_dir: Path) -> Path:
+        return job_dir / "inputs"
+
+    def _rubric_output_paths(self, root: Path) -> dict[str, Path]:
+        return {key: root / rel_path for key, rel_path in RUBRIC_ARTIFACTS.items()}
+
+    def _load_rubric_artifacts_from_root(self, root: Path) -> dict:
+        artifacts = {}
+        for key, path in self._rubric_output_paths(root).items():
+            artifacts[key] = _load_json(path)
+        return artifacts
+
+    def _write_rubric_artifacts(self, root: Path, artifacts: dict):
+        for key, path in self._rubric_output_paths(root).items():
+            self._write_json(path, artifacts.get(key, {}) if isinstance(artifacts.get(key, {}), dict) else {})
+
+    def _input_paths_from_root(self, root: Path) -> tuple[Path, Path, Path]:
+        inputs_dir = root / "inputs"
+        rubric_path = resolve_input_path(inputs_dir / "rubric.md", "rubric")
+        outline_path = resolve_input_path(inputs_dir / "assignment_outline.md", "assignment_outline")
+        submissions_dir = inputs_dir / "submissions"
+        return rubric_path, outline_path, submissions_dir
+
+    def _build_rubric_artifacts(self, rubric_path: Path, outline_path: Path, *, existing_verification: dict | None = None, teacher_edits: dict | None = None, action: str | None = None) -> dict:
+        return build_rubric_artifacts(
+            rubric_path,
+            outline_path=outline_path,
+            criteria_config_path=self.root / RUBRIC_CRITERIA_CONFIG,
+            existing_verification=existing_verification,
+            teacher_edits=teacher_edits,
+            action=action,
+        )
+
     def _write_json(self, path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -540,7 +605,18 @@ class PipelineQueue:
             self._thread = threading.Thread(target=self._worker_loop, daemon=True)
             self._thread.start()
 
-    def _insert_job(self, job_id: str, snap: str, mode: str, job_dir: Path, *, tenant_id: str, teacher_id: str, project_id: str):
+    def _insert_job(
+        self,
+        job_id: str,
+        snap: str,
+        mode: str,
+        job_dir: Path,
+        *,
+        tenant_id: str,
+        teacher_id: str,
+        project_id: str,
+        status: str = "queued",
+    ):
         stamp = now_iso()
         with self._conn() as conn:
             conn.execute(
@@ -551,9 +627,9 @@ class PipelineQueue:
                     progress_current, progress_total, progress_stage, progress_message,
                     tenant_id, teacher_id, project_id, started_at, completed_at,
                     cache_status, cache_source_job_id, gate_summary
-                ) VALUES(?, ?, ?, 'queued', ?, NULL, '', ?, ?, 0, 0, '', '', ?, ?, ?, '', '', 'miss', '', '{}')
+                ) VALUES(?, ?, ?, ?, ?, NULL, '', ?, ?, 0, 0, '', '', ?, ?, ?, '', '', 'miss', '', '{}')
                 """,
-                (job_id, snap, mode, str(job_dir), stamp, stamp, tenant_id, teacher_id, project_id),
+                (job_id, snap, mode, status, str(job_dir), stamp, stamp, tenant_id, teacher_id, project_id),
             )
             conn.commit()
 
@@ -767,7 +843,17 @@ class PipelineQueue:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    def _stage_workspace(self, job_id: str, tenant_id: str, job_dir: Path, manifest: dict, rubric_path: Path, outline_path: Path, submissions_dir: Path):
+    def _stage_workspace(
+        self,
+        job_id: str,
+        tenant_id: str,
+        job_dir: Path,
+        manifest: dict,
+        rubric_path: Path,
+        outline_path: Path,
+        submissions_dir: Path,
+        rubric_artifacts: dict,
+    ):
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
@@ -790,6 +876,8 @@ class PipelineQueue:
             calibration_manifest_dst = workspace_dir / CALIBRATION_MANIFEST_ARTIFACT
             calibration_manifest_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(calibration_manifest_src, calibration_manifest_dst)
+        self._write_rubric_artifacts(workspace_dir, rubric_artifacts)
+        self._write_rubric_artifacts(job_dir, rubric_artifacts)
         self._write_json(self._manifest_path(job_dir), manifest)
         self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
 
@@ -807,6 +895,7 @@ class PipelineQueue:
         identity = dict(identity or {})
         tenant_id = str(identity.get("tenant_id", "") or "local-dev-tenant")
         teacher_id = str(identity.get("teacher_id", "") or "local-dev-teacher")
+        rubric_artifacts = self._build_rubric_artifacts(rubric_path, outline_path)
         manifest = build_pipeline_manifest(
             root=self.root,
             mode=mode,
@@ -814,39 +903,63 @@ class PipelineQueue:
             outline_path=outline_path,
             submissions_dir=submissions_dir,
             extra_paths=extra_paths,
+            rubric_artifacts=rubric_artifacts,
         )
         snap = manifest["manifest_hash"]
-        cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
-        if cached:
-            self._update_ops_state(lambda payload: payload.__setitem__("cache_hits", int(payload.get("cache_hits", 0) or 0) + 1))
-            return {
-                "job_id": cached["job_id"],
-                "status": "completed",
-                "cached": True,
-                "snapshot_hash": snap,
-                "manifest_hash": snap,
-            }
+        requires_confirmation = bool((rubric_artifacts.get("rubric_verification", {}) or {}).get("required_confirmation", False))
+        if not requires_confirmation:
+            cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
+            if cached:
+                self._update_ops_state(lambda payload: payload.__setitem__("cache_hits", int(payload.get("cache_hits", 0) or 0) + 1))
+                return {
+                    "job_id": cached["job_id"],
+                    "status": "completed",
+                    "cached": True,
+                    "snapshot_hash": snap,
+                    "manifest_hash": snap,
+                    "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
+                }
         self._update_ops_state(lambda payload: payload.__setitem__("cache_misses", int(payload.get("cache_misses", 0) or 0) + 1))
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id, tenant_id)
         job_dir.mkdir(parents=True, exist_ok=True)
         self._event_path(job_dir).touch()
-        self._stage_workspace(job_id, tenant_id, job_dir, manifest, rubric_path, outline_path, submissions_dir)
-        self._insert_job(job_id, snap, mode, job_dir, tenant_id=tenant_id, teacher_id=teacher_id, project_id=project_id)
+        self._stage_workspace(job_id, tenant_id, job_dir, manifest, rubric_path, outline_path, submissions_dir, rubric_artifacts)
+        initial_status = "awaiting_rubric_confirmation" if requires_confirmation else "queued"
+        self._insert_job(
+            job_id,
+            snap,
+            mode,
+            job_dir,
+            tenant_id=tenant_id,
+            teacher_id=teacher_id,
+            project_id=project_id,
+            status=initial_status,
+        )
         self._append_event(
             job_dir,
             "queued",
             f"Job {job_id} accepted for processing",
             event="start",
         )
-        self._start_worker()
-        self._queue.put(job_id)
+        if requires_confirmation:
+            self._append_event(
+                job_dir,
+                "rubric",
+                "Rubric normalization needs teacher confirmation before scoring can continue",
+                level="warning",
+                event="message",
+            )
+        else:
+            self._start_worker()
+            self._queue.put(job_id)
         return {
             "job_id": job_id,
-            "status": "queued",
+            "status": initial_status,
             "cached": False,
             "snapshot_hash": snap,
             "manifest_hash": snap,
+            "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
         }
 
     def load_dashboard_data(self, job_id: str, identity: dict | None = None) -> dict | None:
@@ -857,6 +970,104 @@ class PipelineQueue:
         if not artifact.exists():
             return None
         return json.loads(artifact.read_text(encoding="utf-8"))
+
+    def rubric_status(self, job_id: str, identity: dict | None = None) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
+        if not job:
+            return None
+        job_dir = Path(job["job_dir"])
+        workspace_dir = self._workspace_dir(job_id, job.get("tenant_id", ""))
+        artifact_root = workspace_dir if workspace_dir.exists() else job_dir
+        artifacts = self._load_rubric_artifacts_from_root(artifact_root)
+        return {
+            "job_id": job_id,
+            "status": job.get("status", ""),
+            "manifest_hash": job.get("manifest_hash", ""),
+            **artifacts,
+        }
+
+    def confirm_rubric(
+        self,
+        job_id: str,
+        *,
+        action: str,
+        teacher_edits: dict | None = None,
+        identity: dict | None = None,
+    ) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
+        if not job:
+            return None
+        status = str(job.get("status", "") or "")
+        if status not in {"awaiting_rubric_confirmation", "queued"}:
+            return self.rubric_status(job_id, identity=identity)
+        job_dir = Path(job["job_dir"])
+        workspace_dir = self._workspace_dir(job_id, job.get("tenant_id", ""))
+        rubric_path, outline_path, submissions_dir = self._input_paths_from_root(job_dir)
+        existing_verification = self._load_rubric_artifacts_from_root(workspace_dir).get("rubric_verification", {})
+        if action == "reject":
+            self._append_event(job_dir, "rubric", "Teacher rejected rubric interpretation", level="error", event="failed")
+            self._update_job(
+                job_id,
+                "failed",
+                error="Rubric interpretation rejected by teacher",
+                stage="rubric",
+                message="Failed: Rubric rejected",
+                completed_at=now_iso(),
+            )
+            return self.rubric_status(job_id, identity=identity)
+
+        rubric_artifacts = self._build_rubric_artifacts(
+            rubric_path,
+            outline_path,
+            existing_verification=existing_verification,
+            teacher_edits=teacher_edits or {},
+            action="edit" if teacher_edits else "confirm",
+        )
+        manifest = build_pipeline_manifest(
+            root=self.root,
+            mode=job["mode"],
+            rubric_path=rubric_path,
+            outline_path=outline_path,
+            submissions_dir=submissions_dir,
+            extra_paths=[],
+            rubric_artifacts=rubric_artifacts,
+        )
+        snap = manifest["manifest_hash"]
+        self._write_rubric_artifacts(job_dir, rubric_artifacts)
+        self._write_rubric_artifacts(workspace_dir, rubric_artifacts)
+        self._write_json(self._manifest_path(job_dir), manifest)
+        self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
+        with self._conn() as conn:
+            conn.execute("UPDATE jobs SET snapshot_hash=?, updated_at=? WHERE id=?", (snap, now_iso(), job_id))
+            conn.commit()
+        cached = self._find_completed_snapshot(snap, str(job.get("tenant_id", "") or ""), str(job.get("teacher_id", "") or ""))
+        if cached:
+            artifact = Path(cached["artifact_path"])
+            self._update_job(
+                job_id,
+                "completed",
+                artifact=artifact,
+                current=len(pipeline_steps()),
+                total=len(pipeline_steps()),
+                stage="completed",
+                message="Loaded cached artifact after rubric confirmation",
+                completed_at=now_iso(),
+                cache_status="hit",
+                cache_source_job_id=cached["job_id"],
+            )
+            self._append_event(job_dir, "rubric", "Rubric confirmed; matched a cached manifest-identical run", event="complete")
+            return self.rubric_status(job_id, identity=identity)
+        self._append_event(job_dir, "rubric", "Rubric confirmed; queueing full scoring run", event="complete")
+        self._update_job(
+            job_id,
+            "queued",
+            stage="rubric",
+            message="Rubric confirmed; queued for scoring",
+            completed_at="",
+        )
+        self._start_worker()
+        self._queue.put(job_id)
+        return self.rubric_status(job_id, identity=identity)
 
     def _worker_loop(self):
         while True:
@@ -932,6 +1143,12 @@ class PipelineQueue:
             counts = {
                 "queued": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='queued'" if where else "SELECT COUNT(*) FROM jobs WHERE status='queued'", tuple(params)).fetchone()[0],
                 "running": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='running'" if where else "SELECT COUNT(*) FROM jobs WHERE status='running'", tuple(params)).fetchone()[0],
+                "awaiting_rubric_confirmation": conn.execute(
+                    f"SELECT COUNT(*) FROM jobs {where} AND status='awaiting_rubric_confirmation'"
+                    if where
+                    else "SELECT COUNT(*) FROM jobs WHERE status='awaiting_rubric_confirmation'",
+                    tuple(params),
+                ).fetchone()[0],
                 "completed": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='completed'" if where else "SELECT COUNT(*) FROM jobs WHERE status='completed'", tuple(params)).fetchone()[0],
                 "failed": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='failed'" if where else "SELECT COUNT(*) FROM jobs WHERE status='failed'", tuple(params)).fetchone()[0],
             }
@@ -1043,10 +1260,13 @@ class PipelineQueue:
             baseline = self._artifact_snapshot(workspace_dir)
             metadata = ensure_class_metadata(workspace_dir / "inputs")
             bias_path = ensure_bootstrap_calibration(workspace_dir, metadata)
+            rubric_manifest = _load_json(workspace_dir / RUBRIC_ARTIFACTS["rubric_manifest"])
+            rubric_input = resolve_input_path(workspace_dir / "inputs" / "rubric.md", "rubric")
             manifest["run_scope"] = build_run_scope(
                 metadata=metadata,
                 routing=load_contract_json(workspace_dir / "config" / "llm_routing.json"),
-                rubric_path=workspace_dir / "inputs" / "rubric.md",
+                rubric_path=rubric_input,
+                rubric_manifest=rubric_manifest,
             )
             manifest["calibration_artifact"] = _file_manifest(workspace_dir / CALIBRATION_ARTIFACT, CALIBRATION_ARTIFACT)
             manifest["calibration_manifest"] = _file_manifest(workspace_dir / CALIBRATION_MANIFEST_ARTIFACT, CALIBRATION_MANIFEST_ARTIFACT)

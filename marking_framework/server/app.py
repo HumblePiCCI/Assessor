@@ -39,6 +39,15 @@ PIPELINE_EXTRA_PATHS = (
 )
 class AuthPayload(BaseModel):
     api_key: str
+
+
+class RubricConfirmationPayload(BaseModel):
+    action: str | None = None
+    genre: str | None = None
+    rubric_family: str | None = None
+    teacher_notes: str | None = None
+    criteria: list[dict] | None = None
+    levels: list[dict] | None = None
 def save_upload(upload: UploadFile, dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
@@ -286,6 +295,39 @@ async def pipeline_v2_data(job_id: str, request: Request):
     if data is None:
         raise HTTPException(status_code=404, detail="Dashboard data not ready")
     return data
+
+
+@app.get("/pipeline/v2/jobs/{job_id}/rubric")
+async def pipeline_v2_rubric(job_id: str, request: Request):
+    payload = PIPELINE_QUEUE.rubric_status(job_id, identity=request_identity(request))
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return payload
+
+
+@app.post("/pipeline/v2/jobs/{job_id}/rubric")
+async def pipeline_v2_rubric_confirm(job_id: str, payload: RubricConfirmationPayload, request: Request):
+    action = str(payload.action or "confirm").strip().lower()
+    teacher_edits = {
+        key: value
+        for key, value in {
+            "genre": payload.genre,
+            "rubric_family": payload.rubric_family,
+            "teacher_notes": payload.teacher_notes,
+            "criteria": payload.criteria,
+            "levels": payload.levels,
+        }.items()
+        if value not in (None, "", [])
+    }
+    result = PIPELINE_QUEUE.confirm_rubric(
+        job_id,
+        action=action,
+        teacher_edits=teacher_edits,
+        identity=request_identity(request),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return result
 @app.get("/pipeline/v2/jobs/{job_id}/events")
 async def pipeline_v2_events(job_id: str, request: Request, after: int = -1, limit: int = 200):
     payload = PIPELINE_QUEUE.get_events(job_id, identity=request_identity(request), after=after, limit=limit)

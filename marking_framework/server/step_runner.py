@@ -12,6 +12,14 @@ ARTIFACT_WATCH_ROOTS = ("inputs", "processing", "assessments", "outputs")
 def pipeline_steps() -> list[dict]:
     return [
         {
+            "id": "rubric",
+            "label": "Normalizing rubric contract",
+            "cmd": [
+                "python3",
+                "scripts/normalize_rubric.py",
+            ],
+        },
+        {
             "id": "extract",
             "label": "Extracting text",
             "cmd": [

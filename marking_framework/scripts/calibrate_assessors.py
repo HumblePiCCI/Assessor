@@ -30,6 +30,7 @@ try:
     )
     from scripts.levels import normalize_level
     from scripts.openai_client import extract_text, responses_create
+    from scripts.rubric_contract import load_json as load_rubric_json, runtime_rubric_context
     from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria, total_points
     from scripts.run_llm_assessors import build_pass1_prompt, parse_pass1_item, pass1_text_format
     from scripts.fallback_assessor import deterministic_pass1_item
@@ -48,6 +49,7 @@ except ImportError:  # pragma: no cover - Running as script
     )
     from levels import normalize_level  # pragma: no cover
     from openai_client import extract_text, responses_create  # pragma: no cover
+    from rubric_contract import load_json as load_rubric_json, runtime_rubric_context  # pragma: no cover
     from rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria, total_points  # pragma: no cover
     from run_llm_assessors import build_pass1_prompt, parse_pass1_item, pass1_text_format  # pragma: no cover
     from fallback_assessor import deterministic_pass1_item  # pragma: no cover
@@ -385,6 +387,9 @@ def main() -> int:
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--grade-profiles", default="config/grade_level_profiles.json", help="Grade profiles")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
+    parser.add_argument("--normalized-rubric", default="outputs/normalized_rubric.json", help="Normalized rubric contract JSON")
+    parser.add_argument("--rubric-manifest", default="outputs/rubric_manifest.json", help="Rubric manifest JSON")
+    parser.add_argument("--rubric-verification", default="outputs/rubric_verification.json", help="Rubric verification JSON")
     parser.add_argument("--output", default="outputs/calibration_bias.json", help="Bias output")
     parser.add_argument("--manifest-output", default="", help="Optional calibration manifest output")
     parser.add_argument("--freshness-window-hours", type=float, default=0.0, help="Override calibration freshness window")
@@ -395,7 +400,13 @@ def main() -> int:
     cfg_repeats = calibration.get("bias_correction", {}).get("repeats")
     if args.repeats == 1 and isinstance(cfg_repeats, int) and cfg_repeats > 1:
         args.repeats = cfg_repeats
-    rubric = load_file_text(resolve_input_path(Path(args.rubric), "rubric"))
+    rubric_path = resolve_input_path(Path(args.rubric), "rubric")
+    rubric_context = runtime_rubric_context(
+        rubric_path,
+        normalized_path=Path(args.normalized_rubric),
+        verification_path=Path(args.rubric_verification),
+    )
+    rubric = rubric_context["rubric_text"]
     outline = load_file_text(resolve_input_path(Path(args.outline), "assignment_outline"))
     if not rubric.strip():
         print(f"Rubric text is empty. Check file at {args.rubric}.")
@@ -405,10 +416,12 @@ def main() -> int:
     points_possible = total_points(criteria_cfg) if criteria_cfg else None
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
     routing = load_json(Path(args.routing))
+    rubric_manifest = load_rubric_json(Path(args.rubric_manifest))
     run_scope_template = build_run_scope(
         metadata={"grade_level": BAND_GRADE_LEVEL.get("grade_8_10", 9), "genre": "literary_analysis"},
         routing=routing,
-        rubric_path=Path(args.rubric),
+        rubric_path=rubric_path,
+        rubric_manifest=rubric_manifest,
     )
 
     records = build_records(args, calibration, routing, rubric, outline, profiles, criteria_cfg, points_possible, assessors)
@@ -443,7 +456,6 @@ def main() -> int:
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     manifest_path = Path(args.manifest_output) if args.manifest_output else calibration_manifest_path(out_path)
-    rubric_path = resolve_input_path(Path(args.rubric), "rubric")
     scope_coverage = []
     for scope_name, sample_count in sorted(summary["scope_coverage"].items()):
         scope_parts = scope_name.split("|", 1)

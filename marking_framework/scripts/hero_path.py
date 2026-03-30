@@ -64,6 +64,9 @@ def main() -> int:
         args.publish_gate = True
         args.sota_gate = True
 
+    if run(step_cmd("rubric", ["python3", "scripts/normalize_rubric.py"])) != 0:
+        return 1
+
     if not args.skip_extract:
         cmd = step_cmd(
             "extract",

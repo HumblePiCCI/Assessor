@@ -186,7 +186,13 @@ def normalize_metadata_scope(metadata: dict | None) -> tuple[dict, str]:
     return normalized, source
 
 
-def rubric_family_from_metadata(metadata: dict | None, rubric_path: Path | None = None) -> str:
+def rubric_family_from_metadata(metadata: dict | None, rubric_path: Path | None = None, rubric_manifest: dict | None = None) -> str:
+    manifest = rubric_manifest or {}
+    if isinstance(manifest, dict):
+        for key in ("rubric_family",):
+            value = manifest.get(key)
+            if value:
+                return str(value).strip()
     meta = metadata or {}
     for key in ("rubric_family", "rubric_family_id", "rubric_name"):
         if meta.get(key):
@@ -201,16 +207,23 @@ def build_run_scope(
     metadata: dict | None = None,
     routing: dict | None = None,
     rubric_path: Path | None = None,
+    rubric_manifest: dict | None = None,
 ) -> dict:
     normalized, source = normalize_metadata_scope(metadata)
     grade_level = int(normalized["grade_level"])
     grade_band = grade_band_for_level(grade_level)
     if not grade_band and bool(normalized.get("_used_default_grade_level")):
         grade_band = grade_band_for_level(DEFAULT_GRADE_LEVEL) or ""
-    genre = normalize_genre(normalized.get("genre") or normalized.get("assignment_genre")) or DEFAULT_GENRE
+    manifest_genre = ""
+    if isinstance(rubric_manifest, dict):
+        manifest_genre = normalize_genre(rubric_manifest.get("genre"))
+    explicit_genre = ""
+    if not bool(normalized.get("_used_default_genre")):
+        explicit_genre = normalize_genre(normalized.get("genre") or normalized.get("assignment_genre"))
+    genre = explicit_genre or manifest_genre or normalize_genre(normalized.get("genre") or normalized.get("assignment_genre")) or DEFAULT_GENRE
     model_version = model_version_from_routing(routing or {})
     model_family = model_family_from_version(model_version)
-    rubric_family = rubric_family_from_metadata(normalized, rubric_path)
+    rubric_family = rubric_family_from_metadata(normalized, rubric_path, rubric_manifest=rubric_manifest)
     key = f"{grade_band}|{genre}" if grade_band and genre else ""
     scope_id_parts = [grade_band, genre, rubric_family, model_family]
     scope_id = "|".join(part for part in scope_id_parts if part)

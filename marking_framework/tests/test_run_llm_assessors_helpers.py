@@ -85,8 +85,34 @@ def test_run_llm_assessors_helper_functions(tmp_path):
     resolved_outline = rla.resolve_input_path(inputs / "assignment_outline.md", "assignment_outline")
     assert resolved_rubric == rubric_docx
     assert resolved_outline == outline_txt
+    (inputs / "rubric.pdf").write_text("pdf", encoding="utf-8")
+    assert rla.resolve_input_path(inputs / "rubric.pdf", "rubric").suffix == ".pdf"
     missing_path = rla.resolve_input_path(inputs / "nope.md", "nope")
     assert missing_path == inputs / "nope.md"
+
+
+def test_runtime_rubric_context_prefers_normalized_contract(tmp_path):
+    rubric = tmp_path / "rubric.md"
+    rubric.write_text("Ideas and analysis\nLevel 4 80-100", encoding="utf-8")
+    normalized = tmp_path / "normalized_rubric.json"
+    normalized.write_text(
+        json.dumps(
+            {
+                "genre": "literary_analysis",
+                "rubric_family": "rubric_a",
+                "criteria": [{"name": "Insight", "weight": 1.0, "canonical_label": "Insight"}],
+                "scale": {"levels": [{"label": "4", "band_min": 80, "band_max": 100, "descriptor": "excellent"}]},
+                "evidence_requirements": {},
+                "raw_text": "original rubric text",
+            }
+        ),
+        encoding="utf-8",
+    )
+    verification = tmp_path / "rubric_verification.json"
+    verification.write_text(json.dumps({"status": "confirmed"}), encoding="utf-8")
+    context = rla.runtime_rubric_context(rubric, normalized_path=normalized, verification_path=verification)
+    assert "VERIFIED RUBRIC CONTRACT" in context["rubric_text"]
+    assert "Insight" in context["rubric_text"]
 
 
 def test_parse_pass1_item_missing_keys():

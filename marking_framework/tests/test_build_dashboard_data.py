@@ -241,6 +241,10 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
     (tmp_path / "outputs" / "local_learning_profile.json").write_text(json.dumps({"review_count": 2}), encoding="utf-8")
     (tmp_path / "outputs" / "local_teacher_prior.json").write_text(json.dumps({"active": True, "weights": {"boundary_level_bias": 0.04}}), encoding="utf-8")
     (tmp_path / "outputs" / "aggregate_learning_summary.json").write_text(json.dumps({"mode": "opt_in", "scope_record_count": 3}), encoding="utf-8")
+    (tmp_path / "outputs" / "normalized_rubric.json").write_text(json.dumps({"genre": "literary_analysis"}), encoding="utf-8")
+    (tmp_path / "outputs" / "rubric_manifest.json").write_text(json.dumps({"manifest_hash": "rubric-manifest-1", "rubric_family": "rubric_a"}), encoding="utf-8")
+    (tmp_path / "outputs" / "rubric_validation_report.json").write_text(json.dumps({"proceed_mode": "warn", "confidence": {"status": "medium"}}), encoding="utf-8")
+    (tmp_path / "outputs" / "rubric_verification.json").write_text(json.dumps({"status": "warning", "summary": ["We think your rubric has four criteria."]}), encoding="utf-8")
     (tmp_path / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-xyz"}), encoding="utf-8")
     (tmp_path / "outputs" / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4"}), encoding="utf-8")
     texts = tmp_path / "texts"
@@ -263,4 +267,6 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
     assert payload["local_teacher_prior"]["active"] is True
     assert payload["review_delta"]["summary"]["rank_movement_count"] == 1
     assert payload["review_draft"]["review_state"] == "draft"
+    assert payload["rubric_manifest"]["rubric_family"] == "rubric_a"
+    assert payload["rubric_verification"]["status"] == "warning"
     assert payload["uncertainty_summary"]["counts"]["boundary_cases"] == 1

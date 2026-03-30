@@ -10,7 +10,7 @@ Quick Start
    - LLM assessors: add `--llm-assessors` (requires OPENAI_API_KEY)
 
 1) Place inputs
-   - Rubric: `inputs/rubric.docx` or `inputs/rubric.md`
+   - Rubric: `inputs/rubric.docx`, `inputs/rubric.md`, `inputs/rubric.txt`, `inputs/rubric.rtf`, `inputs/rubric.pdf`, or an image-backed rubric file
    - Assignment outline: `inputs/assignment_outline.docx` or `inputs/assignment_outline.md`
    - Student work: `inputs/submissions/`
    - Optional class metadata: `inputs/class_metadata.json` (e.g., {"grade_level": 7})
@@ -23,6 +23,8 @@ Quick Start
    - `python3 scripts/conventions_scan.py --inputs processing/normalized_text --output processing/conventions_report.csv`
 
 4) Assessor passes (LLM agents)
+   - Normalize and verify the rubric contract first: `python3 scripts/normalize_rubric.py`
+   - Low-confidence rubric parses pause for teacher confirmation or small edits before scoring continues in the queue-backed runtime.
    - Use prompts in `prompts/`.
    - Save outputs to:
      - `assessments/pass1_individual/` (per-assessor JSON)
@@ -66,6 +68,10 @@ Key Outputs
 - `outputs/final_order.csv` (post global rerank order)
 - `outputs/feedback_summaries/` (two stars and a wish with validated quotes)
 - `outputs/dashboard_data.json` (UI data)
+- `outputs/normalized_rubric.json` (canonical runtime rubric contract)
+- `outputs/rubric_manifest.json` (rubric contract hash, family, confidence, and confirmation state)
+- `outputs/rubric_validation_report.json` (parse checks, warnings, and proceed mode)
+- `outputs/rubric_verification.json` (teacher-readable interpretation and confirmation/edit state)
 - `outputs/review_feedback_latest.json` (latest persisted teacher review snapshot)
 - `outputs/local_learning_profile.json` (local review summary and future runtime-prior seed)
 - `outputs/aggregate_learning_summary.json` (governed aggregate-learning eligibility and retention summary)

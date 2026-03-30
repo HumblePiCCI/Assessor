@@ -179,6 +179,24 @@ def test_manifest_hash_busts_when_dependency_changes(tmp_path, target_relpath, w
     assert changed != baseline
 
 
+def test_manifest_hash_busts_when_rubric_confirmation_changes(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _seed_runtime(root)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    base_artifacts = pqmod.build_rubric_artifacts(rubric, outline_path=outline, criteria_config_path=root / "config" / "rubric_criteria.json")
+    baseline = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root, rubric_artifacts=base_artifacts)
+    edited_artifacts = pqmod.build_rubric_artifacts(
+        rubric,
+        outline_path=outline,
+        criteria_config_path=root / "config" / "rubric_criteria.json",
+        teacher_edits={"genre": "argumentative"},
+        action="edit",
+    )
+    changed = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root, rubric_artifacts=edited_artifacts)
+    assert changed != baseline
+
+
 def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifacts(tmp_path):
     calls = {}
 
@@ -211,6 +229,8 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert "PYTHONPATH" in calls["env"]
     assert not (root / "outputs" / "dashboard_data.json").exists()
     assert (workspace_dir / "pipeline_manifest.json").exists()
+    assert (workspace_dir / "outputs" / "normalized_rubric.json").exists()
+    assert (workspace_dir / "outputs" / "rubric_manifest.json").exists()
     assert (Path(job["manifest_path"])).exists()
     artifact_dir = queue._artifact_dir(result["manifest_hash"], "local-dev-tenant")
     assert (artifact_dir / "pipeline_manifest.json").exists()
@@ -219,10 +239,34 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert data_json["students"][0]["student_id"] == "s1"
 
 
+def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):
+    def run_ok(_cmd, env=None, cwd=None, **kwargs):
+        out = Path(cwd) / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_ok)
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    rubric.write_text("", encoding="utf-8")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    assert submitted["status"] == "awaiting_rubric_confirmation"
+    job = queue.get_job(submitted["job_id"])
+    assert job["status"] == "awaiting_rubric_confirmation"
+    review = queue.rubric_status(submitted["job_id"])
+    assert review["rubric_verification"]["required_confirmation"] is True
+    confirmed = queue.confirm_rubric(submitted["job_id"], action="edit", teacher_edits={"genre": "argumentative"})
+    assert confirmed["status"] == "queued"
+    queue._process_job(submitted["job_id"])
+    assert queue.get_job(submitted["job_id"])["status"] == "completed"
+
+
 def test_submit_cached_completed_snapshot(tmp_path):
     queue, root, _data, _logs, _resets = _make_queue(tmp_path)
     rubric, outline, subs = _write_inputs(tmp_path / "inputs")
-    snap = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
+    rubric_artifacts = pqmod.build_rubric_artifacts(rubric, outline_path=outline, criteria_config_path=root / "config" / "rubric_criteria.json")
+    snap = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root, rubric_artifacts=rubric_artifacts)
     artifact = queue._artifact_dir(snap, "local-dev-tenant") / "outputs" / "dashboard_data.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("{}", encoding="utf-8")
