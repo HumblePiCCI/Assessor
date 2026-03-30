@@ -36,11 +36,10 @@ The current system can:
 - benchmark against explicit human gold
 - rerank globally from pairwise evidence
 - enforce calibration and gate contracts
-- persist teacher review snapshots, local learning summaries, and anonymized aggregate logs
+- distinguish draft review from finalized review
+- persist finalized teacher deltas, local learning summaries, scoped local teacher priors, and anonymized aggregate logs
 
 The current system does not yet:
-- distinguish draft teacher sorting from finalized learning signal
-- consume local teacher preference priors inside runtime reranking
 - promote aggregate review traffic into product updates through a governed data path
 - satisfy the operational, privacy, and launch requirements of a production product
 
@@ -887,7 +886,7 @@ Use this section as the running status checkpoint.
 - Phase 4: completed
 - Phase 5: completed
 - Phase 6: completed
-- Phase 7: pending
+- Phase 7: completed
 - Phase 8: pending
 - Phase 9: pending
 
@@ -903,14 +902,13 @@ Use this section as the running status checkpoint.
 - calibration now ships with a versioned manifest, explicit run scope, synthetic bootstrap marking, and drift-aware release checks
 - publish and SOTA gates now evaluate explicit `dev`, `candidate`, and `release` contracts with benchmark, reproducibility, calibration freshness, and budget thresholds
 - teacher review now persists as versioned structured data, emits replay artifacts for benchmark/boundary/calibration refresh, and produces both a local learning profile and an anonymized aggregate feedback log
+- teacher review now uses draft-versus-final state, derives finalized net-delta artifacts, and feeds a bounded scoped local teacher prior back into runtime reranking
 
 ### Outstanding Architectural Risks
 
-- review persistence does not yet separate exploratory draft sorting from finalized learning signal
-- local learning profiles are not yet consumed directly inside the scoring/reranking runtime
 - aggregate review telemetry is not yet governed, transported, or promoted through a formal product-improvement workflow
 - production auth, privacy, retention, and operational launch controls are not yet defined in the codebase
 
 ### Next Decision Point
 
-Start Phase 7 by formalizing review draft versus final state, then derive finalized-only net deltas before wiring any teacher prior into runtime reranking.
+Start Phase 8 by governing anonymized aggregate review learning, promotion workflows, and privacy-safe upload/retention contracts.

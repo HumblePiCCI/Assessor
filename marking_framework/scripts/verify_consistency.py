@@ -279,6 +279,7 @@ def main() -> int:
     parser.add_argument("--report-output", default="outputs/consistency_report.json", help="Consistency report JSON output")
     parser.add_argument("--legacy-output", default="outputs/consistency_adjusted.csv", help="Compatibility CSV output")
     parser.add_argument("--config", default="config/marking_config.json", help="Marking config JSON")
+    parser.add_argument("--local-prior", default="outputs/local_teacher_prior.json", help="Local teacher prior JSON")
     args = parser.parse_args()
 
     scores_path = Path(args.scores)
@@ -324,6 +325,7 @@ def main() -> int:
             scores_path=scores_path,
             judgments_path=out_path,
             config_path=Path(args.config),
+            local_prior_path=Path(args.local_prior),
             final_order_path=Path(args.rerank_output),
             matrix_output_path=Path(args.matrix_output),
             score_output_path=Path(args.scores_output),

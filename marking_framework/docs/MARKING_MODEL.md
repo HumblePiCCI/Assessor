@@ -77,8 +77,9 @@ Model Components
   - pairwise adjudications
   - evidence-quality notes
 - Each saved review is versioned against the pipeline manifest, calibration manifest, and final artifact set.
-- Saved review feedback currently feeds replay exports and local learning summaries.
-- The production contract will treat finalized teacher review, not intermediate UI motion, as the learning boundary before any runtime personalization is applied.
+- Exploratory edits are saved as draft state; only finalized review becomes learning signal.
+- Finalized review feedback feeds replay exports, local learning summaries, and a bounded scoped local teacher prior used during future reranks in the same scope.
+- Product-wide aggregate learning from teacher feedback remains a governed follow-on stage.
 
 6) Two Stars and a Wish (Post-Curve)
 - Generated only after consensus ranking and curve-based grades are finalized.

@@ -9,9 +9,11 @@ from pathlib import Path
 
 try:
     from scripts.aggregate_helpers import get_level_bands
+    from scripts.local_teacher_prior import compute_teacher_preference_adjustments
     from scripts.levels import normalize_level
 except ImportError:  # pragma: no cover - Support running as a script
     from aggregate_helpers import get_level_bands  # pragma: no cover
+    from local_teacher_prior import compute_teacher_preference_adjustments  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
 
 
@@ -37,6 +39,16 @@ def load_rows(path: Path) -> list[dict]:
         return []
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def current_run_scope(scores_path: Path) -> dict:
+    root = scores_path.resolve().parent.parent if scores_path.resolve().parent.name == "outputs" else Path(".").resolve()
+    for candidate in [root / "pipeline_manifest.json", root / "outputs" / "pipeline_manifest.json"]:
+        payload = load_json(candidate)
+        if payload:
+            scope = payload.get("run_scope", {})
+            return scope if isinstance(scope, dict) else {}
+    return {}
 
 
 def num(value, default=0.0) -> float:
@@ -309,6 +321,13 @@ def build_prior_scores(rows: list[dict]) -> dict[str, float]:
             6,
         )
     return prior
+
+
+def level_boundaries_from_config(config: dict) -> list[float]:
+    ordered = sorted(
+        [float(band.get("min", 0.0) or 0.0) for band in get_level_bands(config or {}) if num(band.get("min"), 0.0) > 0.0]
+    )
+    return ordered[1:] if len(ordered) > 1 else [60.0, 70.0, 80.0, 90.0]
 
 
 def optimize_scores(
@@ -586,6 +605,8 @@ def build_final_rows(
     final_order: list[str],
     raw_scores: dict[str, float],
     prior_scores: dict[str, float],
+    teacher_adjustments: dict[str, float],
+    teacher_diagnostics: dict[str, dict],
     per_student: dict,
     caps: dict[str, dict],
     constraints: dict,
@@ -605,6 +626,7 @@ def build_final_rows(
         final_rank = int(final_rank_map[sid])
         displacement = final_rank - seed_rank
         per_student_metrics = per_student.get(sid, {})
+        teacher_info = teacher_diagnostics.get(sid, {})
         cap_info = caps.get(sid, {"cap": len(rows), "label": "high_support", "best_rank": 1, "worst_rank": len(rows)})
         notes = []
         if displacement < 0:
@@ -627,6 +649,9 @@ def build_final_rows(
         base_row["rerank_support_weight"] = round(float(per_student_metrics.get("support_weight", 0.0) or 0.0), 6)
         base_row["rerank_opposition_weight"] = round(float(per_student_metrics.get("opposition_weight", 0.0) or 0.0), 6)
         base_row["rerank_incident_weight"] = round(float(per_student_metrics.get("incident_weight", 0.0) or 0.0), 6)
+        base_row["teacher_preference_adjustment"] = round(float(teacher_adjustments.get(sid, 0.0) or 0.0), 6)
+        base_row["teacher_preference_uncertainty_gate"] = round(float(teacher_info.get("uncertainty_gate", 0.0) or 0.0), 6)
+        base_row["teacher_preference_reasons"] = ";".join(teacher_info.get("reasons", [])) if teacher_info.get("reasons") else ""
         base_row["rerank_displacement"] = displacement
         base_row["rerank_displacement_cap"] = int(cap_info["cap"])
         base_row["rerank_displacement_cap_label"] = cap_info["label"]
@@ -645,6 +670,9 @@ def build_final_rows(
                 "pairwise_support_weight": base_row["rerank_support_weight"],
                 "pairwise_opposition_weight": base_row["rerank_opposition_weight"],
                 "pairwise_incident_weight": base_row["rerank_incident_weight"],
+                "teacher_preference_adjustment": base_row["teacher_preference_adjustment"],
+                "teacher_preference_uncertainty_gate": base_row["teacher_preference_uncertainty_gate"],
+                "teacher_preference_reasons": base_row["teacher_preference_reasons"],
                 "displacement": displacement,
                 "displacement_cap": int(cap_info["cap"]),
                 "displacement_cap_label": cap_info["label"],
@@ -684,6 +712,7 @@ def run_global_rerank(
     scores_path: Path,
     judgments_path: Path,
     config_path: Path,
+    local_prior_path: Path,
     final_order_path: Path,
     matrix_output_path: Path,
     score_output_path: Path,
@@ -707,7 +736,19 @@ def run_global_rerank(
     rows_by_id = {row["student_id"]: row for row in rows}
     raw_judgment_payload, judgments = load_judgments(judgments_path, rows_by_id)
     matrix, per_student, directional = build_pairwise_matrix(rows, judgments)
-    prior_scores = build_prior_scores(rows)
+    base_prior_scores = build_prior_scores(rows)
+    local_prior_payload = load_json(local_prior_path)
+    teacher_adjustments, teacher_meta = compute_teacher_preference_adjustments(
+        rows,
+        per_student,
+        local_prior_payload,
+        current_scope=current_run_scope(scores_path),
+        boundaries=level_boundaries_from_config(config if isinstance(config, dict) else {}),
+    )
+    prior_scores = {
+        sid: round(float(base_prior_scores.get(sid, 0.0) or 0.0) + float(teacher_adjustments.get(sid, 0.0) or 0.0), 6)
+        for sid in base_prior_scores
+    }
     student_ids = [row["student_id"] for row in rows]
     raw_scores = optimize_scores(
         student_ids,
@@ -735,7 +776,17 @@ def run_global_rerank(
         hard_evidence_margin=hard_evidence_margin,
     )
     final_order = weighted_topological_order(rows, raw_scores, prior_scores, adjacency, indegree)
-    final_rows, score_rows = build_final_rows(rows, final_order, raw_scores, prior_scores, per_student, caps, constraint_meta)
+    final_rows, score_rows = build_final_rows(
+        rows,
+        final_order,
+        raw_scores,
+        prior_scores,
+        teacher_adjustments,
+        teacher_meta.get("students", {}) if isinstance(teacher_meta, dict) else {},
+        per_student,
+        caps,
+        constraint_meta,
+    )
     final_rank_map = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
     agreement = pairwise_agreement(final_rank_map, judgments)
     movements = [
@@ -750,6 +801,8 @@ def run_global_rerank(
             "rerank_prior_score": row["rerank_prior_score"],
             "support_weight": row["rerank_support_weight"],
             "opposition_weight": row["rerank_opposition_weight"],
+            "teacher_preference_adjustment": row["teacher_preference_adjustment"],
+            "teacher_preference_uncertainty_gate": row["teacher_preference_uncertainty_gate"],
             "notes": row["rerank_notes"].split(";") if row["rerank_notes"] else [],
         }
         for row in final_rows
@@ -762,6 +815,7 @@ def run_global_rerank(
             "scores": str(scores_path),
             "judgments": str(judgments_path),
             "config": str(config_path),
+            "local_prior": str(local_prior_path),
         },
         "hyperparameters": {
             "iterations": int(iterations),
@@ -791,6 +845,13 @@ def run_global_rerank(
         },
         "constraints": constraint_meta,
         "movements": movements,
+        "teacher_prior": {
+            "active": bool(teacher_meta.get("active", False)) if isinstance(teacher_meta, dict) else False,
+            "scope_match": bool(teacher_meta.get("scope_match", True)) if isinstance(teacher_meta, dict) else True,
+            "reason": str(teacher_meta.get("reason", "") or "") if isinstance(teacher_meta, dict) else "",
+            "weights": local_prior_payload.get("weights", {}) if isinstance(local_prior_payload, dict) else {},
+            "support": local_prior_payload.get("support", {}) if isinstance(local_prior_payload, dict) else {},
+        },
         "raw_judgments": {
             "generated_at": raw_judgment_payload.get("generated_at", ""),
             "model": raw_judgment_payload.get("model", ""),
@@ -821,6 +882,7 @@ def main() -> int:
     parser.add_argument("--input", default="outputs/consensus_scores.csv", help="Seed ranking CSV")
     parser.add_argument("--judgments", default="outputs/consistency_checks.json", help="Pairwise judgments JSON")
     parser.add_argument("--config", default="config/marking_config.json", help="Marking config JSON")
+    parser.add_argument("--local-prior", default="outputs/local_teacher_prior.json", help="Local teacher prior JSON")
     parser.add_argument("--output", default="outputs/final_order.csv", help="Final reranked CSV")
     parser.add_argument("--matrix-output", default="outputs/pairwise_matrix.json", help="Pairwise matrix JSON")
     parser.add_argument("--scores-output", default="outputs/rerank_scores.csv", help="Rerank score CSV")
@@ -843,6 +905,7 @@ def main() -> int:
             scores_path=Path(args.input),
             judgments_path=Path(args.judgments),
             config_path=Path(args.config),
+            local_prior_path=Path(args.local_prior),
             final_order_path=Path(args.output),
             matrix_output_path=Path(args.matrix_output),
             score_output_path=Path(args.scores_output),

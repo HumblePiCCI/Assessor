@@ -25,6 +25,8 @@ class ProjectPayload(BaseModel):
 
 class ProjectReviewPayload(BaseModel):
     project_id: str | None = None
+    action: str | None = None
+    session_id: str | None = None
     students: list[dict] = Field(default_factory=list)
     pairwise: list[dict] = Field(default_factory=list)
     review_notes: str | None = None
@@ -213,10 +215,21 @@ async def projects_delete(project_id: str):
 
 @router.get("/projects/review")
 async def projects_review():
-    return review_store.load_review_bundle(BASE_DIR, workspace_root(), get_current_project())
+    review_store.ensure_draft_review(BASE_DIR, workspace_root(), get_current_project())
+    bundle = review_store.load_review_bundle(BASE_DIR, workspace_root(), get_current_project())
+    review_store.materialize_workspace_review_state(workspace_root(), bundle)
+    return bundle
 
 
 @router.post("/projects/review")
 async def projects_review_save(payload: ProjectReviewPayload):
     project = project_meta_for_review(payload.project_id)
-    return review_store.save_review_bundle(BASE_DIR, workspace_root(), project, payload.model_dump(exclude_none=True))
+    action = str(payload.action or "draft").strip().lower()
+    stage = "final" if action in {"final", "finalize", "publish"} else "draft"
+    return review_store.save_review_bundle(
+        BASE_DIR,
+        workspace_root(),
+        project,
+        payload.model_dump(exclude_none=True),
+        stage=stage,
+    )

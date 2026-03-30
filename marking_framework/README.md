@@ -49,7 +49,8 @@ Quick Start
 9) Teacher review UI
    - `python3 scripts/build_dashboard_data.py`
    - `python3 scripts/serve_ui.py`
-   - Saved review feedback is versioned and exported for replay, but runtime personalization from teacher feedback is still a planned follow-on step
+   - Save exploratory edits as draft state, then finalize the review when the curve is settled
+   - Only finalized reviews feed the local teacher prior used on future reranks in the same scope
 
 10) Pay-as-you-go job runner (optional)
    - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
@@ -73,7 +74,7 @@ Key Outputs
 Notes
 - The conventions scan is a heuristic baseline. For high-stakes marking, replace with a dedicated grammar engine.
 - The consensus step is required before curve-based grading.
-- Saved teacher review feedback is persisted and exported for replay into benchmarks and calibration candidates. The production plan still needs to add finalized-review-only learning before those signals are applied back into runtime ranking.
+- Teacher review feedback is now split into draft and finalized state. Only finalized reviews feed the local runtime teacher prior; aggregate cross-teacher learning and governance remain future work.
 - See `docs/LEGAL_NOTES.md` before production use.
 - LLM routing: `config/llm_routing.json`
 - Pricing config: `config/pricing.json`

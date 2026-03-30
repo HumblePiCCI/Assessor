@@ -24,7 +24,7 @@ Notes
 - Pricing is set in `config/pricing.json` and must be kept in sync with model pricing.
 - The cost calculator uses input/output token usage returned by the API.
 - Cost caps are configured in `config/cost_limits.json`.
-- Teacher review feedback can be persisted and exported for replay, but finalized-review-only runtime personalization is still a planned production feature.
+- Teacher review feedback can be persisted as draft or finalized state. Only finalized reviews feed the local runtime teacher prior; aggregate cross-teacher learning remains a later governed feature.
 
 Minimal server (optional)
 - `server/app.py` provides a minimal FastAPI endpoint for synchronous jobs.

@@ -235,7 +235,11 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
         json.dumps({"movements": [{"student_id": "s1", "support_weight": 1.2, "opposition_weight": 1.0}]}),
         encoding="utf-8",
     )
+    (tmp_path / "outputs" / "review_feedback_draft.json").write_text(json.dumps({"review_state": "draft", "students": []}), encoding="utf-8")
+    (tmp_path / "outputs" / "review_feedback_latest.json").write_text(json.dumps({"review_state": "final", "students": [{"student_id": "s1"}]}), encoding="utf-8")
+    (tmp_path / "outputs" / "review_delta_latest.json").write_text(json.dumps({"summary": {"rank_movement_count": 1}}), encoding="utf-8")
     (tmp_path / "outputs" / "local_learning_profile.json").write_text(json.dumps({"review_count": 2}), encoding="utf-8")
+    (tmp_path / "outputs" / "local_teacher_prior.json").write_text(json.dumps({"active": True, "weights": {"boundary_level_bias": 0.04}}), encoding="utf-8")
     (tmp_path / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-xyz"}), encoding="utf-8")
     (tmp_path / "outputs" / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4"}), encoding="utf-8")
     texts = tmp_path / "texts"
@@ -254,4 +258,7 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
     assert set(student["uncertainty_flags"]) == {"boundary_case", "high_disagreement", "low_confidence_rerank_move"}
     assert payload["review_context"]["pipeline_manifest"]["manifest_hash"] == "manifest-xyz"
     assert payload["local_learning_profile"]["review_count"] == 2
+    assert payload["local_teacher_prior"]["active"] is True
+    assert payload["review_delta"]["summary"]["rank_movement_count"] == 1
+    assert payload["review_draft"]["review_state"] == "draft"
     assert payload["uncertainty_summary"]["counts"]["boundary_cases"] == 1

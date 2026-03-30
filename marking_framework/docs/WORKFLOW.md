@@ -73,7 +73,9 @@ Optional cost report:
 11) Teacher Review UI
 - Build data: `python3 scripts/build_dashboard_data.py`
 - Serve UI: `python3 scripts/serve_ui.py`
-- Saved review feedback is versioned and exported for replay, but finalized-review-only runtime learning remains a follow-on production task
+- Save exploratory edits as draft state
+- Finalize the review only when the curve is settled
+- Only finalized reviews feed the local runtime teacher prior; product-wide aggregate learning remains a later phase
 
 12) Final Outputs
 - `outputs/ranked_list.md`

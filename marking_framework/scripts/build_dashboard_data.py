@@ -233,6 +233,7 @@ def review_context(root: Path, rows_source: Path | None) -> dict:
             "path": str(pipeline_path),
             "manifest_hash": str(pipeline_manifest.get("manifest_hash", "") or ""),
             "generated_at": str(pipeline_manifest.get("generated_at", "") or ""),
+            "run_scope": pipeline_manifest.get("run_scope", {}) if isinstance(pipeline_manifest.get("run_scope", {}), dict) else {},
             "sha256": file_sha256(pipeline_path),
         },
         "calibration_manifest": {
@@ -329,8 +330,11 @@ def main() -> int:
     cost_report = load_json(cost_path)
     consistency_report = load_json(Path("outputs/consistency_report.json"))
     pairwise_matrix = load_json(Path("outputs/pairwise_matrix.json"))
+    review_draft = load_json(Path("outputs/review_feedback_draft.json"))
     review_feedback = load_json(Path("outputs/review_feedback_latest.json"))
+    review_delta = load_json(Path("outputs/review_delta_latest.json"))
     local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
+    local_teacher_prior = load_json(Path("outputs/local_teacher_prior.json"))
     uncertainty_by_student = movement_map(consistency_report)
     boundaries = level_boundaries(Path("config/marking_config.json"))
 
@@ -378,6 +382,9 @@ def main() -> int:
                 "rerank_support_weight": row.get("rerank_support_weight"),
                 "rerank_opposition_weight": row.get("rerank_opposition_weight"),
                 "rerank_incident_weight": row.get("rerank_incident_weight"),
+                "teacher_preference_adjustment": row.get("teacher_preference_adjustment"),
+                "teacher_preference_uncertainty_gate": row.get("teacher_preference_uncertainty_gate"),
+                "teacher_preference_reasons": row.get("teacher_preference_reasons"),
                 "rerank_displacement_cap": row.get("rerank_displacement_cap"),
                 "rerank_displacement_cap_label": row.get("rerank_displacement_cap_label"),
                 "uncertainty_flags": flags,
@@ -411,8 +418,11 @@ def main() -> int:
         "cost_report": cost_report,
         "consistency_report": consistency_report,
         "pairwise_matrix": pairwise_matrix,
+        "review_draft": review_draft,
         "review_feedback": review_feedback,
+        "review_delta": review_delta,
         "local_learning_profile": local_learning_profile,
+        "local_teacher_prior": local_teacher_prior,
         "review_context": review_context(Path("."), rows_source),
     }
 

@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -52,6 +52,7 @@ function clearLocalState() {
   reviewBundle = null;
   reviewStudents = {};
   reviewPairs = {};
+  reviewSessionId = '';
   grades = [];
   currentIndex = 0; sliderStudentId = null; focusLock = false;
   resetUploadLabels();
@@ -113,9 +114,11 @@ function ensureReviewPanel() {
       <div class="auth-status" id="pairwiseStatus">Open split view to compare two essays.</div>
     </div>
     <div class="project-actions">
-      <button id="saveReview" class="ghost">Save review signal</button>
+      <button id="saveReview" class="ghost">Save draft</button>
+      <button id="finalizeReview" class="ghost">Finalize review</button>
     </div>
-    <div id="reviewStatus" class="auth-status">No persisted review yet.</div>
+    <div id="reviewStatus" class="auth-status">No finalized review yet.</div>
+    <div id="reviewDraftStatus" class="auth-status">No draft review yet.</div>
     <div id="learningSummary" class="auth-status">Local profile unavailable.</div>
   `;
   const auth = actions.querySelector('.auth');
@@ -127,8 +130,11 @@ function applyReviewBundle(bundle) {
   reviewBundle = bundle || null;
   reviewStudents = {};
   reviewPairs = {};
+  const draft = (bundle && bundle.draft_review) ? bundle.draft_review : {};
   const latest = (bundle && bundle.latest_review) ? bundle.latest_review : {};
-  (latest.students || []).forEach(item => {
+  const active = (draft && ((draft.students && draft.students.length) || (draft.pairwise && draft.pairwise.length) || draft.review_notes)) ? draft : latest;
+  reviewSessionId = ((draft && draft.review_session && draft.review_session.session_id) || (latest && latest.review_session && latest.review_session.session_id) || '');
+  (active.students || []).forEach(item => {
     reviewStudents[item.student_id] = {
       student_id: item.student_id,
       level_override: item.level_override || '',
@@ -137,7 +143,7 @@ function applyReviewBundle(bundle) {
       evidence_comment: item.evidence_comment || '',
     };
   });
-  (latest.pairwise || []).forEach(item => {
+  (active.pairwise || []).forEach(item => {
     const left = (item.pair && item.pair[0]) || item.student_id || item.higher_student_id;
     const right = (item.pair && item.pair[1]) || item.other_student_id || item.lower_student_id;
     if (!left || !right) return;
@@ -152,14 +158,22 @@ function applyReviewBundle(bundle) {
   const reviewStatus = document.getElementById('reviewStatus');
   if (reviewStatus) {
     const savedAt = latest.saved_at || '';
-    reviewStatus.textContent = savedAt ? `Latest review saved ${savedAt}` : 'No persisted review yet.';
+    reviewStatus.textContent = savedAt ? `Latest finalized review saved ${savedAt}` : 'No finalized review yet.';
+  }
+  const reviewDraftStatus = document.getElementById('reviewDraftStatus');
+  if (reviewDraftStatus) {
+    const savedAt = draft.saved_at || '';
+    reviewDraftStatus.textContent = savedAt ? `Draft session saved ${savedAt}` : 'No draft review yet.';
   }
   const learningSummary = document.getElementById('learningSummary');
   if (learningSummary) {
     const profile = (bundle && bundle.local_learning_profile) ? bundle.local_learning_profile : {};
+    const prior = (bundle && bundle.local_teacher_prior) ? bundle.local_teacher_prior : {};
+    const delta = (bundle && bundle.latest_delta) ? bundle.latest_delta : {};
     const replay = (bundle && bundle.replay_exports) ? bundle.replay_exports : {};
     const anon = (bundle && bundle.anonymized_aggregate) ? bundle.anonymized_aggregate : {};
-    learningSummary.textContent = `Local profile: ${profile.review_count || 0} reviews, ${profile.student_review_count || 0} student decisions, ${profile.pairwise_adjudication_count || 0} pairwise adjudications. Replay exports: ${replay.benchmark_gold_count || 0} benchmark rows, ${replay.calibration_exemplars_count || 0} exemplar candidates. Anonymous aggregate: ${anon.record_count || 0} records.`;
+    const activeLabel = prior.active ? 'active' : (prior.activation && prior.activation.reason) ? prior.activation.reason.replaceAll('_', ' ') : 'inactive';
+    learningSummary.textContent = `Local profile: ${profile.review_count || 0} finalized reviews, ${profile.student_review_count || 0} student decisions, ${profile.pairwise_adjudication_count || 0} pairwise adjudications. Latest delta: ${delta.summary ? (delta.summary.rank_movement_count || 0) : 0} rank moves, ${delta.summary ? (delta.summary.level_override_count || 0) : 0} level overrides. Local prior: ${activeLabel}. Replay exports: ${replay.benchmark_gold_count || 0} benchmark rows, ${replay.calibration_exemplars_count || 0} exemplar candidates. Anonymous aggregate: ${anon.record_count || 0} records.`;
   }
 }
 async function loadReviewBundle() {
@@ -217,22 +231,34 @@ function renderReviewPanel(student) {
     pairStatus.textContent = `Comparing with ${labelFor(compare)}. Saved pairwise preference: ${preferred}.`;
   }
 }
-async function saveReviewBundle() {
-  const reviewStatus = document.getElementById('reviewStatus');
-  if (reviewStatus) reviewStatus.textContent = 'Saving review signal...';
+function reviewPayload() {
   const students = Object.values(reviewStudents).filter(item => item.level_override || item.evidence_quality || item.evidence_comment || item.desired_rank !== '');
   const pairwise = Object.values(reviewPairs).filter(item => item.preferred_student_id);
+  return { students, pairwise, session_id: reviewSessionId };
+}
+async function saveReviewBundle(action = 'draft') {
+  const reviewStatus = document.getElementById('reviewStatus');
+  const reviewDraftStatus = document.getElementById('reviewDraftStatus');
+  if (action === 'finalize') {
+    if (reviewStatus) reviewStatus.textContent = 'Finalizing review...';
+  } else if (reviewDraftStatus) {
+    reviewDraftStatus.textContent = 'Saving draft review...';
+  }
   try {
     const res = await fetch(apiUrl('/projects/review'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ students, pairwise }),
+      body: JSON.stringify({ ...reviewPayload(), action }),
     });
     if (!res.ok) throw new Error('save failed');
     applyReviewBundle(await res.json());
     if (data?.students?.length) renderReviewPanel(data.students[currentIndex]);
   } catch (_) {
-    if (reviewStatus) reviewStatus.textContent = 'Failed to save review signal.';
+    if (action === 'finalize') {
+      if (reviewStatus) reviewStatus.textContent = 'Failed to finalize review.';
+    } else if (reviewDraftStatus) {
+      reviewDraftStatus.textContent = 'Failed to save draft review.';
+    }
   }
 }
 function getCompareIndex() { if (!data || data.students.length < 2) return null; const target = currentIndex + compareDirection; if (target >= 0 && target < data.students.length) return target; const fallback = currentIndex - compareDirection; if (fallback >= 0 && fallback < data.students.length) return fallback; return null; }
@@ -512,6 +538,7 @@ function setupControls() {
   const reviewQuality = document.getElementById('reviewEvidenceQuality');
   const reviewComment = document.getElementById('reviewEvidenceComment');
   const saveReview = document.getElementById('saveReview');
+  const finalizeReview = document.getElementById('finalizeReview');
   const preferCurrent = document.getElementById('preferCurrent');
   const preferCompare = document.getElementById('preferCompare');
   const clearPairwise = document.getElementById('clearPairwise');
@@ -519,7 +546,8 @@ function setupControls() {
   if (reviewRank) reviewRank.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).desired_rank = e.target.value.trim() ? parseInt(e.target.value, 10) : ''; });
   if (reviewQuality) reviewQuality.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_quality = e.target.value; });
   if (reviewComment) reviewComment.addEventListener('input', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_comment = e.target.value.trim(); });
-  if (saveReview) saveReview.addEventListener('click', saveReviewBundle);
+  if (saveReview) saveReview.addEventListener('click', () => saveReviewBundle('draft'));
+  if (finalizeReview) finalizeReview.addEventListener('click', () => saveReviewBundle('finalize'));
   if (preferCurrent) preferCurrent.addEventListener('click', () => {
     const student = data?.students?.[currentIndex];
     const compareIndex = getCompareIndex();

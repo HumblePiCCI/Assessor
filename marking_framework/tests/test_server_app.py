@@ -385,6 +385,7 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     review_resp = client.post(
         "/projects/review",
         json={
+            "action": "draft",
             "students": [
                 {
                     "student_id": "s1",
@@ -408,11 +409,41 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     assert review_resp.status_code == 200
     payload = review_resp.json()
     assert payload["scope_id"] == project_id
-    assert payload["latest_review"]["students"][0]["level_override"] == "4"
-    assert payload["replay_exports"]["benchmark_gold_count"] == 1
+    assert payload["draft_review"]["students"][0]["level_override"] == "4"
+    assert payload["latest_review"]["students"] == []
     get_resp = client.get("/projects/review")
     assert get_resp.status_code == 200
-    assert get_resp.json()["local_learning_profile"]["student_review_count"] == 1
+    assert get_resp.json()["draft_review"]["review_state"] == "draft"
+    assert get_resp.json()["local_learning_profile"]["student_review_count"] == 0
+    finalize_resp = client.post(
+        "/projects/review",
+        json={
+            "action": "finalize",
+            "students": [
+                {
+                    "student_id": "s1",
+                    "level_override": "4",
+                    "desired_rank": 1,
+                    "evidence_quality": "thin",
+                    "evidence_comment": "Student One needs clearer evidence.",
+                }
+            ],
+            "pairwise": [
+                {
+                    "student_id": "s1",
+                    "other_student_id": "s2",
+                    "preferred_student_id": "s1",
+                    "confidence": "high",
+                    "rationale": "Student One should be above Student Two.",
+                }
+            ],
+        },
+    )
+    assert finalize_resp.status_code == 200
+    finalize_payload = finalize_resp.json()
+    assert finalize_payload["latest_review"]["students"][0]["level_override"] == "4"
+    assert finalize_payload["replay_exports"]["benchmark_gold_count"] == 2
+    assert finalize_payload["latest_delta"]["summary"]["rank_movement_count"] >= 1
     list_resp = client.get("/projects")
     assert list_resp.json()["current"]["review_summary"]["student_review_count"] == 1
 
