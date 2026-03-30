@@ -13,27 +13,29 @@ class FakeQueue:
         self.data = None
         self.events = None
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
         self.submitted = {
             "mode": mode,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(p.name for p in submissions_dir.glob("*")),
             "extra": [str(p) for p in extra_paths],
+            "identity": dict(identity or {}),
+            "project_id": project_id,
         }
         return {"job_id": "j1", "status": "queued", "cached": False, "snapshot_hash": "abc", "manifest_hash": "abc"}
 
-    def get_job(self, job_id):
+    def get_job(self, job_id, identity=None):
         if self.job and self.job.get("id") == job_id:
             return self.job
         return None
 
-    def load_dashboard_data(self, job_id):
+    def load_dashboard_data(self, job_id, identity=None):
         if self.data and job_id == "j1":
             return self.data
         return None
 
-    def get_events(self, job_id, after=-1, limit=200):
+    def get_events(self, job_id, identity=None, after=-1, limit=200):
         if job_id != "j1":
             return None
         payload = self.events or {"events": [], "next_after": after, "done": False, "status": "running"}

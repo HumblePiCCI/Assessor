@@ -13,6 +13,7 @@ from pathlib import Path
 
 from scripts.calibration_contract import build_run_scope, calibration_manifest_path, load_json as load_contract_json
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
+from server.runtime_context import identity_can_access, identity_token, launch_contract
 from server.step_runner import (
     artifact_watch_roots,
     pipeline_step_graph_hash,
@@ -49,6 +50,8 @@ RUNTIME_SOURCE_PATHS = (
     "server/pipeline_queue.py",
     "server/step_runner.py",
 )
+OPS_STATE_FILE = "pipeline_ops.json"
+RECENT_FAILURE_LIMIT = 20
 
 
 def now_iso() -> str:
@@ -356,6 +359,7 @@ class PipelineQueue:
         self.jobs_dir = data_dir / "pipeline_jobs"
         self.workspaces_dir = data_dir / "workspaces"
         self.artifacts_dir = data_dir / "artifacts"
+        self.ops_path = data_dir / OPS_STATE_FILE
         self.db_path = data_dir / "pipeline_jobs.sqlite3"
         self.reset_workspace = reset_workspace_fn
         self.run = run_fn
@@ -368,6 +372,18 @@ class PipelineQueue:
         self._queue = queue.Queue()
         self._thread = None
         self._lock = threading.Lock()
+        if not self.ops_path.exists():
+            self._write_json(
+                self.ops_path,
+                {
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "cache_validation_failures": 0,
+                    "recent_gate_failures": [],
+                    "recent_incidents": [],
+                    "last_retention_report": {},
+                },
+            )
 
     def _conn(self):
         return sqlite3.connect(self.db_path)
@@ -378,6 +394,14 @@ class PipelineQueue:
             "progress_total": "INTEGER DEFAULT 0",
             "progress_stage": "TEXT DEFAULT ''",
             "progress_message": "TEXT DEFAULT ''",
+            "tenant_id": "TEXT DEFAULT ''",
+            "teacher_id": "TEXT DEFAULT ''",
+            "project_id": "TEXT DEFAULT ''",
+            "started_at": "TEXT DEFAULT ''",
+            "completed_at": "TEXT DEFAULT ''",
+            "cache_status": "TEXT DEFAULT 'miss'",
+            "cache_source_job_id": "TEXT DEFAULT ''",
+            "gate_summary": "TEXT DEFAULT '{}'",
         }
         existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         for name, ddl in required.items():
@@ -411,12 +435,79 @@ class PipelineQueue:
     def _manifest_path(self, job_dir: Path) -> Path:
         return job_dir / "pipeline_manifest.json"
 
-    def _workspace_dir(self, job_id: str) -> Path:
-        return self.workspaces_dir / job_id
+    def _tenant_token(self, tenant_id: str) -> str:
+        return identity_token(tenant_id or "local-dev-tenant")
+
+    def _job_dir(self, job_id: str, tenant_id: str) -> Path:
+        return self.jobs_dir / self._tenant_token(tenant_id) / job_id
+
+    def _workspace_dir(self, job_id: str, tenant_id: str = "") -> Path:
+        return self.workspaces_dir / self._tenant_token(tenant_id or "local-dev-tenant") / job_id
+
+    def _artifact_dir(self, manifest_hash_value: str, tenant_id: str) -> Path:
+        return self.artifacts_dir / self._tenant_token(tenant_id or "local-dev-tenant") / manifest_hash_value
 
     def _write_json(self, path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _load_ops_state(self) -> dict:
+        payload = _load_json(self.ops_path)
+        if payload:
+            return payload
+        return {
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "cache_validation_failures": 0,
+            "recent_gate_failures": [],
+            "recent_incidents": [],
+            "last_retention_report": {},
+        }
+
+    def _update_ops_state(self, mutator):
+        with self._lock:
+            payload = self._load_ops_state()
+            mutator(payload)
+            self._write_json(self.ops_path, payload)
+
+    def _record_incident(self, kind: str, message: str, *, extra: dict | None = None):
+        def mutate(payload):
+            items = list(payload.get("recent_incidents", []) or [])
+            items.append(
+                {
+                    "timestamp": now_iso(),
+                    "kind": kind,
+                    "message": message,
+                    "extra": extra or {},
+                }
+            )
+            payload["recent_incidents"] = items[-RECENT_FAILURE_LIMIT:]
+
+        self._update_ops_state(mutate)
+
+    def _record_gate_summary(self, job_id: str, gate_summary: dict):
+        failures = []
+        if not bool(gate_summary.get("publish_ok", False)):
+            failures.extend(str(item) for item in gate_summary.get("publish_failures", []) or [])
+        if not bool(gate_summary.get("sota_ok", False)):
+            failures.extend(str(item) for item in gate_summary.get("sota_failures", []) or [])
+        if not failures:
+            return
+
+        def mutate(payload):
+            items = list(payload.get("recent_gate_failures", []) or [])
+            items.append(
+                {
+                    "timestamp": now_iso(),
+                    "job_id": job_id,
+                    "publish_profile": gate_summary.get("publish_profile", ""),
+                    "sota_profile": gate_summary.get("sota_profile", ""),
+                    "failures": sorted(set(failures)),
+                }
+            )
+            payload["recent_gate_failures"] = items[-RECENT_FAILURE_LIMIT:]
+
+        self._update_ops_state(mutate)
 
     def _append_event(
         self,
@@ -449,7 +540,7 @@ class PipelineQueue:
             self._thread = threading.Thread(target=self._worker_loop, daemon=True)
             self._thread.start()
 
-    def _insert_job(self, job_id: str, snap: str, mode: str, job_dir: Path):
+    def _insert_job(self, job_id: str, snap: str, mode: str, job_dir: Path, *, tenant_id: str, teacher_id: str, project_id: str):
         stamp = now_iso()
         with self._conn() as conn:
             conn.execute(
@@ -457,10 +548,12 @@ class PipelineQueue:
                 INSERT INTO jobs(
                     id, snapshot_hash, mode, status, job_dir,
                     artifact_path, error, created_at, updated_at,
-                    progress_current, progress_total, progress_stage, progress_message
-                ) VALUES(?, ?, ?, 'queued', ?, NULL, '', ?, ?, 0, 0, '', '')
+                    progress_current, progress_total, progress_stage, progress_message,
+                    tenant_id, teacher_id, project_id, started_at, completed_at,
+                    cache_status, cache_source_job_id, gate_summary
+                ) VALUES(?, ?, ?, 'queued', ?, NULL, '', ?, ?, 0, 0, '', '', ?, ?, ?, '', '', 'miss', '', '{}')
                 """,
-                (job_id, snap, mode, str(job_dir), stamp, stamp),
+                (job_id, snap, mode, str(job_dir), stamp, stamp, tenant_id, teacher_id, project_id),
             )
             conn.commit()
 
@@ -474,6 +567,11 @@ class PipelineQueue:
         total: int | None = None,
         stage: str | None = None,
         message: str | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        cache_status: str | None = None,
+        cache_source_job_id: str | None = None,
+        gate_summary: dict | None = None,
     ):
         fields = ["status=?", "updated_at=?"]
         values = [status, now_iso()]
@@ -495,31 +593,71 @@ class PipelineQueue:
         if message is not None:
             fields.append("progress_message=?")
             values.append(message)
+        if started_at is not None:
+            fields.append("started_at=?")
+            values.append(started_at)
+        if completed_at is not None:
+            fields.append("completed_at=?")
+            values.append(completed_at)
+        if cache_status is not None:
+            fields.append("cache_status=?")
+            values.append(cache_status)
+        if cache_source_job_id is not None:
+            fields.append("cache_source_job_id=?")
+            values.append(cache_source_job_id)
+        if gate_summary is not None:
+            fields.append("gate_summary=?")
+            values.append(json.dumps(gate_summary, sort_keys=True))
         values.append(job_id)
         with self._conn() as conn:
             conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id=?", tuple(values))
             conn.commit()
 
-    def _find_completed_snapshot(self, snap: str) -> dict | None:
+    def _validate_cached_artifact(self, snap: str, artifact: Path) -> tuple[bool, str]:
+        if not artifact.exists():
+            return False, "artifact_missing"
+        manifest_path = artifact.parent.parent / "pipeline_manifest.json"
+        if not manifest_path.exists():
+            return False, "artifact_manifest_missing"
+        manifest = _load_json(manifest_path)
+        if str(manifest.get("manifest_hash", "") or "") != snap:
+            return False, "artifact_manifest_hash_mismatch"
+        dashboard = artifact.parent / "dashboard_data.json"
+        if not dashboard.exists():
+            return False, "dashboard_missing"
+        return True, ""
+
+    def _find_completed_snapshot(self, snap: str, tenant_id: str, teacher_id: str) -> dict | None:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT id, artifact_path FROM jobs WHERE snapshot_hash=? AND status='completed' ORDER BY updated_at DESC LIMIT 1",
-                (snap,),
+                """
+                SELECT id, artifact_path FROM jobs
+                WHERE snapshot_hash=? AND tenant_id=? AND teacher_id=? AND status='completed'
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (snap, tenant_id, teacher_id),
             ).fetchone()
         if not row:
             return None
         artifact = Path(row[1]) if row[1] else None
-        if not artifact or not artifact.exists():
+        if not artifact:
+            return None
+        valid, reason = self._validate_cached_artifact(snap, artifact)
+        if not valid:
+            self._record_incident("cache_validation_failure", f"Manifest {snap} cache invalid: {reason}", extra={"job_id": row[0]})
+            self._update_ops_state(lambda payload: payload.__setitem__("cache_validation_failures", int(payload.get("cache_validation_failures", 0) or 0) + 1))
             return None
         return {"job_id": row[0], "artifact_path": str(artifact)}
 
-    def get_job(self, job_id: str) -> dict | None:
+    def get_job(self, job_id: str, identity: dict | None = None) -> dict | None:
         with self._conn() as conn:
             row = conn.execute(
                 """
                 SELECT id, snapshot_hash, mode, status, job_dir, artifact_path, error,
                        created_at, updated_at, progress_current, progress_total,
-                       progress_stage, progress_message
+                       progress_stage, progress_message, tenant_id, teacher_id,
+                       project_id, started_at, completed_at, cache_status,
+                       cache_source_job_id, gate_summary
                 FROM jobs WHERE id=?
                 """,
                 (job_id,),
@@ -540,18 +678,36 @@ class PipelineQueue:
             "progress_total",
             "progress_stage",
             "progress_message",
+            "tenant_id",
+            "teacher_id",
+            "project_id",
+            "started_at",
+            "completed_at",
+            "cache_status",
+            "cache_source_job_id",
+            "gate_summary",
         )
         payload = dict(zip(keys, row))
+        owner = {
+            "tenant_id": payload.get("tenant_id", ""),
+            "teacher_id": payload.get("teacher_id", ""),
+        }
+        if identity and not identity_can_access(owner, identity):
+            return None
         total = int(payload.get("progress_total") or 0)
         current = int(payload.get("progress_current") or 0)
         payload["progress_percent"] = round((current / total) * 100.0, 2) if total > 0 else 0.0
         payload["manifest_hash"] = payload["snapshot_hash"]
         payload["manifest_path"] = str(self._manifest_path(Path(payload["job_dir"])))
-        payload["workspace_dir"] = str(self._workspace_dir(job_id))
+        payload["workspace_dir"] = str(self._workspace_dir(job_id, payload.get("tenant_id", "")))
+        try:
+            payload["gate_summary"] = json.loads(payload.get("gate_summary") or "{}")
+        except json.JSONDecodeError:
+            payload["gate_summary"] = {}
         return payload
 
-    def get_events(self, job_id: str, after: int = -1, limit: int = 200) -> dict | None:
-        job = self.get_job(job_id)
+    def get_events(self, job_id: str, identity: dict | None = None, after: int = -1, limit: int = 200) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
         if not job:
             return None
         path = self._event_path(Path(job["job_dir"]))
@@ -611,8 +767,8 @@ class PipelineQueue:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    def _stage_workspace(self, job_id: str, job_dir: Path, manifest: dict, rubric_path: Path, outline_path: Path, submissions_dir: Path):
-        workspace_dir = self._workspace_dir(job_id)
+    def _stage_workspace(self, job_id: str, tenant_id: str, job_dir: Path, manifest: dict, rubric_path: Path, outline_path: Path, submissions_dir: Path):
+        workspace_dir = self._workspace_dir(job_id, tenant_id)
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -637,7 +793,20 @@ class PipelineQueue:
         self._write_json(self._manifest_path(job_dir), manifest)
         self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
 
-    def submit(self, mode: str, rubric_path: Path, outline_path: Path, submissions_dir: Path, extra_paths: list[Path]) -> dict:
+    def submit(
+        self,
+        mode: str,
+        rubric_path: Path,
+        outline_path: Path,
+        submissions_dir: Path,
+        extra_paths: list[Path],
+        *,
+        identity: dict | None = None,
+        project_id: str = "",
+    ) -> dict:
+        identity = dict(identity or {})
+        tenant_id = str(identity.get("tenant_id", "") or "local-dev-tenant")
+        teacher_id = str(identity.get("teacher_id", "") or "local-dev-teacher")
         manifest = build_pipeline_manifest(
             root=self.root,
             mode=mode,
@@ -647,8 +816,9 @@ class PipelineQueue:
             extra_paths=extra_paths,
         )
         snap = manifest["manifest_hash"]
-        cached = self._find_completed_snapshot(snap)
+        cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
         if cached:
+            self._update_ops_state(lambda payload: payload.__setitem__("cache_hits", int(payload.get("cache_hits", 0) or 0) + 1))
             return {
                 "job_id": cached["job_id"],
                 "status": "completed",
@@ -656,12 +826,13 @@ class PipelineQueue:
                 "snapshot_hash": snap,
                 "manifest_hash": snap,
             }
+        self._update_ops_state(lambda payload: payload.__setitem__("cache_misses", int(payload.get("cache_misses", 0) or 0) + 1))
         job_id = uuid.uuid4().hex
-        job_dir = self.jobs_dir / job_id
+        job_dir = self._job_dir(job_id, tenant_id)
         job_dir.mkdir(parents=True, exist_ok=True)
         self._event_path(job_dir).touch()
-        self._stage_workspace(job_id, job_dir, manifest, rubric_path, outline_path, submissions_dir)
-        self._insert_job(job_id, snap, mode, job_dir)
+        self._stage_workspace(job_id, tenant_id, job_dir, manifest, rubric_path, outline_path, submissions_dir)
+        self._insert_job(job_id, snap, mode, job_dir, tenant_id=tenant_id, teacher_id=teacher_id, project_id=project_id)
         self._append_event(
             job_dir,
             "queued",
@@ -678,8 +849,8 @@ class PipelineQueue:
             "manifest_hash": snap,
         }
 
-    def load_dashboard_data(self, job_id: str) -> dict | None:
-        job = self.get_job(job_id)
+    def load_dashboard_data(self, job_id: str, identity: dict | None = None) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
         if not job or job["status"] != "completed" or not job.get("artifact_path"):
             return None
         artifact = Path(job["artifact_path"])
@@ -725,6 +896,127 @@ class PipelineQueue:
                 items.append(str(item.relative_to(path)))
         return items
 
+    def _gate_summary(self, workspace_dir: Path) -> dict:
+        publish_path = workspace_dir / "outputs" / "publish_gate.json"
+        sota_path = workspace_dir / "outputs" / "sota_gate.json"
+        publish = _load_json(publish_path)
+        sota = _load_json(sota_path)
+        publish_profiles = publish.get("profiles", {}) if isinstance(publish, dict) else {}
+        publish_failures = []
+        if isinstance(publish_profiles, dict):
+            for item in publish_profiles.values():
+                publish_failures.extend(str(value) for value in item.get("failures", []) or [])
+        sota_profiles = sota.get("profiles", {}) if isinstance(sota, dict) else {}
+        sota_failures = []
+        if isinstance(sota_profiles, dict):
+            for item in sota_profiles.values():
+                sota_failures.extend(str(value) for value in item.get("failures", []) or [])
+        return {
+            "publish_ok": bool(publish.get("ok", False)),
+            "publish_profile": str(publish.get("highest_attained_profile", "") or publish.get("target_profile", "") or ""),
+            "publish_failures": sorted(set(publish_failures)),
+            "sota_ok": bool(sota.get("ok", False)),
+            "sota_profile": str(sota.get("highest_attained_profile", "") or sota.get("target_profile", "") or ""),
+            "sota_failures": sorted(set(sota_failures)),
+        }
+
+    def ops_summary(self, identity: dict | None = None) -> dict:
+        ops = self._load_ops_state()
+        observability = launch_contract(self.root).get("observability", {})
+        with self._conn() as conn:
+            where = ""
+            params = []
+            if identity and str(identity.get("tenant_id", "") or "").strip():
+                where = "WHERE tenant_id=?"
+                params.append(str(identity.get("tenant_id", "") or "").strip())
+            counts = {
+                "queued": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='queued'" if where else "SELECT COUNT(*) FROM jobs WHERE status='queued'", tuple(params)).fetchone()[0],
+                "running": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='running'" if where else "SELECT COUNT(*) FROM jobs WHERE status='running'", tuple(params)).fetchone()[0],
+                "completed": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='completed'" if where else "SELECT COUNT(*) FROM jobs WHERE status='completed'", tuple(params)).fetchone()[0],
+                "failed": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='failed'" if where else "SELECT COUNT(*) FROM jobs WHERE status='failed'", tuple(params)).fetchone()[0],
+            }
+            rows = conn.execute(
+                f"SELECT started_at, completed_at, status FROM jobs {where}" if where else "SELECT started_at, completed_at, status FROM jobs",
+                tuple(params),
+            ).fetchall()
+        latencies = []
+        for started_at, completed_at, status in rows:
+            if status not in {"completed", "failed"} or not started_at or not completed_at:
+                continue
+            start_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
+            latencies.append(max(0.0, (end_dt - start_dt).total_seconds()))
+        latencies.sort()
+        p95 = latencies[int((len(latencies) - 1) * 0.95)] if latencies else 0.0
+        queue_depth = self._queue.qsize()
+        warnings = []
+        if queue_depth > int(observability.get("max_queue_depth_warning", 5) or 5):
+            warnings.append("queue_depth_above_warning")
+        if p95 > float(observability.get("max_p95_job_latency_seconds", 3600.0) or 3600.0):
+            warnings.append("p95_job_latency_above_warning")
+        if int(ops.get("cache_validation_failures", 0) or 0) > 0:
+            warnings.append("cache_validation_failures_present")
+        return {
+            "queue_depth": queue_depth,
+            "jobs": counts,
+            "latency": {
+                "completed_jobs": len(latencies),
+                "mean_seconds": round(sum(latencies) / len(latencies), 6) if latencies else 0.0,
+                "p95_seconds": round(p95, 6),
+            },
+            "cache": {
+                "hits": int(ops.get("cache_hits", 0) or 0),
+                "misses": int(ops.get("cache_misses", 0) or 0),
+                "validation_failures": int(ops.get("cache_validation_failures", 0) or 0),
+            },
+            "recent_gate_failures": list(ops.get("recent_gate_failures", []) or []),
+            "recent_incidents": list(ops.get("recent_incidents", []) or []),
+            "retention_policy": launch_contract(self.root).get("retention", {}),
+            "observability_thresholds": observability,
+            "warnings": warnings,
+            "last_retention_report": ops.get("last_retention_report", {}),
+        }
+
+    def prune_retention(self, dry_run: bool = True) -> dict:
+        retention = launch_contract(self.root).get("retention", {})
+        now = datetime.now(timezone.utc)
+        report = {
+            "dry_run": bool(dry_run),
+            "generated_at": now_iso(),
+            "jobs_removed": [],
+            "workspaces_removed": [],
+            "artifacts_removed": [],
+        }
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, tenant_id, status, updated_at, job_dir, artifact_path FROM jobs").fetchall()
+        for job_id, tenant_id, status, updated_at, job_dir, artifact_path in rows:
+            if status not in {"completed", "failed"}:
+                continue
+            updated_dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00")) if updated_at else now
+            age_days = max(0.0, (now - updated_dt).total_seconds() / 86400.0)
+            job_path = Path(str(job_dir))
+            workspace_path = self._workspace_dir(str(job_id), str(tenant_id or ""))
+            artifact = Path(str(artifact_path)) if artifact_path else None
+            artifact_dir = artifact.parent.parent if artifact else self._artifact_dir(str(job_id), str(tenant_id or ""))
+            if age_days >= float(retention.get("job_days", 14) or 14):
+                report["jobs_removed"].append(str(job_path))
+                if not dry_run and job_path.exists():
+                    shutil.rmtree(job_path)
+            if age_days >= float(retention.get("workspace_days", 7) or 7):
+                report["workspaces_removed"].append(str(workspace_path))
+                if not dry_run and workspace_path.exists():
+                    shutil.rmtree(workspace_path)
+            if age_days >= float(retention.get("artifact_days", 30) or 30):
+                report["artifacts_removed"].append(str(artifact_dir))
+                if not dry_run and artifact_dir.exists():
+                    shutil.rmtree(artifact_dir)
+
+        def mutate(payload):
+            payload["last_retention_report"] = report
+
+        self._update_ops_state(mutate)
+        return report
+
     def _process_job(self, job_id: str):
         job = self.get_job(job_id)
         if not job or job["status"] != "queued":
@@ -732,10 +1024,20 @@ class PipelineQueue:
         run_id = job_id[:8]
         mode = job["mode"]
         job_dir = Path(job["job_dir"])
-        workspace_dir = self._workspace_dir(job_id)
+        tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
+        workspace_dir = self._workspace_dir(job_id, tenant_id)
         manifest = _load_json(self._manifest_path(job_dir))
         steps = pipeline_steps()
-        self._update_job(job_id, "running", current=0, total=len(steps), stage="queued", message="Job queued")
+        self._update_job(
+            job_id,
+            "running",
+            current=0,
+            total=len(steps),
+            stage="queued",
+            message="Job queued",
+            started_at=now_iso(),
+            cache_status="miss",
+        )
         self.log(self.root, run_id, f"QUEUE START mode={mode} manifest={job['snapshot_hash']} workspace={workspace_dir}")
         try:
             baseline = self._artifact_snapshot(workspace_dir)
@@ -806,6 +1108,11 @@ class PipelineQueue:
                     if step.get("required", True):
                         self._append_event(job_dir, stage, f"Step failed: {label}", level="error", event="failed")
                         self.log(self.root, run_id, f"QUEUE ERROR step {stage} failed", detail=detail[:8000])
+                        self._record_incident(
+                            "job_step_failed",
+                            f"Job {job_id} failed at step {stage}",
+                            extra={"job_id": job_id, "step": stage, "tenant_id": tenant_id},
+                        )
                         self._update_job(
                             job_id,
                             "failed",
@@ -814,6 +1121,7 @@ class PipelineQueue:
                             total=len(steps),
                             stage=stage,
                             message=f"Failed: {label}",
+                            completed_at=now_iso(),
                         )
                         return
                     self._append_event(
@@ -840,6 +1148,11 @@ class PipelineQueue:
             if not dashboard.exists():
                 self._append_event(job_dir, "dashboard", "Dashboard data missing after successful run", level="error", event="failed")
                 self.log(self.root, run_id, "QUEUE ERROR dashboard missing")
+                self._record_incident(
+                    "dashboard_missing",
+                    f"Job {job_id} completed steps but did not produce dashboard output",
+                    extra={"job_id": job_id, "tenant_id": tenant_id},
+                )
                 self._update_job(
                     job_id,
                     "failed",
@@ -848,10 +1161,11 @@ class PipelineQueue:
                     total=len(steps),
                     stage="dashboard",
                     message="Failed: Dashboard output missing",
+                    completed_at=now_iso(),
                 )
                 return
 
-            artifact_dir = self.artifacts_dir / job["snapshot_hash"]
+            artifact_dir = self._artifact_dir(job["snapshot_hash"], tenant_id)
             if artifact_dir.exists():
                 shutil.rmtree(artifact_dir)
             artifact_outputs_dir = artifact_dir / "outputs"
@@ -860,6 +1174,7 @@ class PipelineQueue:
             manifest_artifact = artifact_dir / "pipeline_manifest.json"
             self._write_json(manifest_artifact, manifest)
             artifact_path = artifact_outputs_dir / "dashboard_data.json"
+            gate_summary = self._gate_summary(workspace_dir)
             published = self._artifact_listing(artifact_dir)
             self._append_event(job_dir, "completed", "Published artifacts", event="artifact", artifacts=published)
             self._update_job(
@@ -870,10 +1185,25 @@ class PipelineQueue:
                 total=len(steps),
                 stage="completed",
                 message="Pipeline complete",
+                completed_at=now_iso(),
+                gate_summary=gate_summary,
             )
+            self._record_gate_summary(job_id, gate_summary)
             self._append_event(job_dir, "completed", "Pipeline complete", event="complete")
             self.log(self.root, run_id, "QUEUE SUCCESS")
         except Exception as exc:  # pragma: no cover - defensive
             self._append_event(job_dir, "unhandled", f"Unhandled error: {exc}", level="error", event="failed")
             self.log(self.root, run_id, "QUEUE ERROR unhandled", detail=str(exc))
-            self._update_job(job_id, "failed", error=str(exc)[:500], stage="unhandled", message="Failed with unhandled error")
+            self._record_incident(
+                "job_unhandled_exception",
+                f"Unhandled exception while processing job {job_id}",
+                extra={"job_id": job_id, "tenant_id": tenant_id, "error": str(exc)[:500]},
+            )
+            self._update_job(
+                job_id,
+                "failed",
+                error=str(exc)[:500],
+                stage="unhandled",
+                message="Failed with unhandled error",
+                completed_at=now_iso(),
+            )

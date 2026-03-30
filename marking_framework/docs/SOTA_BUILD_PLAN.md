@@ -29,6 +29,7 @@ The original eight implementation phases are now in the repo:
 - Phase 6: teacher review persistence and replay exports
 - Phase 7: finalized-review-only local preference prior
 - Phase 8: aggregate review learning governance
+- Phase 9: production hardening and launch contract
 
 That is necessary progress, but it is not the same thing as production readiness.
 
@@ -42,9 +43,16 @@ The current system can:
 - persist finalized teacher deltas, local learning summaries, scoped local teacher priors, and governed anonymized aggregate records
 - export and ingest anonymized finalized-only aggregate packages with provenance and retention metadata
 - promote approved benchmark, boundary, and calibration candidates into adjudicated staging assets
+- enforce strict identity and ownership rules in staging/production mode
+- isolate teacher workspaces, projects, queue jobs, and cached artifacts by tenant-aware paths
+- expose queue ops summaries, cache validation health, retention maintenance, and gate-failure summaries
+- validate launch readiness with `scripts/validate_production_launch.py`
+- produce manifest-aware rollback plans with `scripts/release_rollback.py`
 
-The current system does not yet:
-- satisfy the operational, privacy, and launch requirements of a production product
+The remaining work before a real rollout is no longer architectural. It is environmental and operational:
+- wire the strict identity headers to the real auth provider
+- run the launch validator against the real release candidate
+- rehearse the rollback flow against the deployment environment
 
 ## Working Definition Of SOTA For This Repo
 
@@ -140,15 +148,12 @@ The repo already has the right major layers. The work is to harden and unify the
 
 These are now the real blockers between the current branch state and a production-ready product.
 
-### Gap 1: Production Ops, Privacy, And Launch Controls Are Still Missing
+### Gap 1: Deployment Integration Still Needs To Be Applied
 
-The branch does not yet define the operational contract for:
-- teacher and tenant isolation
-- retention and deletion policy
-- auditability of promoted learning data
-- queue health and backpressure
-- rollback and incident handling
-- launch checklist and go/no-go rules
+The repo now defines the production contract. The remaining gap is applying it in the live environment:
+- upstream identity provider integration
+- deployment-time secret management
+- live release rehearsal with real ops surfaces
 
 ## Target Architecture
 
@@ -850,7 +855,7 @@ Use this section as the running status checkpoint.
 - Phase 6: completed
 - Phase 7: completed
 - Phase 8: completed
-- Phase 9: pending
+- Phase 9: completed
 
 ### Latest Confirmed Improvements
 
@@ -866,11 +871,12 @@ Use this section as the running status checkpoint.
 - teacher review now persists as versioned structured data, emits replay artifacts for benchmark/boundary/calibration refresh, and produces both a local learning profile and governed anonymized aggregate records
 - teacher review now uses draft-versus-final state, derives finalized net-delta artifacts, and feeds a bounded scoped local teacher prior back into runtime reranking
 - aggregate review learning now enforces finalized-only anonymized eligibility, project-level collection policy, provenance/retention manifests, governed export and ingestion packages, and adjudication-required promotion staging for benchmark, boundary, and calibration candidates
+- production runtime now enforces strict identity-aware auth in staging/production, isolates projects and teacher workspaces, emits queue ops and retention reports, validates launch readiness, and generates rollback plans
 
 ### Outstanding Architectural Risks
 
-- production auth, privacy, retention, and operational launch controls are not yet defined in the codebase
+- the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
 
 ### Next Decision Point
 
-Start Phase 9 by hardening production auth, isolation, retention reconciliation, audit, and launch controls.
+Run `scripts/validate_production_launch.py` against the intended release candidate and complete the live rollout rehearsal.

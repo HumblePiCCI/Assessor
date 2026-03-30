@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import DEVNULL, Popen, run
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
+import server.projects as projectsmod
+from server.runtime_context import launch_contract, require_admin, resolve_request_identity
 app = FastAPI()
 app.include_router(projects_router)
 app.add_middleware(
@@ -45,6 +47,18 @@ def workspace_root() -> Path:
     return BASE_DIR.parent
 def current_api_key() -> str | None:
     return API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
+
+
+def request_identity(request: Request | None) -> dict:
+    return resolve_request_identity(request, BASE_DIR.parent)
+
+
+def dashboard_data_path_for_identity(identity: dict) -> Path:
+    if not identity.get("strict_auth", False):
+        return DATA_JSON_PATH
+    return projectsmod.workspace_root(identity) / "outputs" / "dashboard_data.json"
+
+
 def reset_workspace(root: Path):
     inputs_dir = root / "inputs"
     exemplars_dir = inputs_dir / "exemplars"
@@ -111,19 +125,40 @@ PIPELINE_QUEUE = PipelineQueue(
     api_key_fn=current_api_key,
 )
 @app.get("/auth/status")
-async def auth_status():
+async def auth_status(request: Request):
     key = API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
-    return {"connected": bool(key)}
+    identity = request_identity(request)
+    contract = launch_contract(BASE_DIR.parent)
+    return {
+        "connected": bool(key),
+        "runtime_mode": identity.get("auth_mode", "development"),
+        "strict_auth": bool(identity.get("strict_auth", False)),
+        "identity_headers": identity.get("headers", {}),
+        "production_contract": contract,
+    }
+
+
+@app.get("/auth/context")
+async def auth_context(request: Request):
+    identity = request_identity(request)
+    return {
+        "tenant_id": identity.get("tenant_id", ""),
+        "teacher_id": identity.get("teacher_id", ""),
+        "role": identity.get("role", "teacher"),
+        "runtime_mode": identity.get("auth_mode", "development"),
+        "strict_auth": bool(identity.get("strict_auth", False)),
+    }
 def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="UI asset not found")
     return FileResponse(path, media_type=media_type)
 @app.get("/data.json")
-async def ui_data_json():
-    if not DATA_JSON_PATH.exists():
+async def ui_data_json(request: Request):
+    data_path = dashboard_data_path_for_identity(request_identity(request))
+    if not data_path.exists():
         return {"students": []}
-    return json.loads(DATA_JSON_PATH.read_text(encoding="utf-8"))
+    return json.loads(data_path.read_text(encoding="utf-8"))
 @app.get("/")
 async def ui_index():
     return ui_file_response("index.html")
@@ -184,14 +219,17 @@ def validate_pipeline_mode(mode: str) -> str:
 
 
 def submit_pipeline_job(
+    request: Request,
     rubric: UploadFile,
     outline: UploadFile,
     submissions: Optional[List[UploadFile]],
     mode: str,
+    project_id: str = "",
 ):
     if not submissions:
         raise HTTPException(status_code=400, detail="No submissions provided")
     mode = validate_pipeline_mode(mode)
+    identity = request_identity(request)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         rubric_path = tmp_dir / f"rubric{Path(rubric.filename).suffix or '.md'}"
@@ -209,51 +247,77 @@ def submit_pipeline_job(
             outline_path=outline_path,
             submissions_dir=submissions_dir,
             extra_paths=[root / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
+            identity=identity,
+            project_id=project_id,
         )
 
 
 @app.post("/pipeline/run")
 async def run_pipeline(
+    request: Request,
     rubric: UploadFile = File(...),
     outline: UploadFile = File(...),
     submissions: Optional[List[UploadFile]] = File(None),
     mode: str = Form("codex_local"),
+    project_id: str = Form(""),
 ):
-    return submit_pipeline_job(rubric=rubric, outline=outline, submissions=submissions, mode=mode)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, project_id=project_id)
 
 
 @app.post("/pipeline/v2/run")
 async def run_pipeline_v2(
+    request: Request,
     rubric: UploadFile = File(...),
     outline: UploadFile = File(...),
     submissions: Optional[List[UploadFile]] = File(None),
     mode: str = Form("codex_local"),
+    project_id: str = Form(""),
 ):
-    return submit_pipeline_job(rubric=rubric, outline=outline, submissions=submissions, mode=mode)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, project_id=project_id)
 @app.get("/pipeline/v2/jobs/{job_id}")
-async def pipeline_v2_status(job_id: str):
-    job = PIPELINE_QUEUE.get_job(job_id)
+async def pipeline_v2_status(job_id: str, request: Request):
+    job = PIPELINE_QUEUE.get_job(job_id, identity=request_identity(request))
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 @app.get("/pipeline/v2/jobs/{job_id}/data")
-async def pipeline_v2_data(job_id: str):
-    data = PIPELINE_QUEUE.load_dashboard_data(job_id)
+async def pipeline_v2_data(job_id: str, request: Request):
+    data = PIPELINE_QUEUE.load_dashboard_data(job_id, identity=request_identity(request))
     if data is None:
         raise HTTPException(status_code=404, detail="Dashboard data not ready")
     return data
 @app.get("/pipeline/v2/jobs/{job_id}/events")
-async def pipeline_v2_events(job_id: str, after: int = -1, limit: int = 200):
-    payload = PIPELINE_QUEUE.get_events(job_id, after=after, limit=limit)
+async def pipeline_v2_events(job_id: str, request: Request, after: int = -1, limit: int = 200):
+    payload = PIPELINE_QUEUE.get_events(job_id, identity=request_identity(request), after=after, limit=limit)
     if payload is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return payload
+
+
+@app.get("/pipeline/v2/ops/status")
+async def pipeline_v2_ops_status(request: Request):
+    identity = request_identity(request)
+    if identity.get("strict_auth", False):
+        require_admin(identity)
+    return PIPELINE_QUEUE.ops_summary(identity=identity)
+
+
+@app.post("/pipeline/v2/ops/maintenance")
+async def pipeline_v2_ops_maintenance(request: Request, dry_run: bool = True):
+    identity = request_identity(request)
+    if identity.get("strict_auth", False):
+        require_admin(identity)
+    return PIPELINE_QUEUE.prune_retention(dry_run=dry_run)
 @app.post("/jobs")
 async def create_job(
+    request: Request,
     rubric: UploadFile = File(...),
     outline: UploadFile = File(...),
     submissions_zip: UploadFile = File(...),
 ):
+    identity = request_identity(request)
+    if identity.get("strict_auth", False):
+        raise HTTPException(status_code=403, detail="Legacy /jobs endpoint is disabled in strict runtime mode")
     job_id = str(uuid.uuid4())
     job_dir = DATA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -298,7 +362,10 @@ async def create_job(
     shutil.make_archive(str(archive_path).replace(".zip", ""), "zip", str(outputs_dir))
     return {"job_id": job_id, "outputs_zip": f"/jobs/{job_id}/outputs"}
 @app.get("/jobs/{job_id}/outputs")
-async def get_outputs(job_id: str):
+async def get_outputs(job_id: str, request: Request):
+    identity = request_identity(request)
+    if identity.get("strict_auth", False):
+        raise HTTPException(status_code=403, detail="Legacy /jobs endpoint is disabled in strict runtime mode")
     job_dir = DATA_DIR / job_id
     archive_path = job_dir / "outputs.zip"
     if not archive_path.exists():

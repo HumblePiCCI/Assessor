@@ -202,7 +202,7 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     job = queue.get_job(result["job_id"])
     assert job["status"] == "completed"
     workspace_dir = Path(job["workspace_dir"])
-    assert workspace_dir == data / "workspaces" / result["job_id"]
+    assert workspace_dir == queue._workspace_dir(result["job_id"], "local-dev-tenant")
     assert workspace_dir in resets
     assert calls["cwds"] and calls["cwds"][0] == workspace_dir
     assert calls["env"]["LLM_MODE"] == "openai"
@@ -212,7 +212,7 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert not (root / "outputs" / "dashboard_data.json").exists()
     assert (workspace_dir / "pipeline_manifest.json").exists()
     assert (Path(job["manifest_path"])).exists()
-    artifact_dir = queue.artifacts_dir / result["manifest_hash"]
+    artifact_dir = queue._artifact_dir(result["manifest_hash"], "local-dev-tenant")
     assert (artifact_dir / "pipeline_manifest.json").exists()
     assert (artifact_dir / "outputs" / "dashboard_data.json").exists()
     data_json = queue.load_dashboard_data(result["job_id"])
@@ -223,11 +223,11 @@ def test_submit_cached_completed_snapshot(tmp_path):
     queue, root, _data, _logs, _resets = _make_queue(tmp_path)
     rubric, outline, subs = _write_inputs(tmp_path / "inputs")
     snap = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
-    artifact = queue.artifacts_dir / snap / "outputs" / "dashboard_data.json"
+    artifact = queue._artifact_dir(snap, "local-dev-tenant") / "outputs" / "dashboard_data.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("{}", encoding="utf-8")
-    (artifact.parent.parent / "pipeline_manifest.json").write_text("{}", encoding="utf-8")
-    queue._insert_job("done", snap, "openai", queue.jobs_dir / "done")
+    (artifact.parent.parent / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": snap}), encoding="utf-8")
+    queue._insert_job("done", snap, "openai", queue._job_dir("done", "local-dev-tenant"), tenant_id="local-dev-tenant", teacher_id="local-dev-teacher", project_id="")
     queue._update_job("done", "completed", artifact=artifact)
     out = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
     assert out["cached"] is True
@@ -242,8 +242,8 @@ def test_two_jobs_stage_inputs_into_separate_workspaces(tmp_path):
     rubric2, outline2, subs2 = _write_inputs(tmp_path / "inputs2", submission_name="beta.txt", submission_text="beta essay")
     first = queue.submit("openai", rubric1, outline1, subs1, _extra_paths(root))
     second = queue.submit("openai", rubric2, outline2, subs2, _extra_paths(root))
-    first_workspace = data / "workspaces" / first["job_id"]
-    second_workspace = data / "workspaces" / second["job_id"]
+    first_workspace = queue._workspace_dir(first["job_id"], "local-dev-tenant")
+    second_workspace = queue._workspace_dir(second["job_id"], "local-dev-tenant")
     assert first_workspace != second_workspace
     assert (first_workspace / "inputs" / "submissions" / "alpha.txt").exists()
     assert not (first_workspace / "inputs" / "submissions" / "beta.txt").exists()
@@ -325,9 +325,9 @@ def test_job_lookup_and_artifact_edge_cases(tmp_path):
 
 def test_find_completed_snapshot_missing_artifact(tmp_path):
     queue, _root, _data, _logs, _resets = _make_queue(tmp_path)
-    queue._insert_job("j1", "abc", "openai", queue.jobs_dir / "j1")
-    queue._update_job("j1", "completed", artifact=queue.artifacts_dir / "abc" / "outputs" / "nope.json")
-    assert queue._find_completed_snapshot("abc") is None
+    queue._insert_job("j1", "abc", "openai", queue._job_dir("j1", "local-dev-tenant"), tenant_id="local-dev-tenant", teacher_id="local-dev-teacher", project_id="")
+    queue._update_job("j1", "completed", artifact=queue._artifact_dir("abc", "local-dev-tenant") / "outputs" / "nope.json")
+    assert queue._find_completed_snapshot("abc", "local-dev-tenant", "local-dev-teacher") is None
 
 
 def test_get_events_handles_offsets_bad_json_and_done_flag(tmp_path):
@@ -411,3 +411,68 @@ def test_non_blocking_step_failure_continues(tmp_path, monkeypatch):
     job = queue.get_job(submitted["job_id"])
     assert job["status"] == "completed"
     assert any("QUEUE WARN step warn failed (non-blocking)" in entry[1] for entry in logs)
+
+
+def test_cache_lookup_is_teacher_scoped_and_ops_track_validation_failures(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    snap = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
+    bad_artifact = queue._artifact_dir(snap, "tenant-a") / "outputs" / "dashboard_data.json"
+    bad_artifact.parent.mkdir(parents=True, exist_ok=True)
+    bad_artifact.write_text("{}", encoding="utf-8")
+    (bad_artifact.parent.parent / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "wrong"}), encoding="utf-8")
+    queue._insert_job("cached-a", snap, "openai", queue._job_dir("cached-a", "tenant-a"), tenant_id="tenant-a", teacher_id="teacher-a", project_id="")
+    queue._update_job("cached-a", "completed", artifact=bad_artifact)
+    assert queue._find_completed_snapshot(snap, "tenant-a", "teacher-a") is None
+    ops = queue.ops_summary()
+    assert ops["cache"]["validation_failures"] == 1
+    assert "cache_validation_failures_present" in ops["warnings"]
+
+    fresh = queue.submit(
+        "openai",
+        rubric,
+        outline,
+        subs,
+        _extra_paths(root),
+        identity={"tenant_id": "tenant-a", "teacher_id": "teacher-b"},
+    )
+    assert fresh["cached"] is False
+
+
+def test_large_class_staging_smoke(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    queue._start_worker = lambda: None
+    inputs_dir = tmp_path / "large_inputs"
+    rubric, outline, subs = _write_inputs(inputs_dir, submission_name="essay_000.txt", submission_text="essay 0")
+    for index in range(1, 121):
+        (subs / f"essay_{index:03d}.txt").write_text(f"essay {index}", encoding="utf-8")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    workspace = queue._workspace_dir(submitted["job_id"], "local-dev-tenant")
+    staged = sorted((workspace / "inputs" / "submissions").glob("*.txt"))
+    assert len(staged) == 121
+    assert staged[0].name == "essay_000.txt"
+    assert staged[-1].name == "essay_120.txt"
+
+
+def test_ops_summary_and_retention_report(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._update_job(
+        submitted["job_id"],
+        "completed",
+        artifact=queue._artifact_dir(submitted["manifest_hash"], "local-dev-tenant") / "outputs" / "dashboard_data.json",
+        started_at="2026-03-30T00:00:00+00:00",
+        completed_at="2026-03-30T00:02:00+00:00",
+    )
+    artifact = queue._artifact_dir(submitted["manifest_hash"], "local-dev-tenant") / "outputs" / "dashboard_data.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("{}", encoding="utf-8")
+    (artifact.parent.parent / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": submitted["manifest_hash"]}), encoding="utf-8")
+    ops = queue.ops_summary()
+    assert ops["jobs"]["completed"] == 1
+    assert ops["latency"]["p95_seconds"] == 120.0
+    report = queue.prune_retention(dry_run=True)
+    assert report["dry_run"] is True
+    assert queue.ops_summary()["last_retention_report"]["dry_run"] is True

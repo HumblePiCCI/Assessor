@@ -67,6 +67,9 @@ def canonical_hash(payload) -> str:
 
 
 def review_scope_id(current_project: dict | None) -> str:
+    scope_key = str((current_project or {}).get("scope_key", "") or "").strip()
+    if scope_key:
+        return scope_key
     project_id = str((current_project or {}).get("id", "") or "").strip()
     return project_id or "workspace"
 

@@ -494,9 +494,10 @@ def test_projects_delete_clears_current(tmp_path, monkeypatch):
     projmod.set_current_project(None)
     assert not current_path.exists()
     projmod.set_current_project({"id": other_id, "name": "O"})
-    asyncio.run(projmod.projects_delete(project_id))
+    request = types.SimpleNamespace(headers={})
+    asyncio.run(projmod.projects_delete(project_id, request))
     assert current_path.exists()
-    asyncio.run(projmod.projects_delete(other_id))
+    asyncio.run(projmod.projects_delete(other_id, request))
     assert not current_path.exists()
 
 
@@ -520,3 +521,89 @@ def test_save_project_snapshot_skips_inputs_when_missing(tmp_path, monkeypatch):
     root.mkdir()
     meta = projmod.save_project_snapshot(root, "pid", "Name", include_logs=False)
     assert meta["id"] == "pid"
+
+
+def test_strict_auth_requires_identity_and_uses_scoped_workspace(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setenv("MARKING_RUNTIME_MODE", "production")
+    monkeypatch.delenv("MARKING_STRICT_AUTH", raising=False)
+    client = TestClient(app)
+
+    unauthorized = client.get("/auth/context")
+    assert unauthorized.status_code == 401
+
+    headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "teacher-a", "x-teacher-role": "teacher"}
+    context = client.get("/auth/context", headers=headers)
+    assert context.status_code == 200
+    assert context.json()["strict_auth"] is True
+
+    identity = appmod.request_identity(types.SimpleNamespace(headers=headers))
+    data_root = projmod.workspace_root(identity)
+    (data_root / "outputs").mkdir(parents=True, exist_ok=True)
+    (data_root / "outputs" / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+
+    data_resp = client.get("/data.json", headers=headers)
+    assert data_resp.status_code == 200
+    assert data_resp.json()["students"][0]["student_id"] == "s1"
+
+    blocked = client.post(
+        "/jobs",
+        headers=headers,
+        files={
+            "rubric": ("rubric.md", b"rubric"),
+            "outline": ("outline.md", b"outline"),
+            "submissions_zip": ("subs.zip", make_zip_bytes().read(), "application/zip"),
+        },
+    )
+    assert blocked.status_code == 403
+
+
+def test_strict_project_visibility_and_ops_admin_gate(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setenv("MARKING_RUNTIME_MODE", "production")
+    monkeypatch.delenv("MARKING_STRICT_AUTH", raising=False)
+
+    class OpsQueue:
+        def ops_summary(self, identity=None):
+            return {"queue_depth": 0, "identity": identity}
+
+        def prune_retention(self, dry_run=True):
+            return {"dry_run": dry_run}
+
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", OpsQueue())
+    client = TestClient(app)
+    teacher_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "teacher-a", "x-teacher-role": "teacher"}
+    other_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "teacher-b", "x-teacher-role": "teacher"}
+    admin_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "admin-a", "x-teacher-role": "admin"}
+
+    save_resp = client.post("/projects/save", headers=teacher_headers, json={"name": "Strict Class"})
+    assert save_resp.status_code == 200
+    project_id = save_resp.json()["id"]
+
+    teacher_list = client.get("/projects", headers=teacher_headers)
+    assert len(teacher_list.json()["projects"]) == 1
+
+    other_list = client.get("/projects", headers=other_headers)
+    assert other_list.status_code == 200
+    assert other_list.json()["projects"] == []
+
+    admin_list = client.get("/projects", headers=admin_headers)
+    assert len(admin_list.json()["projects"]) == 1
+
+    denied = client.post("/projects/load", headers=other_headers, json={"project_id": project_id})
+    assert denied.status_code == 403
+
+    teacher_ops = client.get("/pipeline/v2/ops/status", headers=teacher_headers)
+    assert teacher_ops.status_code == 403
+    admin_ops = client.get("/pipeline/v2/ops/status", headers=admin_headers)
+    assert admin_ops.status_code == 200
+    assert admin_ops.json()["queue_depth"] == 0

@@ -118,5 +118,25 @@
         "benchmark_max_mean_student_score_sd_delta": -0.05
       }
     }
+  },
+  "production_contract": {
+    "launch": {
+      "required_publish_profile": "release",
+      "required_sota_profile": "release",
+      "required_benchmark_dataset_count": 3,
+      "required_calibration_freshness_hours": 168.0,
+      "required_privacy_posture": "governed_finalized_anonymized"
+    },
+    "rollback": {
+      "max_release_age_hours": 168.0,
+      "require_manifest_hash": true,
+      "require_git_sha": true,
+      "invalidate_cache_on_rollback": true
+    },
+    "incident": {
+      "require_runbook": true,
+      "require_gate_summary": true,
+      "max_recent_gate_failures": 5
+    }
   }
 }

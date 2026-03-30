@@ -8,13 +8,15 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
         payload = {
             "mode": mode,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(item.name for item in submissions_dir.glob("*") if item.is_file()),
             "extra": [str(path) for path in extra_paths],
+            "identity": dict(identity or {}),
+            "project_id": project_id,
         }
         self.calls.append(payload)
         return {
@@ -51,6 +53,7 @@ def test_pipeline_run_and_v2_delegate_to_same_queue(monkeypatch):
     assert fake.calls[0] == fake.calls[1]
     assert fake.calls[0]["mode"] == "openai"
     assert fake.calls[0]["subs"] == ["s1.txt", "s2.txt"]
+    assert fake.calls[0]["project_id"] == ""
     assert any(path.endswith("config/accuracy_gate.json") for path in fake.calls[0]["extra"])
     assert any(path.endswith("config/sota_gate.json") for path in fake.calls[0]["extra"])
 

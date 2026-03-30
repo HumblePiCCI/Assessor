@@ -113,5 +113,28 @@
         "benchmark_max_mean_student_score_sd": 0.85
       }
     }
+  },
+  "production_contract": {
+    "auth": {
+      "required_mode": "strict",
+      "teacher_header": "x-teacher-id",
+      "tenant_header": "x-tenant-id",
+      "role_header": "x-teacher-role",
+      "project_owner_required": true
+    },
+    "retention": {
+      "job_days": 14,
+      "artifact_days": 30,
+      "workspace_days": 7
+    },
+    "observability": {
+      "max_queue_depth_warning": 5,
+      "max_p95_job_latency_seconds": 180.0
+    },
+    "privacy": {
+      "required_posture": "governed_finalized_anonymized",
+      "aggregate_feedback_policy": "opt_in_or_policy_compliant",
+      "delete_tombstone_days": 365
+    }
   }
 }
