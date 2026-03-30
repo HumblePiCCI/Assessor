@@ -2,7 +2,7 @@
 
 Status
 - State: active working plan
-- Last updated: 2026-03-29
+- Last updated: 2026-03-30
 - Intended use: canonical continuation document for architecture, sequencing, and acceptance criteria across future sessions
 
 ## Purpose
@@ -18,9 +18,35 @@ It is not a vision memo. It is the working source of truth for:
 
 If future work resumes after context compaction, start here.
 
+## Current Status
+
+The original six foundation phases are implemented in the repo:
+- Phase 1: execution unification and reproducibility
+- Phase 2: explicit-gold benchmark harness
+- Phase 3: global reranker
+- Phase 4: versioned calibration
+- Phase 5: profile-based release gates
+- Phase 6: teacher review persistence and replay exports
+
+That is necessary progress, but it is not the same thing as production readiness.
+
+The current system can:
+- run through one authoritative queue-backed execution path
+- emit manifest-keyed artifacts
+- benchmark against explicit human gold
+- rerank globally from pairwise evidence
+- enforce calibration and gate contracts
+- persist teacher review snapshots, local learning summaries, and anonymized aggregate logs
+
+The current system does not yet:
+- distinguish draft teacher sorting from finalized learning signal
+- consume local teacher preference priors inside runtime reranking
+- promote aggregate review traffic into product updates through a governed data path
+- satisfy the operational, privacy, and launch requirements of a production product
+
 ## Working Definition Of SOTA For This Repo
 
-For this project, "SOTA" means five things at once:
+For this project, "SOTA" means seven things at once:
 
 1. Reproducibility
    - Same essays plus same pipeline manifest produce the same outputs.
@@ -32,6 +58,10 @@ For this project, "SOTA" means five things at once:
    - Assessor bias correction is versioned by model, rubric family, grade band, and genre.
 5. Release discipline
    - Shipping is blocked unless accuracy, stability, cost, and reproducibility gates pass.
+6. Bounded personalization
+   - Teacher-specific preference learning is subtle, scoped, uncertainty-gated, and never allowed to override the objective backbone on clear cases.
+7. Safe product learning
+   - Cross-teacher improvement uses only anonymized, governed, finalized review data.
 
 ## Current Scaffold
 
@@ -78,8 +108,11 @@ The repo already has the right major layers. The work is to harden and unify the
   - leveling
   - ranking seed
 - `scripts/verify_consistency.py`
-  - adjacent-pair order checks
-  - local swap application
+  - pairwise evidence collection
+- `scripts/global_rerank.py`
+  - deterministic rerank optimization
+  - level locks
+  - displacement caps
 - `scripts/review_and_grade.py`
   - non-interactive or reviewed grade curve generation
 - `scripts/apply_curve.py`
@@ -101,48 +134,54 @@ The repo already has the right major layers. The work is to harden and unify the
 - `ui/`
   - teacher review and adjustment UI
 
-## Current Gaps
+## Remaining Production-Ready Gaps
 
-These are the main blockers between the current scaffold and the target system.
+These are the real blockers between the current branch state and a production-ready product.
 
-### Gap 1: Split Execution Paths
+### Gap 1: Review Sessions Are Not Yet Split Into Draft And Final
 
-The repo has two materially different execution paths:
-- `POST /pipeline/run` runs directly against the repo workspace
-- `POST /pipeline/v2/run` uses the queue
+Today the UI can save structured review state, but the system does not yet formalize the distinction between:
+- exploratory draft sorting
+- finalized teacher judgment
 
-This creates risk in three ways:
-- concurrent jobs can clobber each other
-- the two paths can drift in behavior
-- reproducibility is harder because the mutable repo root is part of runtime state
+That matters because production learning must be based on the final settled curve, not on intermediate drag-and-drop behavior.
 
-### Gap 2: Incomplete Cache Fingerprinting
+### Gap 2: Local Learning Profiles Are Descriptive, Not Yet Operational
 
-The queue caches artifacts by a limited snapshot hash. Today that hash does not fully cover:
-- prompts
-- exemplar content
-- calibration artifacts
-- grade profiles
-- all relevant config files
-- code version
+`server/review_store.py` produces useful summaries and replay exports, but the runtime ranking path does not yet consume a bounded teacher prior.
 
-That means "same input essays" can incorrectly reuse stale artifacts after pipeline changes.
+That means the system can observe teacher behavior but cannot yet learn from it safely inside `scripts/global_rerank.py`.
 
-### Gap 3: Weak Evaluation Harness
+### Gap 3: Teacher Preference Reasons Are Not Yet Normalized
 
-The benchmark currently infers gold labels from filenames or display names. That is not strong enough for serious comparison, release gating, or model selection.
+The system stores comments and evidence-quality flags, but it does not yet convert teacher adjustments into a stable reason vocabulary such as:
+- eloquence
+- insight
+- completeness
+- concision
+- organization
+- voice
+- evidence fit
 
-### Gap 4: Local Consistency Repair
+Without that layer, the product risks learning from raw movement without understanding why the teacher made the move.
 
-`verify_consistency.py` applies greedy adjacent swaps. That helps with obvious inversions, but it does not solve the global ranking problem.
+### Gap 4: Aggregate Review Learning Is Not Yet Governed End To End
 
-### Gap 5: Bootstrap Calibration Is Not Production Calibration
+The repo can write anonymized local aggregate logs, but it does not yet define:
+- finalized-only export rules
+- consent and opt-out behavior
+- secure upload and ingestion
+- human adjudication before promotion into benchmark or calibration assets
 
-The neutral bootstrap profile is useful for continuity, but it is not valid evidence that a production run is calibrated for a given scope.
+### Gap 5: Production Ops, Privacy, And Launch Controls Are Still Missing
 
-### Gap 6: Gates Are Useful But Not Yet Full Release Contracts
-
-The gate scripts exist, but they are not yet backed by a sufficiently strong benchmark, reproducibility contract, or drift policy.
+The branch does not yet define the operational contract for:
+- teacher and tenant isolation
+- retention and deletion policy
+- auditability of promoted learning data
+- queue health and backpressure
+- rollback and incident handling
+- launch checklist and go/no-go rules
 
 ## Target Architecture
 
@@ -158,8 +197,11 @@ The target architecture keeps the existing layers but changes the control flow a
    - seed rank, pairwise evidence, rerank model, and final order are separate artifacts
 4. Every release is benchmarked
    - prompt or model changes do not ship unless evals and gates pass
-5. Teacher review becomes training signal
-   - adjudications and overrides feed back into calibration and evals
+5. Teacher review is finalized before it becomes training signal
+   - intermediate edits are draft state only
+   - only finalized net deltas are eligible for learning
+6. Learning stays bounded
+   - teacher priors can only move ambiguous cases within narrow caps
 
 ### Target Run Shape
 
@@ -180,9 +222,45 @@ For each job, the system should produce:
 
 The cache key must be derived from the manifest, not just the uploaded files.
 
+## Target Review-Learning Contract
+
+Teacher review is part of the product, but it must not be treated as a live training stream.
+
+### Principles
+
+1. Draft interaction is not learning
+   - teachers can drag, compare, cluster, and reorganize freely
+   - no intermediate UI move should affect the model
+2. Finalization is the learning boundary
+   - on finalize or publish, compute the net difference between the machine proposal and the final teacher curve
+3. Learn from deltas, not from motion
+   - extract level overrides, material rank moves, pairwise inversions, and boundary decisions from the final landing state
+4. Prefer passive inference
+   - infer teacher taste from repeated finalized deltas
+   - only ask for one-click reason tags when the information gain is unusually high
+5. Apply locally before promoting globally
+   - local teacher priors may adapt faster
+   - product-wide learning requires anonymization, aggregation, and human promotion into official assets
+
+### Target Review Artifacts
+
+The production review system should distinguish:
+- `review_draft.json`
+  - mutable UI state
+  - not used for learning
+- `review_final.json`
+  - immutable finalized teacher curve
+  - attached to pipeline and calibration manifests
+- `review_delta.json`
+  - normalized machine-versus-final correction set
+- `local_preference_prior.json`
+  - scoped, bounded, uncertainty-gated teacher prior for runtime use
+- `anonymized_feedback.jsonl`
+  - finalized-only aggregate telemetry
+
 ## Build Strategy
 
-The build is divided into six phases. The order matters.
+The original six foundation phases are complete. The remaining work is the production-readiness track.
 
 ### Phase 1: Execution Unification And Reproducibility
 
@@ -515,7 +593,7 @@ Exit condition
 ### Phase 6: Turn Teacher Review Into Learning Signal
 
 Goal
-- use teacher corrections to improve future runs
+- capture teacher corrections as reusable structured data and replay candidates
 
 Primary files
 - `scripts/build_dashboard_data.py`
@@ -557,57 +635,219 @@ Test plan
 - migration tests for prior artifacts
 
 Exit condition
-- the system can improve from real review traffic
+- the system can persist, version, and replay real review traffic for future improvement cycles
+
+### Phase 7: Finalized Review Promotion And Local Preference Prior
+
+Goal
+- separate exploratory review from committed learning
+- consume teacher preference as a subtle runtime prior without destabilizing ranking quality
+
+Primary files
+- `server/review_store.py`
+- `server/projects.py`
+- `ui/app.js`
+- `scripts/global_rerank.py`
+- `scripts/build_dashboard_data.py`
+- new `scripts/local_teacher_prior.py`
+
+Build tasks
+
+1. Split review persistence into draft and final states
+   - save interactive UI state as draft only
+   - write final review artifacts only on explicit finalize or publish
+
+2. Capture the starting machine proposal for each review session
+   - store the source rank artifact hash and review session metadata
+   - preserve the exact machine order the teacher started from
+
+3. Derive learning signal only from final landing spots
+   - compute net level overrides
+   - compute material rank displacements
+   - compute implied pairwise inversions
+   - compute changed boundary decisions
+
+4. Build a scoped local teacher prior
+   - scope by teacher or project, grade band, genre, rubric family, and model family
+   - require minimum support before activation
+   - decay stale or weakly-supported preferences toward zero
+
+5. Integrate the local prior into runtime reranking
+   - gate it by uncertainty
+   - cap displacement from teacher prior alone
+   - forbid level-band crossing from preference alone
+
+6. Keep reason capture sparse
+   - default to passive learning from finalized deltas
+   - use optional one-click reason chips only for unusually informative cases
+
+Acceptance criteria
+- intermediate sorting does not create learning records
+- finalized reviews produce deterministic delta artifacts
+- local priors only affect ambiguous cases within narrow bounds
+- repeated finalized patterns subtly improve local ordering without degrading benchmark accuracy
+
+Test plan
+- draft-versus-final persistence tests
+- final-delta extraction tests
+- local-prior activation threshold tests
+- uncertainty-gated rerank tests
+- no-effect-on-clear-cases regression tests
+
+Exit condition
+- the runtime learns only from finalized teacher judgment, and only in bounded ambiguous regions
+
+### Phase 8: Aggregate Review Learning And Governance
+
+Goal
+- turn many teachers' finalized feedback into safe, governed product improvement
+
+Primary files
+- `server/review_store.py`
+- `server/projects.py`
+- `bench/`
+- `inputs/exemplars/`
+- new aggregate-learning ingestion and promotion scripts
+
+Build tasks
+
+1. Define aggregate-learning eligibility rules
+   - finalized reviews only
+   - anonymized records only
+   - opt-in or policy-compliant collection only
+
+2. Normalize teacher reasons
+   - derive a small controlled vocabulary from structured tags and passive signals
+   - keep free-text comments as secondary evidence, not direct weights
+
+3. Add secure upload and ingestion
+   - package anonymized eligible feedback
+   - transport it to the product-improvement pipeline
+   - track provenance and retention
+
+4. Add promotion workflow for official assets
+   - benchmark gold candidates
+   - boundary challenge candidates
+   - calibration exemplar candidates
+   - require human adjudication before promotion
+
+5. Add privacy and data-governance controls
+   - retention windows
+   - deletion semantics
+   - audit trail for promoted data
+
+Acceptance criteria
+- global product learning consumes only anonymized finalized data
+- promoted benchmark and calibration assets have provenance and human sign-off
+- the repo can distinguish local personalization from product-wide learning
+
+Test plan
+- anonymization integrity tests
+- finalized-only export tests
+- promotion-workflow fixture tests
+- retention and deletion tests
+
+Exit condition
+- cross-teacher learning is explainable, governed, and safe to use
+
+### Phase 9: Production Hardening And Launch Contract
+
+Goal
+- make the system operable, supportable, and safe enough to launch
+
+Primary files
+- `server/app.py`
+- `server/pipeline_queue.py`
+- `server/projects.py`
+- `config/*gate*.json`
+- operational docs under `docs/`
+
+Build tasks
+
+1. Define production auth and isolation rules
+   - teacher identity
+   - project ownership
+   - tenant and artifact isolation
+
+2. Add operational observability
+   - queue depth
+   - job latency
+   - cache-hit correctness checks
+   - gate failure summaries
+
+3. Add data and incident controls
+   - retention and deletion policy
+   - rollback paths for model or prompt regressions
+   - incident response notes for bad releases
+
+4. Add launch-performance validation
+   - load and concurrency tests
+   - large-class run tests
+   - degraded-mode behavior tests
+
+5. Freeze the production launch contract
+   - required gate profiles
+   - required benchmark coverage
+   - required calibration freshness
+   - required privacy posture
+
+Acceptance criteria
+- launch readiness is defined by documented operational and release contracts
+- the service can fail safely and recover predictably
+- release approval does not depend on implicit tribal knowledge
+
+Test plan
+- queue concurrency tests
+- large-cohort smoke tests
+- rollback and incident-runbook drills
+- production config validation tests
+
+Exit condition
+- the product is technically launchable, supportable, and governable
 
 ## Sequencing
 
-The correct order is:
+The remaining production-readiness order is:
 
-1. Phase 1: execution unification and reproducibility
-2. Phase 2: benchmark replacement
-3. Phase 3: global reranker
-4. Phase 4: calibration versioning
-5. Phase 5: release-gate hardening
-6. Phase 6: teacher feedback ingestion
+1. Phase 7: finalized review promotion and local preference prior
+2. Phase 8: aggregate review learning and governance
+3. Phase 9: production hardening and launch contract
 
 Why this order:
-- Phase 1 is required to make any benchmark or gate results trustworthy
-- Phase 2 is required before claiming improvement
-- Phase 3 improves ranking quality but depends on reliable artifacts
-- Phase 4 and 5 turn the improved system into a controlled release process
-- Phase 6 closes the long-term quality loop
+- Phase 7 is required before teacher feedback can safely affect runtime behavior
+- Phase 8 is required before product-wide learning can use real review traffic
+- Phase 9 is required before any of the above can be launched as a real product
 
 ## Immediate Next Sprint
 
-The next sprint should complete the minimum viable foundation.
+The next sprint should start the finalized-review boundary.
 
 ### Sprint Goal
 
-Make the pipeline isolated, reproducible, and benchmarkable enough that future improvements can be measured honestly.
+Let teachers sort and resort freely, but only let finalized landing spots become learning signal.
 
 ### Sprint Scope
 
-1. Unify `/pipeline/run` onto the queue-backed engine
-2. Add isolated per-job workspaces
-3. Add `pipeline_manifest.json`
-4. Expand cache hashing to prompts, exemplars, calibration, config, and code version
-5. Define the explicit benchmark gold schema
-6. Refactor `verify_consistency.py` so it can emit pairwise evidence without mutating order
+1. Add review session IDs and persist draft state separately from final state
+2. Store the source machine-order artifact hash at session start
+3. Add explicit finalize action in the review API and UI
+4. Derive `review_delta.json` from machine order versus finalized teacher order
+5. Make `local_learning_profile.json` depend on finalized reviews only
+6. Expose delta summaries in dashboard data for auditability
 
 ### Sprint Deliverables
 
-- queue-backed authoritative execution path
-- manifest-aware artifact cache
-- benchmark schema committed in `bench/`
-- pairwise evidence artifact design
-- updated tests covering all of the above
+- separate draft and final review artifacts
+- explicit finalized-review delta artifact
+- finalized-only local learning profile
+- updated review API and UI state flow
+- tests proving intermediate edits do not become learning data
 
 ### Sprint Exit Criteria
 
-- a manifest-identical job rerun is byte-stable
-- changing prompts or exemplars invalidates cache
-- benchmark fixtures no longer rely on filename labels
-- pairwise evidence can be generated independently of local swap application
+- a teacher can sort repeatedly without generating learning records
+- finalize produces a deterministic net-delta artifact
+- only finalized reviews contribute to local learning summaries
 
 ## Engineering Rules While Executing This Plan
 
@@ -647,6 +887,9 @@ Use this section as the running status checkpoint.
 - Phase 4: completed
 - Phase 5: completed
 - Phase 6: completed
+- Phase 7: pending
+- Phase 8: pending
+- Phase 9: pending
 
 ### Latest Confirmed Improvements
 
@@ -663,9 +906,11 @@ Use this section as the running status checkpoint.
 
 ### Outstanding Architectural Risks
 
-- cache key coverage is still incomplete
+- review persistence does not yet separate exploratory draft sorting from finalized learning signal
 - local learning profiles are not yet consumed directly inside the scoring/reranking runtime
+- aggregate review telemetry is not yet governed, transported, or promoted through a formal product-improvement workflow
+- production auth, privacy, retention, and operational launch controls are not yet defined in the codebase
 
 ### Next Decision Point
 
-Start the next improvement cycle by consuming the local learning profile inside runtime ranking/grading decisions and defining the secure upload path for anonymized aggregate review telemetry.
+Start Phase 7 by formalizing review draft versus final state, then derive finalized-only net deltas before wiring any teacher prior into runtime reranking.

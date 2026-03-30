@@ -60,11 +60,25 @@ Model Components
 - Rounding policy is configurable.
 - Optional review step allows manual adjustment of top/bottom before applying the curve.
 
-5b) Final Pairwise Review (Hero Path)
-- After consensus, adjacent essays are re-read in pairs against the assignment outline.
-- Order changes are conservative (swap only when clearly justified).
-- This produces a final order prior to curve application.
-- Optional confidence threshold can auto-apply swaps and flag low-confidence cases.
+5b) Pairwise Evidence And Global Rerank
+- After consensus, near-adjacent essays are re-read in pairs against the assignment outline.
+- The consistency stage emits normalized pairwise evidence rather than directly mutating the order.
+- A deterministic global reranker consumes:
+  - seed composite features
+  - pairwise judgments
+  - level-band constraints
+  - displacement caps
+- This produces `final_order.csv` and `consistency_report.json` prior to curve application.
+
+5c) Teacher Review Feedback
+- The dashboard persists structured teacher review snapshots:
+  - level overrides
+  - desired rank changes
+  - pairwise adjudications
+  - evidence-quality notes
+- Each saved review is versioned against the pipeline manifest, calibration manifest, and final artifact set.
+- Saved review feedback currently feeds replay exports and local learning summaries.
+- The production contract will treat finalized teacher review, not intermediate UI motion, as the learning boundary before any runtime personalization is applied.
 
 6) Two Stars and a Wish (Post-Curve)
 - Generated only after consensus ranking and curve-based grades are finalized.
@@ -73,7 +87,7 @@ Model Components
 - The Wish must target the biggest improvement to overall quality.
 
 Decision Rules
-- Final ranking determined by composite score (weighted: rubric + conventions + comparative).
+- Final ranking is seeded by the composite score (weighted: rubric + conventions + comparative) and resolved by the global reranker using pairwise evidence plus level-lock constraints.
 - Adjusted level band is resolved before fine-grained ordering.
 - Tie-breakers in order: composite bucket, Borda bucket, rubric after penalty, conventions mistake rate, student ID.
 - Conventions penalty triggers if mistake rate exceeds threshold (default: 7%).
@@ -84,8 +98,11 @@ Outputs
 - Consensus ranking (composite score-based)
 - Score summary table (with composite scores, penalties, flags)
 - Inter-rater reliability metrics (ICC, Kendall's W, SDs)
+- Pairwise evidence matrix and rerank diagnostics
+- Final order artifact for curve application
 - Curve-based grades (with interactive review)
 - Disagreement list for review
+- Persisted teacher review snapshot, replay exports, and local learning profile
 - Two stars and a wish feedback per student (post-curve, with quote validation)
 
 Validation Harness

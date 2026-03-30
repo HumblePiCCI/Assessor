@@ -6,7 +6,7 @@ Purpose
 
 Quick Start
 0) Optional Hero Path orchestration
-   - `python3 scripts/hero_path.py --generate-pairs --build-dashboard`
+   - `python3 scripts/hero_path.py --verify-consistency --apply-consistency --build-dashboard`
    - LLM assessors: add `--llm-assessors` (requires OPENAI_API_KEY)
 
 1) Place inputs
@@ -31,10 +31,10 @@ Quick Start
 5) Aggregate to consensus
    - `python3 scripts/aggregate_assessments.py --config config/marking_config.json`
 
-6) Final pairwise review (optional)
-   - `python3 scripts/generate_pairwise_review.py`
-   - Fill `assessments/final_review_pairs.json` (keep/swap with reason)
-   - Apply: `python3 scripts/apply_pairwise_adjustments.py --min-confidence med`
+6) Collect pairwise consistency evidence and rerank globally
+   - `python3 scripts/verify_consistency.py`
+   - `python3 scripts/global_rerank.py`
+   - Or via Hero Path: `python3 scripts/hero_path.py --verify-consistency --apply-consistency`
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`
@@ -49,6 +49,7 @@ Quick Start
 9) Teacher review UI
    - `python3 scripts/build_dashboard_data.py`
    - `python3 scripts/serve_ui.py`
+   - Saved review feedback is versioned and exported for replay, but runtime personalization from teacher feedback is still a planned follow-on step
 
 10) Pay-as-you-go job runner (optional)
    - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
@@ -59,18 +60,20 @@ Key Outputs
 - `outputs/consensus_scores.csv` (rubric means, conventions, Borda, composite scores)
 - `outputs/irr_metrics.json` (inter-rater reliability: ICC, Kendall's W)
 - `outputs/grade_curve.csv` (level-aware bell-curve grades based on the resolved order)
-- `assessments/pass3_reconcile/disagreements.md` (items requiring re-read)
-- `outputs/final_order.csv` (post pairwise review, if applied)
-- `outputs/final_review_log.md` (pairwise decisions and reasons)
-- `outputs/final_review_flagged.md` (low-confidence swaps for manual review)
+- `outputs/pairwise_matrix.json` (normalized pairwise evidence and support/opposition weights)
+- `outputs/consistency_report.json` (rerank diagnostics, movements, and uncertainty details)
+- `outputs/final_order.csv` (post global rerank order)
 - `outputs/feedback_summaries/` (two stars and a wish with validated quotes)
 - `outputs/dashboard_data.json` (UI data)
+- `outputs/review_feedback_latest.json` (latest persisted teacher review snapshot)
+- `outputs/local_learning_profile.json` (local review summary and future runtime-prior seed)
 - `outputs/usage_log.jsonl` (LLM token usage, if enabled)
 - `outputs/usage_costs.json` (cost report, if enabled)
 
 Notes
 - The conventions scan is a heuristic baseline. For high-stakes marking, replace with a dedicated grammar engine.
 - The consensus step is required before curve-based grading.
+- Saved teacher review feedback is persisted and exported for replay into benchmarks and calibration candidates. The production plan still needs to add finalized-review-only learning before those signals are applied back into runtime ranking.
 - See `docs/LEGAL_NOTES.md` before production use.
 - LLM routing: `config/llm_routing.json`
 - Pricing config: `config/pricing.json`

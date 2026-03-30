@@ -38,17 +38,17 @@ Optional LLM assessors:
 - Update scores or rankings if needed.
 - Re-run aggregation.
 
-8) Final Pairwise Review (Hero Path)
-- Generate adjacent pairs: `python3 scripts/generate_pairwise_review.py`
-- Update `assessments/final_review_pairs.json` with keep/swap decisions and reasons.
-- Apply adjustments: `python3 scripts/apply_pairwise_adjustments.py --min-confidence med`
-- Review `outputs/final_review_log.md` for recorded decisions.
-- Review `outputs/final_review_flagged.md` for swaps below the confidence threshold.
+8) Pairwise Evidence And Global Rerank
+- Collect pairwise evidence: `python3 scripts/verify_consistency.py`
+- Apply deterministic rerank: `python3 scripts/global_rerank.py`
+- Review `outputs/pairwise_matrix.json` for normalized pairwise evidence.
+- Review `outputs/consistency_report.json` for movements, uncertainty flags, and rerank diagnostics.
+- Review `outputs/final_order.csv` for the resolved order used by grading.
 
-Optional LLM helper:
-- Generate input: `python3 scripts/llm_pairwise_review.py`
-- Run your LLM externally and save to `assessments/final_review_llm_output.json`
-- Apply: `python3 scripts/llm_pairwise_review.py --apply`
+Legacy optional tooling:
+- `python3 scripts/generate_pairwise_review.py`
+- `python3 scripts/apply_pairwise_adjustments.py --min-confidence med`
+- These older swap-based tools still exist, but the canonical pipeline now uses pairwise evidence plus global rerank.
 
 9) Review and Configure Curve (Interactive)
 - Review `outputs/ranked_list.md` and flags in `assessments/pass3_reconcile/disagreements.md`.
@@ -73,9 +73,13 @@ Optional cost report:
 11) Teacher Review UI
 - Build data: `python3 scripts/build_dashboard_data.py`
 - Serve UI: `python3 scripts/serve_ui.py`
+- Saved review feedback is versioned and exported for replay, but finalized-review-only runtime learning remains a follow-on production task
 
 12) Final Outputs
 - `outputs/ranked_list.md`
 - `outputs/consensus_scores.csv`
+- `outputs/pairwise_matrix.json`
+- `outputs/consistency_report.json`
+- `outputs/final_order.csv`
 - `outputs/grade_curve.csv`
 - `outputs/feedback_summaries/`
