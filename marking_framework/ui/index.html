@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hero Path</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+</head>
+<body data-theme="light" data-view="single">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Hero Path</h1>
+      <p class="tagline">Foundational organization tool for teacher‑led assessment.</p>
+    </div>
+    <button id="themeToggle" class="ghost" aria-label="Toggle theme">☾</button>
+  </header>
+
+  <section id="rail">
+    <div id="railScroll" class="rail-scroll" tabindex="0" aria-label="Essay list"></div>
+  </section>
+
+  <main class="layout">
+    <aside id="summary" class="panel">
+      <div class="panel-title">Assessment Summary</div>
+      <div id="summaryList" class="summary-list"></div>
+    </aside>
+
+    <section id="workspace" class="panel">
+      <div class="workspace-header">
+        <button id="prevBtn" class="ghost">‹</button>
+        <div id="detailTitle">Select a student</div>
+        <div class="workspace-actions">
+          <button id="viewToggle" class="ghost" aria-label="Toggle split view">Split</button>
+          <button id="nextBtn" class="ghost">›</button>
+        </div>
+      </div>
+      <div id="essayGrid" class="essay-grid">
+        <div class="essay-panel">
+          <div id="essayLabelPrimary" class="essay-label"></div>
+          <div id="essay" class="essay"></div>
+        </div>
+        <div id="comparePanel" class="essay-panel">
+          <div id="essayLabelCompare" class="essay-label"></div>
+          <div id="essayCompare" class="essay"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside id="actions" class="panel">
+      <div class="panel-title">Feedback &amp; Controls</div>
+
+      <div class="feedback">
+        <div class="feedback-block">
+          <div class="label">Star 1</div>
+          <div id="star1" class="editable" contenteditable="true" data-placeholder="Paste a strength + quote."></div>
+        </div>
+        <div class="feedback-block">
+          <div class="label">Star 2</div>
+          <div id="star2" class="editable" contenteditable="true" data-placeholder="Paste a second strength + quote."></div>
+        </div>
+        <div class="feedback-block">
+          <div class="label">Wish</div>
+          <div id="wish" class="editable" contenteditable="true" data-placeholder="Highest‑leverage fix + quote."></div>
+        </div>
+        <button id="generateFeedback" class="ghost">Generate feedback</button>
+        <button id="copyFeedback" class="ghost">Copy to clipboard</button>
+      </div>
+
+      <div class="controls">
+        <div class="control">
+          <label for="overallGradeSlider">Overall slider</label>
+          <input id="overallGradeSlider" type="range" min="0" max="100" step="1" value="75" />
+        </div>
+        <div class="control">
+          <label for="topGrade">Top mark</label>
+          <input id="topGrade" type="number" value="92" />
+        </div>
+        <div class="control">
+          <label for="bottomGrade">Bottom mark</label>
+          <input id="bottomGrade" type="number" value="58" />
+        </div>
+        <div class="control">
+          <label for="gradeOverride">Final grade</label>
+          <input id="gradeOverride" type="number" placeholder="auto" />
+        </div>
+      </div>
+
+      <div class="auth">
+        <div class="label">Connection</div>
+        <div class="auth-row">
+          <input id="apiKeyInput" type="password" placeholder="OpenAI API key" />
+          <button id="connectKey" class="ghost">Connect</button>
+        </div>
+        <div class="auth-row">
+          <button id="codexLogin" class="ghost">Sign in with Codex</button>
+        </div>
+        <div id="authStatus" class="auth-status">Not connected</div>
+      </div>
+
+      <div class="uploads">
+        <div class="upload" data-target="essays">
+          <input id="uploadEssays" type="file" multiple />
+          <span>Drop essays</span>
+        </div>
+        <div class="upload" data-target="rubric">
+          <input id="uploadRubric" type="file" />
+          <span>Drop rubric</span>
+        </div>
+        <div class="upload" data-target="outline">
+          <input id="uploadOutline" type="file" />
+          <span>Drop outline</span>
+        </div>
+      </div>
+      <div class="pipeline">
+        <button id="runPipeline" class="ghost">Run pipeline</button>
+        <div id="pipelineStatus" class="auth-status">Idle</div>
+      </div>
+
+      <div class="projects auth">
+        <div class="label">Projects</div>
+        <div class="auth-row">
+          <select id="projectSelect"></select>
+          <button id="loadProject" class="ghost">Load</button>
+        </div>
+        <div class="project-actions">
+          <button id="saveProject" class="ghost">Save</button>
+          <button id="newProject" class="ghost">New</button>
+          <button id="clearProject" class="ghost">Clear</button>
+          <button id="deleteProject" class="ghost">Delete</button>
+        </div>
+        <div id="projectStatus" class="auth-status">No project loaded</div>
+      </div>
+    </aside>
+  </main>
+  <div id="pipelineOverlay" class="pipeline-overlay">
+    <div class="pipeline-card">
+      <div class="pipeline-title">Working in the background</div>
+      <div id="pipelineLog" class="pipeline-log"></div>
+    </div>
+  </div>
+  <script src="grade_adjust.js?v=2"></script>
+  <script src="feedback_generate.js?v=1"></script>
+  <script src="app.js?v=7"></script>
+  <script src="progress_stream.js?v=2"></script>
+</body>
+</html>

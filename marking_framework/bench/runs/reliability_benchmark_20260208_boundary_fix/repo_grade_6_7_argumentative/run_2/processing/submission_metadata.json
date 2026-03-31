@@ -1,0 +1,42 @@
+[
+  {
+    "student_id": "s001",
+    "display_name": "level_1",
+    "source_file": "level_1.txt",
+    "word_count": 67,
+    "paragraph_count": 2,
+    "char_count": 344
+  },
+  {
+    "student_id": "s002",
+    "display_name": "level_2",
+    "source_file": "level_2.txt",
+    "word_count": 169,
+    "paragraph_count": 5,
+    "char_count": 981
+  },
+  {
+    "student_id": "s003",
+    "display_name": "level_3",
+    "source_file": "level_3.txt",
+    "word_count": 227,
+    "paragraph_count": 5,
+    "char_count": 1382
+  },
+  {
+    "student_id": "s004",
+    "display_name": "level_4",
+    "source_file": "level_4.txt",
+    "word_count": 225,
+    "paragraph_count": 5,
+    "char_count": 1425
+  },
+  {
+    "student_id": "s005",
+    "display_name": "level_4_plus",
+    "source_file": "level_4_plus.txt",
+    "word_count": 228,
+    "paragraph_count": 5,
+    "char_count": 1389
+  }
+]

@@ -1,0 +1,16 @@
+student_id,rubric_mean_percent,rubric_after_penalty_percent,rubric_sd_points,conventions_mistake_rate_percent,borda_points,borda_percent,composite_score,rank_sd,base_level,base_letter,adjusted_level,adjusted_letter,level_modifier,level_with_modifier,flags,consensus_rank
+grade_6_7_argumentative_level_3,95.0,95.0,4.51,3.96,43.2768,1.0,0.9591,0.0,4+,A+,4+,A+,,4+,rubric_sd,1
+grade_8_10_literary_analysis_level_4_plus,95.0,95.0,7.32,5.23,40.1856,0.9286,0.9464,0.0,4+,A+,4+,A+,-,4+-,rubric_sd,2
+grade_8_10_literary_analysis_level_3,71.32,71.32,5.72,3.59,37.0944,0.8571,0.7724,0.0,3,B,3,B,,3,rubric_sd,3
+grade_8_10_literary_analysis_level_4,54.62,54.62,1.58,6.64,34.0032,0.7857,0.6402,0.0,1,D,1,D,--,1--,rubric_sd,4
+grade_8_10_literary_analysis_level_2,54.0,54.0,0.25,3.21,30.912,0.7143,0.6303,0.0,1,D,1,D,,1,,5
+grade_6_7_argumentative_level_4_plus,54.0,54.0,0.0,3.95,26.7675,0.6185,0.6149,0.47,1,D,1,D,,1,,6
+grade_11_12_news_report_level_4_plus,54.0,54.0,0.0,4.29,25.7829,0.5958,0.6109,0.47,1,D,1,D,-,1-,,7
+grade_11_12_news_report_level_4,54.0,54.0,0.0,2.93,19.6005,0.4529,0.5915,0.47,1,D,1,D,,1,,8
+grade_6_7_argumentative_level_4,54.0,54.0,0.0,6.22,20.5851,0.4757,0.59,0.47,1,D,1,D,--,1--,,9
+grade_8_10_literary_analysis_level_1,54.0,54.0,0.0,3.74,15.456,0.3571,0.576,0.0,1,D,1,D,,1,,10
+grade_6_7_argumentative_level_2,54.0,54.0,0.0,3.55,12.3648,0.2857,0.5655,0.0,1,D,1,D,,1,,11
+grade_11_12_news_report_level_3,54.0,54.0,0.0,2.38,9.2736,0.2143,0.5566,0.0,1,D,1,D,,1,,12
+grade_11_12_news_report_level_2,54.0,54.0,0.0,3.97,6.1824,0.1429,0.5435,0.0,1,D,1,D,,1,,13
+grade_11_12_news_report_level_1,54.0,54.0,0.0,2.04,3.0912,0.0714,0.5357,0.0,1,D,1,D,,1,,14
+grade_6_7_argumentative_level_1,54.0,54.0,0.0,5.97,0.0,0.0,0.519,0.0,1,D,1,D,-,1-,,15

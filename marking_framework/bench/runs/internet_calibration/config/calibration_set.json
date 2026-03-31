@@ -1,0 +1,36 @@
+{
+  "gold_samples": {
+    "grade_6_7": {
+      "argumentative": [
+        {
+          "file": "level_1.md",
+          "target_level": "1",
+          "target_pct": 54
+        },
+        {
+          "file": "level_2.md",
+          "target_level": "2",
+          "target_pct": 64
+        },
+        {
+          "file": "level_3.md",
+          "target_level": "3",
+          "target_pct": 75
+        },
+        {
+          "file": "level_4.md",
+          "target_level": "4",
+          "target_pct": 84
+        },
+        {
+          "file": "level_4_plus.md",
+          "target_level": "4+",
+          "target_pct": 95
+        }
+      ]
+    }
+  },
+  "bias_correction": {
+    "method": "piecewise_monotonic"
+  }
+}

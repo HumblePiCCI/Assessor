@@ -1,0 +1,95 @@
+{
+  "benchmark": "main_vs_fallback",
+  "dataset": "bench/internet_samples_thoughtful",
+  "runs": 1,
+  "modes": {
+    "main": [
+      {
+        "run": 1,
+        "ok": true,
+        "accuracy": 1.0,
+        "model_usage_ratio": 0.0,
+        "students": {
+          "s004": {
+            "display_name": "sample_level4_internet_thoughtful",
+            "expected": "4",
+            "level": "4",
+            "rank": 1,
+            "score": 82.95
+          },
+          "s003": {
+            "display_name": "sample_level3_internet_thoughtful",
+            "expected": "3",
+            "level": "3",
+            "rank": 2,
+            "score": 70.25
+          },
+          "s002": {
+            "display_name": "sample_level2_internet_thoughtful",
+            "expected": "2",
+            "level": "2",
+            "rank": 3,
+            "score": 60.25
+          },
+          "s001": {
+            "display_name": "sample_level1_internet_thoughtful",
+            "expected": "1",
+            "level": "1",
+            "rank": 4,
+            "score": 53.81
+          }
+        }
+      }
+    ],
+    "fallback": [
+      {
+        "run": 1,
+        "ok": true,
+        "accuracy": 1.0,
+        "model_usage_ratio": 0.0,
+        "students": {
+          "s004": {
+            "display_name": "sample_level4_internet_thoughtful",
+            "expected": "4",
+            "level": "4",
+            "rank": 1,
+            "score": 82.95
+          },
+          "s003": {
+            "display_name": "sample_level3_internet_thoughtful",
+            "expected": "3",
+            "level": "3",
+            "rank": 2,
+            "score": 70.25
+          },
+          "s002": {
+            "display_name": "sample_level2_internet_thoughtful",
+            "expected": "2",
+            "level": "2",
+            "rank": 3,
+            "score": 60.25
+          },
+          "s001": {
+            "display_name": "sample_level1_internet_thoughtful",
+            "expected": "1",
+            "level": "1",
+            "rank": 4,
+            "score": 53.81
+          }
+        }
+      }
+    ]
+  },
+  "summary": {
+    "main": {
+      "runs_successful": 1,
+      "accuracy_mean": 1.0,
+      "model_usage_ratio_mean": 0.0
+    },
+    "fallback": {
+      "runs_successful": 1,
+      "accuracy_mean": 1.0,
+      "model_usage_ratio_mean": 0.0
+    }
+  }
+}

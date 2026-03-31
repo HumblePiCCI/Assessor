@@ -1,0 +1,6 @@
+student_id,rubric_mean_percent,rubric_after_penalty_percent,rubric_sd_points,conventions_mistake_rate_percent,borda_points,borda_percent,composite_score,rank_sd,base_level,base_letter,adjusted_level,adjusted_letter,level_modifier,level_with_modifier,flags,consensus_rank
+s005,93.39,93.39,0.14,6.27,12.0,1.0,0.9443,0.0,4+,A+,4+,A+,--,4+--,,1
+s004,83.21,83.21,0.12,6.25,9.0,0.75,0.8356,0.0,4,A,4,A,--,4--,,2
+s003,75.13,75.13,0.11,4.38,6.0,0.5,0.7443,0.0,3,B,3,B,-,3-,,3
+s002,64.25,64.25,0.07,2.67,3.0,0.25,0.6332,0.0,2,C,2,C,,2,,4
+s001,54.2,54.2,0.07,5.61,0.0,0.0,0.521,0.0,1,D,1,D,-,1-,,5

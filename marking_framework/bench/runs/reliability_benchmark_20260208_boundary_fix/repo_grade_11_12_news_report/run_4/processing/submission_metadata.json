@@ -1,0 +1,42 @@
+[
+  {
+    "student_id": "s001",
+    "display_name": "grade_11_12_news_report_level_1",
+    "source_file": "grade_11_12_news_report_level_1.txt",
+    "word_count": 49,
+    "paragraph_count": 2,
+    "char_count": 260
+  },
+  {
+    "student_id": "s002",
+    "display_name": "grade_11_12_news_report_level_2",
+    "source_file": "grade_11_12_news_report_level_2.txt",
+    "word_count": 126,
+    "paragraph_count": 4,
+    "char_count": 756
+  },
+  {
+    "student_id": "s003",
+    "display_name": "grade_11_12_news_report_level_3",
+    "source_file": "grade_11_12_news_report_level_3.txt",
+    "word_count": 168,
+    "paragraph_count": 4,
+    "char_count": 1064
+  },
+  {
+    "student_id": "s004",
+    "display_name": "grade_11_12_news_report_level_4",
+    "source_file": "grade_11_12_news_report_level_4.txt",
+    "word_count": 205,
+    "paragraph_count": 4,
+    "char_count": 1331
+  },
+  {
+    "student_id": "s005",
+    "display_name": "grade_11_12_news_report_level_4_plus",
+    "source_file": "grade_11_12_news_report_level_4_plus.txt",
+    "word_count": 233,
+    "paragraph_count": 4,
+    "char_count": 1521
+  }
+]

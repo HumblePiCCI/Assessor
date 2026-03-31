@@ -1,0 +1,24 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "essay1",
+      "rubric_total_points": 64.3,
+      "criteria_points": {
+        "K1": 60.3,
+        "K2": 62.3,
+        "T1": 64.3,
+        "T2": 66.3,
+        "C1": 68.3,
+        "C2": 60.3,
+        "C3": 62.3,
+        "A1": 64.3,
+        "A2": 66.3
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

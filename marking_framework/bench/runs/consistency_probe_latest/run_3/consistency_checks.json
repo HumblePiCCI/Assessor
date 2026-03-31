@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-02-08T10:09:55.681017+00:00",
+  "checks": [
+    {
+      "pair": [
+        "s003",
+        "s002"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A shows slightly stronger insight and more nuanced argumentation, with tighter, more mature analysis and word choice while maintaining clear organization and evidence use; Essay B is solid but more straightforward and less sophisticated in development."
+    },
+    {
+      "pair": [
+        "s002",
+        "s001"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A is clearly stronger: it has a clear thesis, organized body paragraphs with topic sentences, multiple well-explained pieces of evidence, and more precise language. Essay B is brief, underdeveloped, has weaker organization and mechanics errors, and provides minimal evidence and explanation."
+    }
+  ]
+}

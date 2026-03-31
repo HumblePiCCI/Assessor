@@ -1,0 +1,331 @@
+{
+  "assessor_id": "assessor_B",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 54.19,
+      "criteria_points": {
+        "K1": 53.08,
+        "K2": 53.08,
+        "T1": 53.08,
+        "T2": 53.08,
+        "C1": 53.08,
+        "C2": 63.08,
+        "C3": 53.08,
+        "A1": 53.08,
+        "A2": 53.08
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "Justin says thank you and that is all.",
+          "rationale": "Shows only a limited, surface recall of the event (he says thank you) with no specific story details."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "It is important, but I do not know much else from the story.",
+          "rationale": "Does not explain why gratitude matters in the story or show understanding of its impact on characters/events."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "He says it because someone helped him.",
+          "rationale": "Gives a basic reason but does not analyze significance or connect gratitude to outcomes in the passage."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "I do not know much else from the story.",
+          "rationale": "No evidence of gathering/using information from the passage; explicitly states a lack of text-based support."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "Justin says thank you and that is all.",
+          "rationale": "Response is very short with minimal development; does not meet the requirement for a well-developed paragraph with supporting details."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "It is important, but I do not know much else from the story.",
+          "rationale": "Conventions are mostly correct in the few sentences provided; limited text makes errors hard to assess, but control is basic."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "It is important, but I do not know much else from the story.",
+          "rationale": "Vocabulary is simple and repetitive (e.g., \"important\") with no precise terms about gratitude or character impact."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "Justin says thank you and that is all.",
+          "rationale": "Does not apply reading-response skills (text evidence + explanation) to the prompt beyond a minimal statement."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "He says it because someone helped him.",
+          "rationale": "No connections are made within the story (cause/effect) beyond a vague statement, and no broader connections are included."
+        }
+      ],
+      "notes": "Main idea is very weak and underdeveloped; almost no passage-based details or explanation of why gratitude mattered. Organization is minimal but conventions are mostly correct due to brevity."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 59.22,
+      "criteria_points": {
+        "K1": 58.11,
+        "K2": 58.11,
+        "T1": 58.11,
+        "T2": 48.11,
+        "C1": 58.11,
+        "C2": 78.11,
+        "C3": 58.11,
+        "A1": 58.11,
+        "A2": 58.11
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Justin's gratitude matters because he notices what another person did for him.",
+          "rationale": "Shows basic knowledge of the idea of gratitude, but does not include specific story details/events from the passage."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "This is important because people feel respected when their help is recognized.",
+          "rationale": "Explains a general relationship (gratitude leads to others feeling respected), but the understanding is broad and not tied to how it functions in the story."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "He says thank you after getting help, and that shows he is polite.",
+          "rationale": "Provides a simple inference (thanks = polite) but limited analysis/evaluation and little elaboration."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "He says thank you after getting help,",
+          "rationale": "No evidence of inquiry/research skills (no questions, gathering, or specific textual referencing beyond a general statement)."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Justin's gratitude matters because he notices what another person did for him.\nHe says thank you after getting help, and that shows he is polite.\nThis is important because people feel respected when their help is recognized.",
+          "rationale": "Has a clear topic and basic logical order, but development is brief and lacks specific supporting details from the passage."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "This is important because people feel respected when their help is recognized.",
+          "rationale": "Conventions are controlled; spelling, grammar, and punctuation are correct in the submitted sentences."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "gratitude matters... polite... respected... recognized",
+          "rationale": "Vocabulary is appropriate but fairly general and not very specific to the text or situation."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "He says thank you after getting help, and that shows he is polite.",
+          "rationale": "Applies the general idea of gratitude to a familiar context (saying thank you), but does not apply skills in a more developed or text-specific way."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "people feel respected when their help is recognized.",
+          "rationale": "Makes a basic text-to-world connection about how gratitude affects others, but it remains general and not deeply connected to the story events."
+        }
+      ],
+      "notes": "Main idea is clear but very general; includes minimal passage-based evidence and limited explanation/elaboration. Organization and conventions are solid, but the response needs specific details from the story to reach Level 3."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 57.89,
+      "criteria_points": {
+        "K1": 54.33,
+        "K2": 54.33,
+        "T1": 54.33,
+        "T2": 44.33,
+        "C1": 65.33,
+        "C2": 74.33,
+        "C3": 65.33,
+        "A1": 54.33,
+        "A2": 54.33
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Justin's gratitude was important because it showed growth in his character.",
+          "rationale": "Shows some understanding of character development, but lacks specific story details (events/actions) from the passage to demonstrate thorough content knowledge."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "That response matters because gratitude turns a simple act into a stronger relationship.",
+          "rationale": "Explains a general relationship between gratitude and relationships, but does not clearly connect this idea to what happened in the passage (limited text-based understanding)."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "When a character acknowledges help, readers can see empathy and responsibility.",
+          "rationale": "Includes some analysis of what gratitude shows about a character, but the reasoning stays broad and is not supported with passage-specific evidence."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "In the passage, he takes time to recognize the support he received instead of ignoring it.",
+          "rationale": "Refers generally to the passage but does not include specific details/quotes or clear information-gathering from the text."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Justin's gratitude was important because it showed growth in his character.\nIn the passage, he takes time to recognize the support he received instead of ignoring it.",
+          "rationale": "Clear main idea and logical progression; however, support is general rather than specific, which limits development."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Justin's gratitude was important because it showed growth in his character.",
+          "rationale": "Sentences are complete with correct punctuation and spelling; errors are minimal or not evident."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "growth in his character",
+          "rationale": "Vocabulary is clear and grade-appropriate (e.g., 'growth,' 'empathy,' 'responsibility'), but not especially precise to the passage because details are not named."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "That response matters because gratitude turns a simple act into a stronger relationship.",
+          "rationale": "Applies a general idea about gratitude to explain importance, but application would be stronger with concrete examples from the story."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "readers can see empathy and responsibility",
+          "rationale": "Makes a basic text-to-reader connection (what readers learn/see), but does not develop deeper connections to specific moments in the passage."
+        }
+      ],
+      "notes": "Overall Level 2\u20133 range: clear main idea and strong conventions/organization, but the response stays general and does not use specific supporting details from the passage, which limits explanation and evidence."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 58.33,
+      "criteria_points": {
+        "K1": 49.11,
+        "K2": 60.11,
+        "T1": 60.11,
+        "T2": 39.11,
+        "C1": 69.11,
+        "C2": 80.11,
+        "C3": 69.11,
+        "A1": 49.11,
+        "A2": 49.11
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "K1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Justin's gratitude is important because it changes both the moment and his relationship with others.",
+          "rationale": "Shows general understanding of gratitude\u2019s role, but provides no specific details from the passage (no events, actions, or examples), so subject-specific content support is limited."
+        },
+        {
+          "criterion_id": "K2",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "That choice matters because gratitude confirms that the other person's effort had value.",
+          "rationale": "Explains the relationship between gratitude and its impact on others, demonstrating a clear understanding of the concept and its effects in the story context."
+        },
+        {
+          "criterion_id": "T1",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "It also shows Justin is thinking beyond himself, which signals maturity and emotional awareness.",
+          "rationale": "Provides evaluative reasoning about what gratitude reveals about character; analysis is clear but not supported by specific passage evidence."
+        },
+        {
+          "criterion_id": "T2",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "By expressing gratitude clearly and immediately, Justin strengthens trust and creates a more positive outcome for everyone involved.",
+          "rationale": "No inquiry/research moves are present (no questions, no gathering or citing of passage details). The response relies on general claims rather than referenced information."
+        },
+        {
+          "criterion_id": "C1",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "He does not treat help as something he deserves automatically; he names it and responds with sincere thanks.",
+          "rationale": "Ideas progress logically with clear topic focus and smooth linking; the paragraph is controlled and coherent throughout."
+        },
+        {
+          "criterion_id": "C2",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "That choice matters because gratitude confirms that the other person's effort had value.",
+          "rationale": "Conventions are strong: correct sentence structure, punctuation, and spelling with a polished style."
+        },
+        {
+          "criterion_id": "C3",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "which signals maturity and emotional awareness.",
+          "rationale": "Uses precise, grade-appropriate vocabulary (e.g., \"maturity,\" \"emotional awareness,\" \"sincere\") that fits the task and audience."
+        },
+        {
+          "criterion_id": "A1",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "That choice matters because gratitude confirms that the other person's effort had value.",
+          "rationale": "Applies a general understanding of gratitude to the story\u2019s situation, but does not apply knowledge through concrete passage-based examples, limiting effectiveness."
+        },
+        {
+          "criterion_id": "A2",
+          "level": "2",
+          "score": 64.0,
+          "evidence_quote": "Justin's gratitude is important because it changes both the moment and his relationship with others.",
+          "rationale": "Makes a general connection to relationships and outcomes, but connections are broad (not text-to-text/text-to-world with specifics) and not anchored in the passage."
+        }
+      ],
+      "notes": "Clear, well-written paragraph with strong organization and vocabulary, but it stays mostly general and does not use specific details from the passage as evidence, which lowers content support and application."
+    }
+  ]
+}

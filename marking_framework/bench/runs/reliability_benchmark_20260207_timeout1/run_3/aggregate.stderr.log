@@ -1,0 +1,42 @@
+2026-02-07 16:07:53,809 - INFO - Loading config from config/marking_config.json
+2026-02-07 16:07:53,809 - INFO - Reading Pass 1 file: assessor_A.json
+2026-02-07 16:07:53,809 - INFO - Reading Pass 1 file: assessor_B.json
+2026-02-07 16:07:53,810 - INFO - Reading Pass 1 file: assessor_C.json
+2026-02-07 16:07:53,810 - INFO - Loaded 3 Pass 1 assessments
+2026-02-07 16:07:53,810 - INFO - Reading Pass 2 file: assessor_A.txt
+2026-02-07 16:07:53,810 - INFO - Reading Pass 2 file: assessor_B.txt
+2026-02-07 16:07:53,810 - INFO - Reading Pass 2 file: assessor_C.txt
+2026-02-07 16:07:53,810 - INFO - Loaded 3 Pass 2 rankings
+2026-02-07 16:07:53,811 - INFO - Loaded conventions data for 4 students
+2026-02-07 16:07:53,811 - INFO - Found 4 unique students
+2026-02-07 16:07:53,811 - INFO - Pass 1 assessors: 3
+2026-02-07 16:07:53,811 - INFO - Pass 2 assessors: 3
+2026-02-07 16:07:53,811 - INFO - ✓ Data completeness check PASSED
+2026-02-07 16:07:53,811 - INFO - Rubric points possible: 100
+2026-02-07 16:07:53,812 - INFO - Inter-rater reliability metrics:
+2026-02-07 16:07:53,812 - INFO -   Rubric ICC (approx): 0.774 (>0.7 = good, >0.9 = excellent)
+2026-02-07 16:07:53,812 - INFO -   Rank Kendall's W: 1.000 (>0.7 = good agreement)
+2026-02-07 16:07:53,812 - INFO -   Mean rubric SD: 2.78
+2026-02-07 16:07:53,812 - INFO -   Mean rank SD: 0.00
+2026-02-07 16:07:53,812 - INFO - Weighting: rubric=0.7, conventions=0.15, comparative=0.15
+2026-02-07 16:07:53,812 - INFO - Conventions penalty: mistake_rate_threshold=0.07, max_level_drop=1
+2026-02-07 16:07:53,812 - INFO - Level bands: 1, 2, 3, 4, 4+
+2026-02-07 16:07:53,813 - INFO - Student 'sample_level3_internet': conventions penalty applied (mistake_rate=8.1% > threshold=7.0%, level_drop=0.15), rubric reduced from 62.1% to 60.6%
+2026-02-07 16:07:53,813 - INFO - Student 'sample_level4_internet': conventions penalty applied (mistake_rate=12.7% > threshold=7.0%, level_drop=0.82), rubric reduced from 68.7% to 60.5%
+2026-02-07 16:07:53,813 - WARNING - Conventions penalty applied to 2 student(s)
+2026-02-07 16:07:53,813 - INFO - Sorting by composite score (weighted: rubric + conventions + comparative)
+2026-02-07 16:07:53,813 - INFO - Consensus ranking established for 4 students
+2026-02-07 16:07:53,814 - INFO - ✓ Consensus scores written to bench/runs/reliability_benchmark_20260207_timeout1/run_3/consensus_scores.csv
+2026-02-07 16:07:53,814 - INFO - ✓ Ranked list written to bench/runs/reliability_benchmark_20260207_timeout1/run_3/ranked_list.md
+2026-02-07 16:07:53,814 - INFO - ✓ Disagreements written to assessments/pass3_reconcile/disagreements.md (4 flagged)
+2026-02-07 16:07:53,814 - INFO - ✓ IRR metrics written to bench/runs/reliability_benchmark_20260207_timeout1/run_3/irr_metrics.json
+2026-02-07 16:07:53,814 - INFO - 
+2026-02-07 16:07:53,815 - INFO - ============================================================
+2026-02-07 16:07:53,815 - INFO - SUMMARY
+2026-02-07 16:07:53,815 - INFO - ============================================================
+2026-02-07 16:07:53,815 - INFO - Students processed: 4
+2026-02-07 16:07:53,815 - INFO - Students flagged for review: 4
+2026-02-07 16:07:53,815 - INFO - Conventions penalties: 2
+2026-02-07 16:07:53,815 - INFO - Rubric ICC: 0.774 (good)
+2026-02-07 16:07:53,816 - INFO - Rank agreement (Kendall's W): 1.000 (good)
+2026-02-07 16:07:53,816 - INFO - ============================================================

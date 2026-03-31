@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-02-08T09:59:16.858471+00:00",
+  "checks": [
+    {
+      "pair": [
+        "s003",
+        "s002"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A shows stronger insight and more sophisticated analysis (integrity/wholeness theme), tighter phrasing, and a more polished conclusion. Both are well-organized 5-paragraph responses with similar evidence, but B is more straightforward and less nuanced, so A merits the higher rank."
+    },
+    {
+      "pair": [
+        "s002",
+        "s001"
+      ],
+      "decision": "KEEP",
+      "confidence": "high",
+      "reason": "Essay A is better developed and organized with multiple pieces of textual evidence and explanation, clearer topic/thesis and paragraph structure, and stronger language mechanics; Essay B is brief, repetitive, and has limited evidence and analysis with more grammar errors."
+    }
+  ]
+}

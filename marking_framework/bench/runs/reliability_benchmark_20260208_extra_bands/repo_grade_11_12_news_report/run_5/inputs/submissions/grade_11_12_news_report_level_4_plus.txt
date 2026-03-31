@@ -1,0 +1,7 @@
+MAPLE STREET - City council voted 7-2 Tuesday night to approve a new protected bike lane on Maple Street, a project city staff say will run from 3rd Avenue to 12th Avenue and begin construction in the spring. The decision reflects a broader push toward redesigning streets for multiple users, but it also surfaced local concerns about parking and traffic flow.
+
+Council member Dana Brooks framed the lane as a safety measure. "We have had too many close calls on Maple Street," Brooks said, arguing that physical separation is necessary on a corridor with high vehicle volume. The approved design includes a barrier between cyclists and cars, updated lane markings, and intersection signage intended to reduce confusion.
+
+Residents and business owners expressed mixed views. Supporters said protected lanes can improve predictability and reduce conflict by clarifying where cyclists belong. Opponents emphasized trade-offs, including the loss of curbside parking and the possibility of increased congestion. Local business owner Mark Ellis said parking capacity is a practical issue. "Parking is already tight on weekends," Ellis said, adding that customers may be discouraged if spaces are removed.
+
+City staff said they will monitor traffic patterns and safety outcomes after installation and report back to council within six months. The Maple Street lane is part of a larger transportation plan that aims to improve safety for drivers, cyclists, and pedestrians by shifting street design from speed to predictability.

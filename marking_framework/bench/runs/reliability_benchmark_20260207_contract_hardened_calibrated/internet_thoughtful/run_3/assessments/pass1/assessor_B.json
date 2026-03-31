@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_B",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 52.67,
+      "criteria_points": {
+        "K1": 46.2175,
+        "K2": 46.2175,
+        "T1": 55.85866666666667,
+        "T2": 55.85866666666667,
+        "C1": 49.992000000000004,
+        "C2": 69.11850000000001,
+        "C3": 55.85866666666667,
+        "A1": 47.47200000000001,
+        "A2": 47.47200000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 56.46,
+      "criteria_points": {
+        "K1": 52.3,
+        "K2": 52.3,
+        "T1": 57.41818181818182,
+        "T2": 57.41818181818182,
+        "C1": 56.400000000000006,
+        "C2": 69.775,
+        "C3": 57.41818181818182,
+        "A1": 52.540000000000006,
+        "A2": 52.540000000000006
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 64.44,
+      "criteria_points": {
+        "K1": 59.6075,
+        "K2": 59.6075,
+        "T1": 66.2407212572374,
+        "T2": 66.2407212572374,
+        "C1": 64.648,
+        "C2": 76.4765,
+        "C3": 66.2407212572374,
+        "A1": 60.448,
+        "A2": 60.448
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 82.9,
+      "criteria_points": {
+        "K1": 76.88999999999999,
+        "K2": 76.88999999999999,
+        "T1": 86.09468356550765,
+        "T2": 86.09468356550765,
+        "C1": 83.376,
+        "C2": 92.343,
+        "C3": 86.09468356550765,
+        "A1": 79.156,
+        "A2": 79.156
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    }
+  ]
+}

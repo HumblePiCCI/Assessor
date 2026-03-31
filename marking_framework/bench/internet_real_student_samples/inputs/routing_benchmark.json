@@ -1,0 +1,49 @@
+{
+  "mode": "openai",
+  "tasks": {
+    "pass1_assessor": {
+      "model": "gpt-5.2",
+      "reasoning": "low",
+      "temperature": 0.0,
+      "max_output_tokens": 1200,
+      "require_evidence": false
+    },
+    "pass2_ranker": {
+      "model": "gpt-5.2",
+      "reasoning": "low",
+      "temperature": 0.0
+    },
+    "pairwise_reviewer": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0,
+      "max_output_tokens": 500
+    },
+    "feedback_drafter": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0,
+      "max_output_tokens": 800
+    }
+  },
+  "pass1_guard": {
+    "enabled": true,
+    "max_score_delta": 5.0,
+    "max_level_gap": 1,
+    "anchor_blend": 0.35
+  },
+  "quality_gates": {
+    "min_model_coverage": 0.8
+  },
+  "calibration_gate": {
+    "enabled": true,
+    "bias_path": "outputs/calibration_bias.json",
+    "max_age_hours": 168,
+    "min_scope_samples": 10,
+    "min_scope_weight": 0.6
+  },
+  "openai": {
+    "base_url": "https://api.openai.com/v1",
+    "responses_endpoint": "/responses"
+  }
+}

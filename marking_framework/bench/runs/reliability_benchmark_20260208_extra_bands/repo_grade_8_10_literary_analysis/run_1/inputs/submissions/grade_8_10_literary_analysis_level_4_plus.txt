@@ -1,0 +1,9 @@
+In "The Borrowed Name," Jordan's decision to adopt a false screen name seems, at first, like a small act of self-protection. Yet the author uses that choice to examine a larger tension: anonymity can create space to experiment, but it can also erode integrity by training a person to live in fragments. The story argues that the most damaging consequence of a borrowed identity is the slow loss of wholeness.
+
+Jordan tries to shrink the moral weight of the decision with a technical distinction: "It was just a screen name, not a lie." That line is revealing because it is less a belief than a strategy. Jordan wants the benefits of dishonesty (distance from judgment) without the discomfort of naming it. The author exposes how self-justification becomes a habit, and habits shape identity.
+
+The text then turns the consequence inward. "My real name felt heavy in my mouth" suggests that truth has become burdensome, not because it is dangerous, but because Jordan has practiced concealment. The metaphor implies gravity: the real name pulls Jordan back to reality, while the borrowed name floats easily, detached from accountability.
+
+The narrative's sharpest moment arrives when Jordan recognizes a classmate's presence in the forum. This is not merely the fear of being caught; it is the fear of being known inaccurately. Jordan responds by withdrawing from both spaces, which shows the paradox of the borrowed name: it promised safety but produces isolation.
+
+Jordan's final honesty is understated, and that subtlety matters. The author suggests that integrity is not a performance either; it is a decision to align speech, action, and self. In doing so, Jordan reclaims not only credibility, but a stable identity that does not depend on hiding.

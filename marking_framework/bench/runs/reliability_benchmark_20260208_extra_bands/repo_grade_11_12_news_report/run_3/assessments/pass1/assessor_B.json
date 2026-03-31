@@ -1,0 +1,92 @@
+{
+  "assessor_id": "assessor_B",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 54.17,
+      "criteria_points": {
+        "K1": 47.6,
+        "K2": 47.6,
+        "T1": 58.83,
+        "T2": 58.83,
+        "C1": 48.0,
+        "C2": 70.08,
+        "C3": 58.83,
+        "A1": 48.88,
+        "A2": 48.88
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 64.51,
+      "criteria_points": {
+        "K1": 57.11,
+        "K2": 57.11,
+        "T1": 70.55,
+        "T2": 70.55,
+        "C1": 59.09,
+        "C2": 78.01,
+        "C3": 70.55,
+        "A1": 58.81,
+        "A2": 58.81
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 73.96,
+      "criteria_points": {
+        "K1": 66.98,
+        "K2": 66.98,
+        "T1": 79.85,
+        "T2": 79.85,
+        "C1": 68.38,
+        "C2": 85.88,
+        "C3": 79.85,
+        "A1": 68.94,
+        "A2": 68.94
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 82.89,
+      "criteria_points": {
+        "K1": 75.72,
+        "K2": 75.72,
+        "T1": 89.75,
+        "T2": 89.75,
+        "C1": 76.64,
+        "C2": 92.81,
+        "C3": 89.75,
+        "A1": 77.94,
+        "A2": 77.94
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    },
+    {
+      "student_id": "s005",
+      "rubric_total_points": 92.11,
+      "criteria_points": {
+        "K1": 85.05,
+        "K2": 85.05,
+        "T1": 99.33,
+        "T2": 99.33,
+        "C1": 85.73,
+        "C2": 100.0,
+        "C3": 99.33,
+        "A1": 87.59,
+        "A2": 87.59
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor B."
+    }
+  ]
+}

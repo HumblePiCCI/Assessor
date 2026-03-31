@@ -1,0 +1,18 @@
+{
+  "assessor_id": "A",
+  "role": "rubric_strict",
+  "rubric_points_possible": 28,
+  "scores": [
+    {
+      "student_id": "Student Name - Essay Title",
+      "rubric_total_points": 0,
+      "criteria_points": {
+        "Content and Ideas": 0,
+        "Organization and Structure": 0,
+        "Language Use": 0,
+        "Formatting and Requirements": 0
+      },
+      "notes": "Short justification and key evidence."
+    }
+  ]
+}

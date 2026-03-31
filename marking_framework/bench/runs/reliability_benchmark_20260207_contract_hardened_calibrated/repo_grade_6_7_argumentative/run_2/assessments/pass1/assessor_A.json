@@ -1,0 +1,92 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 53.57,
+      "criteria_points": {
+        "K1": 47.54,
+        "K2": 47.54,
+        "T1": 57.52266666666667,
+        "T2": 57.52266666666667,
+        "C1": 47.456,
+        "C2": 69.658,
+        "C3": 57.52266666666667,
+        "A1": 48.696000000000005,
+        "A2": 48.696000000000005
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 62.63,
+      "criteria_points": {
+        "K1": 56.1475,
+        "K2": 56.1475,
+        "T1": 66.91546953405019,
+        "T2": 66.91546953405019,
+        "C1": 59.384,
+        "C2": 76.0995,
+        "C3": 66.91546953405019,
+        "A1": 57.56400000000001,
+        "A2": 57.56400000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 76.05,
+      "criteria_points": {
+        "K1": 73.0525,
+        "K2": 73.0525,
+        "T1": 77.42629889630999,
+        "T2": 77.42629889630999,
+        "C1": 75.736,
+        "C2": 83.53550000000001,
+        "C3": 77.42629889630999,
+        "A1": 73.376,
+        "A2": 73.376
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 78.5,
+      "criteria_points": {
+        "K1": 72.00750000000001,
+        "K2": 72.00750000000001,
+        "T1": 84.14706810035844,
+        "T2": 84.14706810035844,
+        "C1": 73.20800000000001,
+        "C2": 88.6315,
+        "C3": 84.14706810035844,
+        "A1": 74.108,
+        "A2": 74.108
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s005",
+      "rubric_total_points": 87.24,
+      "criteria_points": {
+        "K1": 81.47500000000001,
+        "K2": 81.47500000000001,
+        "T1": 91.86574253470488,
+        "T2": 91.86574253470488,
+        "C1": 83.36,
+        "C2": 95.58000000000001,
+        "C3": 91.86574253470488,
+        "A1": 83.82000000000001,
+        "A2": 83.82000000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

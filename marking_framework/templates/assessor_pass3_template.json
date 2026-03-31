@@ -1,0 +1,10 @@
+{
+  "assessor_id": "A",
+  "role": "rubric_strict",
+  "reconciled": [
+    {
+      "student_id": "Student Name - Essay Title",
+      "action": "keep"  
+    }
+  ]
+}

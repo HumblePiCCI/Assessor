@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/bldt/Desktop/Essays/marking_framework/scripts/run_llm_assessors.py", line 349, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Users/bldt/Desktop/Essays/marking_framework/scripts/run_llm_assessors.py", line 247, in main
+    raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
+ValueError: Pass1 response invalid after retry. See logs/llm_failures.jsonl.

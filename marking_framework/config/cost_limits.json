@@ -1,0 +1,11 @@
+{
+  "per_student_max_usd": 0.25,
+  "per_job_max_usd": 10.0,
+  "per_call_max_tokens": 8000,
+  "abort_on_limit": true,
+  "alert_at_percent": 80,
+  "estimates": {
+    "pass1_output_tokens": 300,
+    "pass2_output_tokens": 200
+  }
+}

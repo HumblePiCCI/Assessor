@@ -1,0 +1,142 @@
+{
+  "target_profile": "dev",
+  "profile_order": [
+    "dev",
+    "candidate",
+    "release"
+  ],
+  "profiles": {
+    "dev": {
+      "thresholds": {
+        "require_publish_gate_ok": true,
+        "min_publish_profile": "dev",
+        "min_assessor_files": 3,
+        "min_model_coverage": 0.9,
+        "min_nonzero_score_rate": 0.95,
+        "min_criteria_coverage": 0.9,
+        "min_evidence_coverage": 0.0,
+        "max_mean_assessor_sd": 9.0,
+        "max_p95_assessor_sd": 15.0,
+        "max_consistency_swap_rate": 0.35,
+        "max_consistency_low_confidence_rate": 0.65,
+        "require_benchmark_report": false,
+        "benchmark_candidate_mode": "main",
+        "benchmark_baseline_mode": "fallback",
+        "benchmark_min_runs_successful": 0,
+        "benchmark_min_exact_level_hit_rate": 0.0,
+        "benchmark_min_within_one_level_hit_rate": 0.0,
+        "benchmark_max_score_band_mae": 999.0,
+        "benchmark_max_mean_rank_displacement": 999.0,
+        "benchmark_min_kendall_tau": -999.0,
+        "benchmark_min_pairwise_order_agreement": -999.0,
+        "benchmark_min_model_usage_ratio": -999.0,
+        "benchmark_max_cost_usd": 999999.0,
+        "benchmark_max_latency_seconds": 999999.0,
+        "benchmark_max_mean_student_level_variance": 999999.0,
+        "benchmark_max_mean_student_rank_variance": 999999.0,
+        "benchmark_max_mean_student_score_variance": 999999.0,
+        "benchmark_max_mean_student_level_sd": 999999.0,
+        "benchmark_max_mean_student_rank_sd": 999999.0,
+        "benchmark_max_mean_student_score_sd": 999999.0,
+        "benchmark_min_exact_level_hit_rate_delta": -999.0,
+        "benchmark_min_within_one_level_hit_rate_delta": -999.0,
+        "benchmark_max_score_band_mae_delta": 999.0,
+        "benchmark_max_mean_rank_displacement_delta": 999.0,
+        "benchmark_min_kendall_tau_delta": -999.0,
+        "benchmark_min_pairwise_order_agreement_delta": -999.0,
+        "benchmark_min_model_usage_ratio_delta": -999.0,
+        "benchmark_max_cost_usd_delta": 999999.0,
+        "benchmark_max_latency_seconds_delta": 999999.0,
+        "benchmark_max_mean_student_level_variance_delta": 999999.0,
+        "benchmark_max_mean_student_rank_variance_delta": 999999.0,
+        "benchmark_max_mean_student_score_variance_delta": 999999.0,
+        "benchmark_max_mean_student_level_sd_delta": 999999.0,
+        "benchmark_max_mean_student_rank_sd_delta": 999999.0,
+        "benchmark_max_mean_student_score_sd_delta": 999999.0
+      }
+    },
+    "candidate": {
+      "inherits": "dev",
+      "thresholds": {
+        "min_publish_profile": "candidate",
+        "require_benchmark_report": true,
+        "benchmark_min_runs_successful": 2,
+        "benchmark_min_exact_level_hit_rate": 0.74,
+        "benchmark_min_within_one_level_hit_rate": 0.95,
+        "benchmark_max_score_band_mae": 2.4,
+        "benchmark_max_mean_rank_displacement": 1.0,
+        "benchmark_min_kendall_tau": 0.78,
+        "benchmark_min_pairwise_order_agreement": 0.9,
+        "benchmark_min_model_usage_ratio": 0.75,
+        "benchmark_max_cost_usd": 6.0,
+        "benchmark_max_latency_seconds": 90.0,
+        "benchmark_max_mean_student_level_sd": 0.22,
+        "benchmark_max_mean_student_rank_sd": 0.25,
+        "benchmark_max_mean_student_score_sd": 1.1,
+        "benchmark_min_exact_level_hit_rate_delta": 0.0,
+        "benchmark_min_within_one_level_hit_rate_delta": 0.0,
+        "benchmark_max_score_band_mae_delta": 0.0,
+        "benchmark_max_mean_rank_displacement_delta": 0.0,
+        "benchmark_min_kendall_tau_delta": 0.0,
+        "benchmark_min_pairwise_order_agreement_delta": 0.0,
+        "benchmark_min_model_usage_ratio_delta": 0.25,
+        "benchmark_max_cost_usd_delta": 6.0,
+        "benchmark_max_latency_seconds_delta": 75.0,
+        "benchmark_max_mean_student_level_sd_delta": 0.0,
+        "benchmark_max_mean_student_rank_sd_delta": 0.0,
+        "benchmark_max_mean_student_score_sd_delta": 0.0
+      }
+    },
+    "release": {
+      "inherits": "candidate",
+      "thresholds": {
+        "min_publish_profile": "release",
+        "benchmark_min_runs_successful": 3,
+        "benchmark_min_exact_level_hit_rate": 0.82,
+        "benchmark_min_within_one_level_hit_rate": 0.97,
+        "benchmark_max_score_band_mae": 2.0,
+        "benchmark_max_mean_rank_displacement": 0.75,
+        "benchmark_min_kendall_tau": 0.84,
+        "benchmark_min_pairwise_order_agreement": 0.93,
+        "benchmark_min_model_usage_ratio": 0.85,
+        "benchmark_max_cost_usd": 4.5,
+        "benchmark_max_latency_seconds": 60.0,
+        "benchmark_max_mean_student_level_sd": 0.18,
+        "benchmark_max_mean_student_rank_sd": 0.22,
+        "benchmark_max_mean_student_score_sd": 0.9,
+        "benchmark_min_exact_level_hit_rate_delta": 0.03,
+        "benchmark_min_within_one_level_hit_rate_delta": 0.02,
+        "benchmark_max_score_band_mae_delta": -0.25,
+        "benchmark_max_mean_rank_displacement_delta": -0.1,
+        "benchmark_min_kendall_tau_delta": 0.05,
+        "benchmark_min_pairwise_order_agreement_delta": 0.05,
+        "benchmark_min_model_usage_ratio_delta": 0.4,
+        "benchmark_max_cost_usd_delta": 4.5,
+        "benchmark_max_latency_seconds_delta": 45.0,
+        "benchmark_max_mean_student_level_sd_delta": -0.01,
+        "benchmark_max_mean_student_rank_sd_delta": -0.01,
+        "benchmark_max_mean_student_score_sd_delta": -0.05
+      }
+    }
+  },
+  "production_contract": {
+    "launch": {
+      "required_publish_profile": "release",
+      "required_sota_profile": "release",
+      "required_benchmark_dataset_count": 3,
+      "required_calibration_freshness_hours": 168.0,
+      "required_privacy_posture": "governed_finalized_anonymized"
+    },
+    "rollback": {
+      "max_release_age_hours": 168.0,
+      "require_manifest_hash": true,
+      "require_git_sha": true,
+      "invalidate_cache_on_rollback": true
+    },
+    "incident": {
+      "require_runbook": true,
+      "require_gate_summary": true,
+      "max_recent_gate_failures": 5
+    }
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "benchmark": "reliability_benchmark_20260207_repo_levels",
+  "settings": {
+    "routing_mode": "codex_local",
+    "model": "gpt-5.2",
+    "timeout": 1,
+    "fallback": "deterministic",
+    "sources": [
+      [
+        "grade_6_7",
+        "argumentative"
+      ],
+      [
+        "grade_8_10",
+        "literary_analysis"
+      ],
+      [
+        "grade_11_12",
+        "news_report"
+      ]
+    ]
+  },
+  "overall": {
+    "dataset_size": 15,
+    "runs_total": 5,
+    "runs_successful": 5,
+    "expected_level_accuracy_mean": 0.333,
+    "expected_level_accuracy_min": 0.333,
+    "expected_level_accuracy_max": 0.333,
+    "mean_rank_stdev": 0.213
+  },
+  "student_summary": {
+    "grade_11_12_news_report_level_1": {
+      "expected_level": "1",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 1.0
+    },
+    "grade_11_12_news_report_level_2": {
+      "expected_level": "2",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_11_12_news_report_level_3": {
+      "expected_level": "3",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_11_12_news_report_level_4": {
+      "expected_level": "4",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.4,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_11_12_news_report_level_4_plus": {
+      "expected_level": "4+",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.4,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_6_7_argumentative_level_1": {
+      "expected_level": "1",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 1.0
+    },
+    "grade_6_7_argumentative_level_2": {
+      "expected_level": "2",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_6_7_argumentative_level_3": {
+      "expected_level": "3",
+      "runs_present": 5,
+      "score_mean": 93.416,
+      "score_stdev": 3.168,
+      "rank_stdev": 0.8,
+      "level_mode": "4+",
+      "level_consistency": 0.8,
+      "level_hit_rate": 0.0
+    },
+    "grade_6_7_argumentative_level_4": {
+      "expected_level": "4",
+      "runs_present": 5,
+      "score_mean": 54.418,
+      "score_stdev": 0.836,
+      "rank_stdev": 0.8,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_6_7_argumentative_level_4_plus": {
+      "expected_level": "4+",
+      "runs_present": 5,
+      "score_mean": 55.042,
+      "score_stdev": 2.084,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_8_10_literary_analysis_level_1": {
+      "expected_level": "1",
+      "runs_present": 5,
+      "score_mean": 54.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 1.0
+    },
+    "grade_8_10_literary_analysis_level_2": {
+      "expected_level": "2",
+      "runs_present": 5,
+      "score_mean": 55.15,
+      "score_stdev": 2.3,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 1.0,
+      "level_hit_rate": 0.0
+    },
+    "grade_8_10_literary_analysis_level_3": {
+      "expected_level": "3",
+      "runs_present": 5,
+      "score_mean": 75.064,
+      "score_stdev": 7.488,
+      "rank_stdev": 0.4,
+      "level_mode": "3",
+      "level_consistency": 0.8,
+      "level_hit_rate": 0.8
+    },
+    "grade_8_10_literary_analysis_level_4": {
+      "expected_level": "4",
+      "runs_present": 5,
+      "score_mean": 61.032,
+      "score_stdev": 12.824,
+      "rank_stdev": 0.0,
+      "level_mode": "1",
+      "level_consistency": 0.8,
+      "level_hit_rate": 0.2
+    },
+    "grade_8_10_literary_analysis_level_4_plus": {
+      "expected_level": "4+",
+      "runs_present": 5,
+      "score_mean": 95.0,
+      "score_stdev": 0.0,
+      "rank_stdev": 0.4,
+      "level_mode": "4+",
+      "level_consistency": 1.0,
+      "level_hit_rate": 1.0
+    }
+  }
+}

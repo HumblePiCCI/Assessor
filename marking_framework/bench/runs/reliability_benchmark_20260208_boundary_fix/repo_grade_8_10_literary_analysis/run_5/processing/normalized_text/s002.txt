@@ -1,0 +1,7 @@
+In "The Borrowed Name," Jordan chooses to use a fake name online because it feels easier than being fully honest. The story explores how hiding your identity can create consequences that follow you into real life.
+
+At first, Jordan feels in control. They tell themselves, "It was just a screen name, not a lie." This shows Jordan is trying to justify the choice. However, the decision starts to affect how Jordan thinks about themself. When Jordan types the fake name again, the narrator says, "My real name felt heavy in my mouth." That line suggests Jordan is becoming uncomfortable with the split between the online self and the real self.
+
+The consequences become clear when Jordan realizes someone at school is part of the same online space. Jordan worries about being found out and starts to avoid conversations. The story shows that the fake name does not protect Jordan from anxiety; it creates more.
+
+In the end, Jordan admits the truth. This does not fix everything instantly, but it is a step toward being honest. Overall, the story suggests that identity is stronger when it is consistent.

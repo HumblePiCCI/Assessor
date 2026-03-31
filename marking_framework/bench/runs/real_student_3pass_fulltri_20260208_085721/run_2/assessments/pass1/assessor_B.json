@@ -1,0 +1,405 @@
+{
+  "assessor_id": "assessor_B",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 55.29,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 53.29,
+        "ORGANIZATIONTRANSITIONS": 53.29,
+        "VOICEAUDIENCESTYLE": 53.29,
+        "CONVENTIONS": 53.29
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "School should start later because teenagers are tired. When its early you cant focus and you just want to sleep.",
+          "rationale": "Position is clear but reasons are general and not developed with examples or explanation beyond simple statements; minimal evidence."
+        },
+        {
+          "criterion_id": "ORGANIZATIONTRANSITIONS",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "Also buses are too early and its dark.\n\nPeople say sports will be later but thats not a big deal.",
+          "rationale": "Basic paragraph break and a brief counterargument, but ideas are listed with little structure and no transitions connecting reasons to the conclusion."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCESTYLE",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "If school is later we will be happier and do better.",
+          "rationale": "Simple, informal voice; limited vocabulary and little audience awareness beyond a broad appeal to student feelings and outcomes."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "1",
+          "score": 54.0,
+          "evidence_quote": "When its early you cant focus... Also buses are too early and its dark.",
+          "rationale": "Frequent missing apostrophes and informal phrasing (its/cant/thats). Errors are noticeable but meaning remains mostly clear."
+        }
+      ],
+      "notes": "Overall Level 1: clear stance but minimal development. Reasons are brief and mostly unsupported; organization is list-like with few transitions; informal language and noticeable convention errors (missing apostrophes) though readability is generally maintained."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 85.35,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 86.35,
+        "ORGANIZATIONCOHESION": 86.35,
+        "STYLEVOICEAUDIENCE": 81.35,
+        "CONVENTIONS": 81.35
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "4",
+          "score": 80.0,
+          "evidence_quote": "High schools should start later because the current early schedule reduces learning and well-being. A later start time would not solve every problem...",
+          "rationale": "Clear, arguable thesis with some nuance; reasons (learning quality, stress, counterargument) are relevant and generally explained, but evidence stays mostly general (few concrete facts/examples)."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "4",
+          "score": 80.0,
+          "evidence_quote": "First... Second... Critics argue... In conclusion...",
+          "rationale": "Logical paragraph structure with clear sequencing and a counterclaim/rebuttal; transitions are straightforward and effective, though not especially varied or sophisticated."
+        },
+        {
+          "criterion_id": "STYLEVOICEAUDIENCE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "This is a fair concern, but it is not a reason to ignore the main purpose of school.",
+          "rationale": "Appropriate persuasive tone and mostly precise vocabulary; voice is controlled but not especially distinctive or compelling, and wording remains somewhat formulaic."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "When students arrive exhausted, they struggle to concentrate and they often feel less motivated.",
+          "rationale": "Grammar, spelling, and punctuation are strong overall with only minor style-level issues (some repetitive sentence openings/structures). Errors do not impede meaning."
+        }
+      ],
+      "notes": "Strong Level 3 performance: clear thesis, logical structure, relevant reasons, and a counterargument. To reach Level 4, add more specific evidence/examples and deepen explanation of how each reason directly improves outcomes."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 95.23,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 94.23,
+        "ORGANIZATIONTRANSITIONS": 94.23,
+        "VOICEAUDIENCE": 94.23,
+        "CONVENTIONS": 94.23
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\"High schools should start later because early schedules waste instructional time and increase student stress.\"",
+          "rationale": "Thesis is precise and arguable, and the essay develops multiple compelling reasons (learning quality, morning strain, counterargument) with clear cause-effect explanation."
+        },
+        {
+          "criterion_id": "ORGANIZATIONTRANSITIONS",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\"The core issue is not laziness; it is learning quality.\" / \"A later start also reduces the daily strain of mornings.\" / \"The common counterargument is...\" / \"Ultimately...\"",
+          "rationale": "Strong paragraphing and logical progression (claim \u2192 reasons \u2192 counterargument \u2192 conclusion). Transitions and topic sentences guide the reader smoothly."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCE",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\"This concern matters, but it is an argument for careful planning, not for keeping a harmful baseline.\"",
+          "rationale": "Purposeful, mature persuasive voice with clear audience awareness; addresses objections respectfully and persuasively with an appropriate tone for a school-policy audience."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\"Teachers can deliver the same lesson, but the student experience changes: slower processing, more mistakes, and more frustration.\"",
+          "rationale": "Very strong grammar, punctuation, and sentence control (effective use of colon, varied structures). No noticeable errors that affect readability."
+        }
+      ],
+      "notes": "Level 4+ overall: nuanced thesis, strong reasoning with well-connected examples and counterargument, excellent cohesion and polished conventions."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 83.41,
+      "criteria_points": {
+        "CLAIMSUPPORT": 82.41,
+        "ORGANIZATIONCOHESION": 82.41,
+        "VOICEAUDIENCESTYLE": 82.41,
+        "CONVENTIONS": 82.41
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMSUPPORT",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Did you know that 7 out of 10 students have cheated at least once in the past year? ... These shocking statistics are from a survey of 9,000 U.S. high school students.",
+          "rationale": "Uses a clear problem focus (cheating is widespread) and relevant evidence (statistics) to establish urgency. The central position is implied more than explicitly stated as a single thesis sentence, but the argument consistently supports the idea that cheating is a serious issue influenced by adults/pressure and needs solutions."
+        },
+        {
+          "criterion_id": "CLAIMSUPPORT",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Last year at a school in Detroit, teachers allegedly provided their students with answers to statewide standard tests... Similar allegations at several schools in San Diego county have prompted investigation.",
+          "rationale": "Strong supporting examples that extend beyond the writer\u2019s personal experience and connect to the claim that the system/adults can contribute to cheating."
+        },
+        {
+          "criterion_id": "CLAIMSUPPORT",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "The kids claim that they\u2019re tempted to cheat because of peer pressure and intense competition to get top grades.",
+          "rationale": "Provides plausible causes and explanation (peer pressure/competition, parent modeling). Some points would be stronger with a clearer link to the concluding call-to-action and a more direct rebuttal of counterarguments."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Incredibly, teachers may even be encouraging their students to cheat!... The kids claim... Finding solutions to this problem is difficult.",
+          "rationale": "Logical progression: hook + scope, examples, causes, then solutions. Paragraphing supports the argument. Transitions are functional though sometimes abrupt (moves from scandal examples to causes without an explicit bridge)."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCESTYLE",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "These shocking statistics... Incredibly, teachers may even be encouraging their students to cheat!",
+          "rationale": "Engaging, persuasive tone aimed at a general audience; vocabulary is appropriate and sometimes vivid. A slightly more formal, less exclamatory approach could increase credibility."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Teachers could also randomly mix the problems throughout the page. Another solution is for adults to lower their expectations.",
+          "rationale": "Grammar, spelling, and punctuation are generally strong and meaning is always clear. Minor issues include occasional informal phrasing and word choices (e.g., \"fudging\"), but they do not impede readability."
+        }
+      ],
+      "notes": "Overall Level 4: strong, well-organized argument with relevant statistics and real-world examples; claim is consistent but could be stated more explicitly as a focused thesis and strengthened with clearer counterargument handling and slightly more formal control of tone."
+    },
+    {
+      "student_id": "s005",
+      "rubric_total_points": 85.35,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 86.35,
+        "ORGANIZATIONCOHESION": 75.35,
+        "VOICEAUDIENCESTYLE": 86.35,
+        "CONVENTIONS": 75.35
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\u201cCell phones are used everywhere, but on the road they are a dangerous distraction to drivers and should be prohibited.\u201d",
+          "rationale": "Insightful, precise position stated early and maintained throughout; reasoning is clear and consistently connected to safety."
+        },
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\u201cmotorists using a cell phone were four times more likely to have an accident\u2026\u201d; \u201c\u2026lead to at least 1,000 deaths per year in California.\u201d",
+          "rationale": "Uses credible, specific evidence (statistics + expert testimony) and explains how distraction creates predictable dangerous driving behaviors; includes analogy to drunk driving to strengthen argument."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Body moves from problem/evidence \u2192 need for laws \u2192 personal responsibility recommendations \u2192 conclusion (\u201cThe best road to safety is to just hang up and drive.\u201d).",
+          "rationale": "Logical progression with clear paragraph purposes and effective transitions; conclusion ties back to thesis and reinforces call to action."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCESTYLE",
+          "level": "4+",
+          "score": 95.0,
+          "evidence_quote": "\u201cYou see it every day\u2026\u201d; \u201cBefore using a cell phone, drivers should think to themselves\u2026\u201d",
+          "rationale": "Purposeful, persuasive voice aimed at a general driving audience; strong hook, direct address, and appropriate, precise vocabulary (e.g., \u201chazardous,\u201d \u201cunpredictable,\u201d \u201cfatalities\u201d)."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Consistent punctuation, spelling, and sentence control throughout; quotes and citations are integrated smoothly.",
+          "rationale": "Very strong control of grammar and mechanics; any issues are minor and do not affect readability."
+        }
+      ],
+      "notes": "Level 4+ overall: clear and compelling thesis, strong credible evidence with explanation, logical organization, and polished persuasive style; conventions are very strong with only minor/possible citation-format limitations."
+    },
+    {
+      "student_id": "s006",
+      "rubric_total_points": 79.31,
+      "criteria_points": {
+        "CLAIMEVIDENCE": 77.31,
+        "ORGANIZATIONCOHESION": 77.31,
+        "VOICESTYLEAUDIENCE": 77.31,
+        "CONVENTIONS": 77.31
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMEVIDENCE",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "\u201c...the Internet has taken the theft of \u2018intellectual property\u2019 to a new level.\u201d / \u201cAs new opportunities for cheating develop, new defenses must keep pace.\u201d",
+          "rationale": "The central position (internet plagiarism is serious and requires active countermeasures) is clear and supported with multiple relevant reasons (difficulty tracing sources, availability of paper mills, need for integrity) and concrete examples (TurnItIn.com, Word Check) plus quotations. However, much of the piece reads like an informative report rather than directly persuading a defined audience with a focused call to action, so it is not consistently compelling/argument-driven enough for Level 4+."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "\u201cFor teachers, Internet plagiarism has been especially problematic...\u201d / \u201cIn addition to such blatant \u2018cut and paste\u2019 plagiarism...\u201d / \u201cBy some definitions, it seems like everyone plagiarizes.\u201d",
+          "rationale": "Logical progression from hook/definition to teacher challenges, detection tools, broader ethical issues, then nuanced concerns about false positives, ending with a strong concluding image. Transitions and paragraphing create clear cohesion."
+        },
+        {
+          "criterion_id": "VOICESTYLEAUDIENCE",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "\u201cNot all thieves lurk in dark alleys and parks. Some sit with their faces lit by the glow of their computer monitors...\u201d",
+          "rationale": "Purposeful voice with engaging figurative language and appropriate academic vocabulary (e.g., \u201cintellectual property,\u201d \u201cattributing,\u201d \u201cnotoriety,\u201d \u201cintellectual integrity\u201d). Audience awareness is generally strong, though the tone sometimes shifts into neutral reporting (many quotations) rather than sustained persuasive commentary."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Consistent punctuation and sentence control throughout (e.g., correct integration of quotations and varied sentence structures).",
+          "rationale": "Very strong grammar, spelling, punctuation, and sentence fluency. Minor style issues only (occasional slightly awkward phrasing), but meaning is consistently clear."
+        }
+      ],
+      "notes": "Overall Level 4 (high). The writing is polished, well-organized, and uses strong, relevant support (examples and quotes). The main limitation is that it often reads as an informational article/report rather than a consistently direct persuasive argument with a clear audience-focused thesis and explicit call to action."
+    },
+    {
+      "student_id": "s007",
+      "rubric_total_points": 77.83,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 76.83,
+        "ORGANIZATIONTRANSITIONS": 76.83,
+        "VOICEAUDIENCE": 76.83,
+        "CONVENTIONS": 76.83
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Owning a pet from the pound or Animal Rescue League has many advantages... if the animals from the pound aren\u2019t adopted right away, they might be put to sleep.",
+          "rationale": "Position is clear and reasons are relevant (rescuing animals, cost, companionship/protection). Evidence is mostly general and based on common-sense statements; limited specific examples or explanation connecting each reason to a persuasive thesis beyond listing benefits."
+        },
+        {
+          "criterion_id": "ORGANIZATIONTRANSITIONS",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "First of all... Besides... Another great advantage... Once you adopt... Please consider adopting...",
+          "rationale": "Paragraphing supports a logical progression (intro reasons, cost, family benefits, conclusion) with basic transitions. Some ideas (responsibilities) are introduced then not developed, which slightly weakens cohesion."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Please consider adopting an animal. If you are thinking of adopting a pet, you might consider choosing a dog or a cat.",
+          "rationale": "Appropriate, friendly persuasive tone and direct address to the reader. Vocabulary is clear but not very precise or nuanced for Grade 8 persuasive writing; argument does not deeply anticipate counterarguments."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Pets from the pound cost a lot less than pets at a fancy pet store, which can cost hundreds of dollars.",
+          "rationale": "Generally correct grammar, spelling, and punctuation; sentences are readable with some variety. Minor style issues (some repetitive wording and simple constructions) but errors do not impede meaning."
+        }
+      ],
+      "notes": "Overall Level 3: clear claim and logical structure with relevant reasons (rescue, cost, companionship), but support stays general and lightly explained. Organization is solid with basic transitions; conventions are mostly controlled."
+    },
+    {
+      "student_id": "s008",
+      "rubric_total_points": 7.65,
+      "criteria_points": {
+        "CLAIMREASONINGEVIDENCE": 9.65,
+        "ORGANIZATIONCOHESION": 9.65,
+        "VOICEAUDIENCE": 9.65,
+        "CONVENTIONS": 18.65
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIMREASONINGEVIDENCE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Ms. Wells made a difference to me! I think she should be the winner of your contest... First of all, Ms. Wells is helpful... In addition, Ms. Wells is a kind person... Lastly, Ms. Wells donates her time to kids.",
+          "rationale": "Position is clear and supported with relevant reasons and some specific examples (math help, Colonial Day, attending a soccer game). However, the explanations stay fairly general/repetitive (e.g., 'If you ask her for help, she\u2019ll help you') and there is no acknowledgement of possible counterarguments or deeper connection to why these qualities make her the best contest choice (beyond assertion)."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "First of all... In addition... Lastly... In conclusion...",
+          "rationale": "Logical paragraph structure with clear sequencing and a concluding restatement. Transitions are basic but effective; development within paragraphs is straightforward rather than nuanced."
+        },
+        {
+          "criterion_id": "VOICEAUDIENCE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Dear Editor, I\u2019m writing to you about the Teacher-Who-Made-a-Difference contest.",
+          "rationale": "Appropriate letter format and polite, enthusiastic tone. Vocabulary and sentence structures are simple for Grade 8 and the persuasion relies more on personal praise than on more mature, audience-targeted reasoning."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Sincerely,\nMelissa",
+          "rationale": "Generally strong control of spelling, punctuation, and sentence boundaries; meaning is consistently clear. (Note: large copied/licensing text included after the letter is distracting, but the letter itself is conventionally correct.)"
+        }
+      ],
+      "notes": "Overall Level 3 (low): clear claim and organized reasons with a few concrete examples, but the argument is basic for Grade 8 (limited elaboration and no counterargument). Conventions are mostly strong."
+    },
+    {
+      "student_id": "s009",
+      "rubric_total_points": 76.22,
+      "criteria_points": {
+        "CLAIM": 77.22,
+        "EVIDENCEREASONING": 77.22,
+        "ORGANIZATIONCOHESION": 77.22,
+        "STYLEVOICE": 77.22,
+        "CONVENTIONS": 86.22
+      },
+      "criteria_evidence": [
+        {
+          "criterion_id": "CLAIM",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "New Jersey is my favorite place for many reasons.",
+          "rationale": "Clear position is stated early and maintained throughout, but the claim is more personal-preference than an arguable persuasive thesis with nuance or awareness of counterpoints."
+        },
+        {
+          "criterion_id": "EVIDENCEREASONING",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Over half of my family lives in New Jersey... we ride roller coasters. We devour juicy caramel-covered apples...",
+          "rationale": "Provides multiple relevant reasons with concrete examples and some sensory detail. Reasoning is mostly descriptive rather than explaining why these points should persuade a broader audience; limited development beyond listing and illustrating."
+        },
+        {
+          "criterion_id": "ORGANIZATIONCOHESION",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "The first reason... The second reason... The third reason... For all these reasons...",
+          "rationale": "Logical paragraph structure with clear sequencing and a concluding paragraph. Transitions are functional (ordinal structure) but not especially varied or sophisticated."
+        },
+        {
+          "criterion_id": "STYLEVOICE",
+          "level": "3",
+          "score": 75.0,
+          "evidence_quote": "Do you have a favorite place to go\u2014a place with family, good weather, and fun things to do like crabbing?",
+          "rationale": "Engaging opening and appropriate, vivid vocabulary (e.g., 'crisp fall breeze,' 'white, fluffy winter snow'). Voice fits an informal persuasive piece, though the overall task reads more like a descriptive personal narrative than targeted persuasion for a specific audience."
+        },
+        {
+          "criterion_id": "CONVENTIONS",
+          "level": "4",
+          "score": 84.0,
+          "evidence_quote": "Do you have a favorite place to go\u2014a place with family, good weather, and fun things to do like crabbing?",
+          "rationale": "Strong control of spelling, punctuation, and sentence structure; meaning is always clear. Minor issues, if any, are negligible."
+        }
+      ],
+      "notes": "Overall Level 3: clear controlling idea and well-organized reasons with vivid examples, but the piece is more descriptive than persuasive (limited audience awareness/counterargument) and reasoning doesn\u2019t strongly connect evidence to a broader persuasive purpose. Conventions are strong."
+    }
+  ]
+}

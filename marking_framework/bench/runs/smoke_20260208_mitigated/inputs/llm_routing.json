@@ -1,0 +1,29 @@
+{
+  "mode": "codex_local",
+  "tasks": {
+    "pass1_assessor": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0
+    },
+    "pass2_ranker": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0
+    },
+    "pairwise_reviewer": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0
+    },
+    "feedback_drafter": {
+      "model": "gpt-5-mini",
+      "reasoning": "low",
+      "temperature": 0.3
+    }
+  },
+  "openai": {
+    "base_url": "https://api.openai.com/v1",
+    "responses_endpoint": "/responses"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "assessor_id": "assessor_A",
+  "role": "llm_assessor",
+  "rubric_points_possible": null,
+  "scores": [
+    {
+      "student_id": "s001",
+      "rubric_total_points": 70.29,
+      "criteria_points": {
+        "K1": 48.875,
+        "K2": 48.875,
+        "T1": 69.28851851851853,
+        "T2": 69.28851851851853,
+        "C1": 85.54074074074074,
+        "C2": 96.0,
+        "C3": 87.85185185185185,
+        "A1": 63.43000000000001,
+        "A2": 63.43000000000001
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s002",
+      "rubric_total_points": 73.36,
+      "criteria_points": {
+        "K1": 55.96999999999999,
+        "K2": 55.96999999999999,
+        "T1": 69.67666666666668,
+        "T2": 69.67666666666668,
+        "C1": 88.26666666666665,
+        "C2": 96.0,
+        "C3": 82.66666666666666,
+        "A1": 70.99,
+        "A2": 70.99
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s003",
+      "rubric_total_points": 73.16,
+      "criteria_points": {
+        "K1": 56.94499999999999,
+        "K2": 56.94499999999999,
+        "T1": 71.51611111111112,
+        "T2": 71.51611111111112,
+        "C1": 84.44444444444444,
+        "C2": 96.0,
+        "C3": 85.11111111111111,
+        "A1": 67.995,
+        "A2": 67.995
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    },
+    {
+      "student_id": "s004",
+      "rubric_total_points": 80.79,
+      "criteria_points": {
+        "K1": 67.04499999999999,
+        "K2": 67.04499999999999,
+        "T1": 77.00880952380953,
+        "T2": 77.00880952380953,
+        "C1": 93.98095238095237,
+        "C2": 96.0,
+        "C3": 84.95238095238095,
+        "A1": 82.015,
+        "A2": 82.015
+      },
+      "criteria_evidence": [],
+      "notes": "Fallback deterministic score for assessor A."
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "benchmark": "main_vs_fallback",
+  "dataset": "bench/internet_samples_thoughtful",
+  "runs": 1,
+  "modes": {
+    "main": [
+      {
+        "run": 1,
+        "ok": false,
+        "error": "cmd=python3 scripts/run_llm_assessors.py --texts bench/runs/main_vs_fallback_after_switch_v3/main/run_1/processing/normalized_text --rubric bench/runs/main_vs_fallback_after_switch_v3/main/run_1/inputs/rubric.md --outline bench/runs/main_vs_fallback_after_switch_v3/main/run_1/inputs/assignment_outline.md --routing bench/runs/main_vs_fallback_after_switch_v3/routing_main.json --pass1-out bench/runs/main_vs_fallback_after_switch_v3/main/run_1/assessments/pass1 --pass2-out bench/runs/main_vs_fallback_after_switch_v3/main/run_1/assessments/pass2 --grade-profiles config/grade_level_profiles.json --class-metadata bench/runs/main_vs_fallback_after_switch_v3/main/run_1/inputs/class_metadata.json --exemplars inputs/exemplars --rubric-criteria config/rubric_criteria.json --fallback deterministic --require-model-usage\nstdout:\nEstimated cost: $0.03 total (~$0.01/student)\nModel coverage: 0/39 successful structured outputs.\nNo model outputs were accepted; failing because --require-model-usage is set.\n\nstderr:\n"
+      }
+    ],
+    "fallback": [
+      {
+        "run": 1,
+        "ok": true,
+        "accuracy": 1.0,
+        "model_usage_ratio": 0.0,
+        "students": {
+          "s004": {
+            "display_name": "sample_level4_internet_thoughtful",
+            "expected": "4",
+            "level": "4",
+            "rank": 1,
+            "score": 82.95
+          },
+          "s003": {
+            "display_name": "sample_level3_internet_thoughtful",
+            "expected": "3",
+            "level": "3",
+            "rank": 2,
+            "score": 70.25
+          },
+          "s002": {
+            "display_name": "sample_level2_internet_thoughtful",
+            "expected": "2",
+            "level": "2",
+            "rank": 3,
+            "score": 60.25
+          },
+          "s001": {
+            "display_name": "sample_level1_internet_thoughtful",
+            "expected": "1",
+            "level": "1",
+            "rank": 4,
+            "score": 53.81
+          }
+        }
+      }
+    ]
+  },
+  "summary": {
+    "main": {
+      "runs_successful": 0,
+      "accuracy_mean": 0.0,
+      "model_usage_ratio_mean": 0.0
+    },
+    "fallback": {
+      "runs_successful": 1,
+      "accuracy_mean": 1.0,
+      "model_usage_ratio_mean": 0.0
+    }
+  }
+}

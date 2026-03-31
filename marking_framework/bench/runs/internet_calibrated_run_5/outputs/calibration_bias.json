@@ -1,0 +1,230 @@
+{
+  "method": "piecewise_monotonic",
+  "generated_at": "2026-02-07T19:40:24.571719+00:00",
+  "scope_template": "<grade_band>|<genre>",
+  "assessors": {
+    "assessor_A": {
+      "global": {
+        "samples": 5,
+        "map_points": [
+          {
+            "x": 46.38,
+            "y": 54.0
+          },
+          {
+            "x": 58.56,
+            "y": 64.0
+          },
+          {
+            "x": 61.86,
+            "y": 95.0
+          },
+          {
+            "x": 63.64,
+            "y": 95.0
+          },
+          {
+            "x": 72.85,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": -13.742,
+        "mae_raw": 13.742,
+        "mae": 6.2,
+        "level_hit_rate": 0.6,
+        "order_position_hit_rate": 0.8,
+        "pairwise_order_agreement": 0.7,
+        "weight": 1.227
+      },
+      "scopes": {
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "map_points": [
+            {
+              "x": 46.38,
+              "y": 54.0
+            },
+            {
+              "x": 58.56,
+              "y": 64.0
+            },
+            {
+              "x": 61.86,
+              "y": 95.0
+            },
+            {
+              "x": 63.64,
+              "y": 95.0
+            },
+            {
+              "x": 72.85,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -13.742,
+          "mae_raw": 13.742,
+          "mae": 6.2,
+          "level_hit_rate": 0.6,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.7,
+          "weight": 1.227
+        }
+      }
+    },
+    "assessor_B": {
+      "global": {
+        "samples": 5,
+        "map_points": [
+          {
+            "x": 44.9,
+            "y": 54.0
+          },
+          {
+            "x": 56.52,
+            "y": 64.0
+          },
+          {
+            "x": 58.8,
+            "y": 95.0
+          },
+          {
+            "x": 60.93,
+            "y": 95.0
+          },
+          {
+            "x": 68.04,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": -16.562,
+        "mae_raw": 16.562,
+        "mae": 6.2,
+        "level_hit_rate": 0.6,
+        "order_position_hit_rate": 0.8,
+        "pairwise_order_agreement": 0.7,
+        "weight": 1.227
+      },
+      "scopes": {
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "map_points": [
+            {
+              "x": 44.9,
+              "y": 54.0
+            },
+            {
+              "x": 56.52,
+              "y": 64.0
+            },
+            {
+              "x": 58.8,
+              "y": 95.0
+            },
+            {
+              "x": 60.93,
+              "y": 95.0
+            },
+            {
+              "x": 68.04,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -16.562,
+          "mae_raw": 16.562,
+          "mae": 6.2,
+          "level_hit_rate": 0.6,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.7,
+          "weight": 1.227
+        }
+      }
+    },
+    "assessor_C": {
+      "global": {
+        "samples": 5,
+        "map_points": [
+          {
+            "x": 49.46,
+            "y": 54.0
+          },
+          {
+            "x": 61.46,
+            "y": 64.0
+          },
+          {
+            "x": 64.78,
+            "y": 95.0
+          },
+          {
+            "x": 67.2,
+            "y": 95.0
+          },
+          {
+            "x": 74.39,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": -10.942,
+        "mae_raw": 10.942,
+        "mae": 6.2,
+        "level_hit_rate": 0.6,
+        "order_position_hit_rate": 0.8,
+        "pairwise_order_agreement": 0.7,
+        "weight": 1.227
+      },
+      "scopes": {
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "map_points": [
+            {
+              "x": 49.46,
+              "y": 54.0
+            },
+            {
+              "x": 61.46,
+              "y": 64.0
+            },
+            {
+              "x": 64.78,
+              "y": 95.0
+            },
+            {
+              "x": 67.2,
+              "y": 95.0
+            },
+            {
+              "x": 74.39,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -10.942,
+          "mae_raw": 10.942,
+          "mae": 6.2,
+          "level_hit_rate": 0.6,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.7,
+          "weight": 1.227
+        }
+      }
+    }
+  },
+  "summary": {
+    "samples": 15,
+    "assessors": 3,
+    "scope_coverage": {
+      "grade_6_7|argumentative": 15
+    }
+  }
+}

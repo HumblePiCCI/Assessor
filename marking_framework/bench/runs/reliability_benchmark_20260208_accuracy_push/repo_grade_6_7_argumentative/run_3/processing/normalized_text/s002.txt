@@ -1,0 +1,9 @@
+Phones should be allowed in class sometimes, but with rules. I think banning them completely causes more problems than it solves.
+
+One reason is safety and communication. If there is an emergency or a change in pickup, students need to contact their families. Also, phones can help with learning. If you do not know a word, you can look it up quickly. In my class, I have used a phone to check how to spell a word or to time myself when I am reading.
+
+Another reason is that students need to learn self-control. If school bans phones forever, students never practice managing distractions. Teachers can say, "Phones face down during lessons" and "Only use phones when the teacher says." That teaches responsibility.
+
+Some people say phones always distract, and that is true sometimes. But rules and consequences can help. If someone is playing games, the teacher can take the phone for the period.
+
+Overall, phones should be allowed for learning and safety, but not for random use.

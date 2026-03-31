@@ -1,0 +1,90 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "returncode": 0,
+      "model_coverage": [
+        12,
+        12
+      ],
+      "ranking": [
+        "s003",
+        "s002",
+        "s001"
+      ],
+      "rubric_after_penalty_percent": {
+        "s003": 76.94,
+        "s002": 78.78,
+        "s001": 58.44
+      }
+    },
+    {
+      "run": 2,
+      "returncode": 0,
+      "model_coverage": [
+        11,
+        14
+      ],
+      "ranking": [
+        "s003",
+        "s002",
+        "s001"
+      ],
+      "rubric_after_penalty_percent": {
+        "s003": 77.04,
+        "s002": 76.74,
+        "s001": 58.44
+      }
+    },
+    {
+      "run": 3,
+      "returncode": 0,
+      "model_coverage": [
+        12,
+        12
+      ],
+      "ranking": [
+        "s003",
+        "s002",
+        "s001"
+      ],
+      "rubric_after_penalty_percent": {
+        "s003": 76.32,
+        "s002": 76.74,
+        "s001": 59.56
+      }
+    }
+  ],
+  "variability": {
+    "s001": {
+      "values": [
+        58.44,
+        58.44,
+        59.56
+      ],
+      "mean": 58.813,
+      "span": 1.12,
+      "span_pct_of_mean": 1.904
+    },
+    "s002": {
+      "values": [
+        78.78,
+        76.74,
+        76.74
+      ],
+      "mean": 77.42,
+      "span": 2.04,
+      "span_pct_of_mean": 2.635
+    },
+    "s003": {
+      "values": [
+        76.94,
+        77.04,
+        76.32
+      ],
+      "mean": 76.767,
+      "span": 0.72,
+      "span_pct_of_mean": 0.938
+    }
+  }
+}

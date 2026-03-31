@@ -1,0 +1,68 @@
+{
+  "runs": 5,
+  "truth_mapping": {
+    "s001": "1",
+    "s002": "2",
+    "s003": "3",
+    "s004": "4"
+  },
+  "run_metrics": [
+    {
+      "file": "bench/runs/reliability_study/run_1/outputs/consensus_scores.csv",
+      "level_hit_rate": 0.25,
+      "position_hit_ratio": 1.0
+    },
+    {
+      "file": "bench/runs/reliability_study/run_2/outputs/consensus_scores.csv",
+      "level_hit_rate": 0.25,
+      "position_hit_ratio": 1.0
+    },
+    {
+      "file": "bench/runs/reliability_study/run_3/outputs/consensus_scores.csv",
+      "level_hit_rate": 0.25,
+      "position_hit_ratio": 1.0
+    },
+    {
+      "file": "bench/runs/reliability_study/run_4/outputs/consensus_scores.csv",
+      "level_hit_rate": 0.25,
+      "position_hit_ratio": 1.0
+    },
+    {
+      "file": "bench/runs/reliability_study/run_5/outputs/consensus_scores.csv",
+      "level_hit_rate": 0.25,
+      "position_hit_ratio": 1.0
+    }
+  ],
+  "mean_level_hit_rate": 0.25,
+  "mean_position_hit_ratio": 1.0,
+  "stability": {
+    "s001": {
+      "target_level": "1",
+      "mode_level": "2",
+      "level_consistency": 1.0,
+      "rank_sd": 0.0,
+      "score_sd": 0.0
+    },
+    "s002": {
+      "target_level": "2",
+      "mode_level": "4",
+      "level_consistency": 1.0,
+      "rank_sd": 0.0,
+      "score_sd": 0.0
+    },
+    "s003": {
+      "target_level": "3",
+      "mode_level": "4",
+      "level_consistency": 1.0,
+      "rank_sd": 0.0,
+      "score_sd": 0.0
+    },
+    "s004": {
+      "target_level": "4",
+      "mode_level": "4",
+      "level_consistency": 1.0,
+      "rank_sd": 0.0,
+      "score_sd": 0.0
+    }
+  }
+}

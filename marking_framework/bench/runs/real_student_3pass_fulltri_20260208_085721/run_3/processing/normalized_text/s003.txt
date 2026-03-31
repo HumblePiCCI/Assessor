@@ -1,0 +1,9 @@
+High schools should start later because early schedules waste instructional time and increase student stress. If schools want better outcomes, a later start is one of the few policy changes that improves learning conditions without adding new programs or costs.
+
+The core issue is not laziness; it is learning quality. When students arrive exhausted, attention and working memory are weaker. Teachers can deliver the same lesson, but the student experience changes: slower processing, more mistakes, and more frustration. A later start does not magically create motivation, but it moves instruction closer to the hours when students can engage with it. That shift makes class time more efficient because students are actually present mentally.
+
+A later start also reduces the daily strain of mornings. Many students manage long commutes, family responsibilities, and early transportation schedules. When mornings are rushed, students skip breakfast, arrive late, and begin the day on edge. A schedule that allows a healthier routine supports not only academic focus, but also behavior and relationships in the classroom.
+
+The common counterargument is that later starts disrupt after-school activities, jobs, and childcare. This concern matters, but it is an argument for careful planning, not for keeping a harmful baseline. Schools regularly adjust schedules for exams and events; they can also coordinate transportation, rotate practice times, and build predictable options for families.
+
+Ultimately, a later start recognizes a simple principle: learning improves when conditions support attention. If schools are serious about achievement, they should schedule learning when students can actually learn.

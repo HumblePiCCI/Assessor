@@ -1,0 +1,1543 @@
+{
+  "method": "piecewise_monotonic_shrinkage",
+  "generated_at": "2026-02-08T01:18:24.852212+00:00",
+  "scope_template": "<grade_band>|<genre>",
+  "assessors": {
+    "assessor_A": {
+      "global": {
+        "samples": 60,
+        "observations": 180,
+        "map_points": [
+          {
+            "x": 51.81,
+            "y": 54.0
+          },
+          {
+            "x": 62.87,
+            "y": 54.0
+          },
+          {
+            "x": 72.95,
+            "y": 64.0
+          },
+          {
+            "x": 74.92,
+            "y": 75.0
+          },
+          {
+            "x": 78.32,
+            "y": 75.0
+          },
+          {
+            "x": 83.55,
+            "y": 89.5
+          },
+          {
+            "x": 92.67,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": 1.2943,
+        "mae_raw": 11.4477,
+        "mae": 11.6301,
+        "level_hit_rate": 0.2667,
+        "order_position_hit_rate": 0.7605,
+        "pairwise_order_agreement": 0.6051,
+        "stability_sd": 0.0,
+        "repeat_level_consistency": 1.0,
+        "weight": 0.8523,
+        "scope_prior": 12.0
+      },
+      "scopes": {
+        "grade_11_12|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 60.74,
+              "y": 54.0
+            },
+            {
+              "x": 73.24,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 87.31,
+              "y": 84.0
+            },
+            {
+              "x": 91.76,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.28,
+          "mae_raw": 12.984,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.44,
+              "y": 54.0
+            },
+            {
+              "x": 73.68,
+              "y": 64.0
+            },
+            {
+              "x": 75.27,
+              "y": 75.0
+            },
+            {
+              "x": 83.55,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 2.658,
+          "mae_raw": 10.55,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 63.71,
+              "y": 54.0
+            },
+            {
+              "x": 71.2,
+              "y": 64.0
+            },
+            {
+              "x": 73.03,
+              "y": 75.0
+            },
+            {
+              "x": 75.75,
+              "y": 84.0
+            },
+            {
+              "x": 82.79,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -1.104,
+          "mae_raw": 11.716,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 66.43,
+              "y": 54.0
+            },
+            {
+              "x": 73.94,
+              "y": 64.0
+            },
+            {
+              "x": 74.9,
+              "y": 75.0
+            },
+            {
+              "x": 82.58,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.24,
+          "mae_raw": 11.28,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 60.44,
+              "y": 54.0
+            },
+            {
+              "x": 74.84,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 85.06,
+              "y": 84.0
+            },
+            {
+              "x": 91.41,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.02,
+          "mae_raw": 12.084,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 61.95,
+              "y": 54.0
+            },
+            {
+              "x": 72.25,
+              "y": 64.0
+            },
+            {
+              "x": 75.34,
+              "y": 75.0
+            },
+            {
+              "x": 75.46,
+              "y": 84.0
+            },
+            {
+              "x": 83.37,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.726,
+          "mae_raw": 11.838,
+          "mae": 16.0,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.6,
+          "pairwise_order_agreement": 0.6,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.8,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 52.59,
+              "y": 54.0
+            },
+            {
+              "x": 65.11,
+              "y": 64.0
+            },
+            {
+              "x": 75.62,
+              "y": 75.0
+            },
+            {
+              "x": 84.29,
+              "y": 84.0
+            },
+            {
+              "x": 91.64,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.55,
+          "mae_raw": 11.766,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.6,
+              "y": 54.0
+            },
+            {
+              "x": 73.53,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 82.49,
+              "y": 84.0
+            },
+            {
+              "x": 92.67,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.928,
+          "mae_raw": 9.788,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.84,
+              "y": 54.0
+            },
+            {
+              "x": 70.35,
+              "y": 64.0
+            },
+            {
+              "x": 76.53,
+              "y": 75.0
+            },
+            {
+              "x": 77.07,
+              "y": 84.0
+            },
+            {
+              "x": 84.5,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.142,
+          "mae_raw": 12.706,
+          "mae": 16.0,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.6,
+          "pairwise_order_agreement": 0.6,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.8,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.04,
+              "y": 54.0
+            },
+            {
+              "x": 72.95,
+              "y": 64.0
+            },
+            {
+              "x": 74.92,
+              "y": 75.0
+            },
+            {
+              "x": 78.32,
+              "y": 84.0
+            },
+            {
+              "x": 83.47,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.06,
+          "mae_raw": 11.032,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 64.11,
+              "y": 54.0
+            },
+            {
+              "x": 76.49,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 83.55,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.57,
+          "mae_raw": 10.43,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 51.81,
+              "y": 54.0
+            },
+            {
+              "x": 62.87,
+              "y": 64.0
+            },
+            {
+              "x": 72.32,
+              "y": 75.0
+            },
+            {
+              "x": 79.42,
+              "y": 84.0
+            },
+            {
+              "x": 82.67,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -4.582,
+          "mae_raw": 11.198,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        }
+      }
+    },
+    "assessor_B": {
+      "global": {
+        "samples": 60,
+        "observations": 180,
+        "map_points": [
+          {
+            "x": 51.53,
+            "y": 54.0
+          },
+          {
+            "x": 62.65,
+            "y": 54.0
+          },
+          {
+            "x": 72.47,
+            "y": 64.0
+          },
+          {
+            "x": 74.6,
+            "y": 75.0
+          },
+          {
+            "x": 79.08,
+            "y": 84.0
+          },
+          {
+            "x": 83.09,
+            "y": 95.0
+          },
+          {
+            "x": 92.47,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": 0.8473,
+        "mae_raw": 11.3307,
+        "mae": 12.6466,
+        "level_hit_rate": 0.25,
+        "order_position_hit_rate": 0.7571,
+        "pairwise_order_agreement": 0.5949,
+        "stability_sd": 0.0,
+        "repeat_level_consistency": 1.0,
+        "weight": 0.842,
+        "scope_prior": 12.0
+      },
+      "scopes": {
+        "grade_11_12|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 60.4,
+              "y": 54.0
+            },
+            {
+              "x": 72.47,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 86.55,
+              "y": 84.0
+            },
+            {
+              "x": 91.34,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.822,
+          "mae_raw": 12.834,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.21,
+              "y": 54.0
+            },
+            {
+              "x": 73.08,
+              "y": 64.0
+            },
+            {
+              "x": 74.6,
+              "y": 75.0
+            },
+            {
+              "x": 83.02,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 2.252,
+          "mae_raw": 10.412,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 63.41,
+              "y": 54.0
+            },
+            {
+              "x": 70.74,
+              "y": 64.0
+            },
+            {
+              "x": 72.55,
+              "y": 75.0
+            },
+            {
+              "x": 74.71,
+              "y": 84.0
+            },
+            {
+              "x": 82.11,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -1.696,
+          "mae_raw": 11.724,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 66.17,
+              "y": 54.0
+            },
+            {
+              "x": 73.73,
+              "y": 64.0
+            },
+            {
+              "x": 74.55,
+              "y": 75.0
+            },
+            {
+              "x": 82.3,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.02,
+          "mae_raw": 11.2,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 60.35,
+              "y": 54.0
+            },
+            {
+              "x": 74.23,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 84.14,
+              "y": 84.0
+            },
+            {
+              "x": 91.11,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.636,
+          "mae_raw": 11.944,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 61.65,
+              "y": 54.0
+            },
+            {
+              "x": 71.84,
+              "y": 64.0
+            },
+            {
+              "x": 74.93,
+              "y": 75.0
+            },
+            {
+              "x": 75.03,
+              "y": 84.0
+            },
+            {
+              "x": 83.09,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -1.092,
+          "mae_raw": 11.8,
+          "mae": 16.0,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.6,
+          "pairwise_order_agreement": 0.6,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.8,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 52.15,
+              "y": 54.0
+            },
+            {
+              "x": 64.52,
+              "y": 64.0
+            },
+            {
+              "x": 75.23,
+              "y": 75.0
+            },
+            {
+              "x": 83.06,
+              "y": 84.0
+            },
+            {
+              "x": 90.83,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -1.242,
+          "mae_raw": 11.406,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.29,
+              "y": 54.0
+            },
+            {
+              "x": 73.29,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 82.15,
+              "y": 84.0
+            },
+            {
+              "x": 92.47,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.71,
+          "mae_raw": 9.57,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.59,
+              "y": 54.0
+            },
+            {
+              "x": 68.56,
+              "y": 64.0
+            },
+            {
+              "x": 75.79,
+              "y": 75.0
+            },
+            {
+              "x": 76.32,
+              "y": 84.0
+            },
+            {
+              "x": 83.34,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -1.08,
+          "mae_raw": 12.78,
+          "mae": 16.0,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.6,
+          "pairwise_order_agreement": 0.6,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.8,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 61.86,
+              "y": 54.0
+            },
+            {
+              "x": 72.69,
+              "y": 64.0
+            },
+            {
+              "x": 74.48,
+              "y": 75.0
+            },
+            {
+              "x": 77.56,
+              "y": 84.0
+            },
+            {
+              "x": 83.1,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.462,
+          "mae_raw": 11.038,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 63.69,
+              "y": 54.0
+            },
+            {
+              "x": 75.82,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 82.45,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.132,
+          "mae_raw": 9.992,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 51.53,
+              "y": 54.0
+            },
+            {
+              "x": 62.65,
+              "y": 64.0
+            },
+            {
+              "x": 72.14,
+              "y": 75.0
+            },
+            {
+              "x": 79.08,
+              "y": 84.0
+            },
+            {
+              "x": 82.44,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -4.832,
+          "mae_raw": 11.268,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        }
+      }
+    },
+    "assessor_C": {
+      "global": {
+        "samples": 60,
+        "observations": 180,
+        "map_points": [
+          {
+            "x": 52.5,
+            "y": 54.0
+          },
+          {
+            "x": 64.25,
+            "y": 54.0
+          },
+          {
+            "x": 73.76,
+            "y": 64.0
+          },
+          {
+            "x": 75.67,
+            "y": 75.0
+          },
+          {
+            "x": 80.38,
+            "y": 84.0
+          },
+          {
+            "x": 85.13,
+            "y": 95.0
+          },
+          {
+            "x": 92.92,
+            "y": 95.0
+          }
+        ],
+        "slope": 1.0,
+        "intercept": 0.0,
+        "bias": 1.7247,
+        "mae_raw": 11.629,
+        "mae": 12.194,
+        "level_hit_rate": 0.2667,
+        "order_position_hit_rate": 0.7621,
+        "pairwise_order_agreement": 0.6068,
+        "stability_sd": 0.0,
+        "repeat_level_consistency": 1.0,
+        "weight": 0.853,
+        "scope_prior": 12.0
+      },
+      "scopes": {
+        "grade_11_12|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 61.48,
+              "y": 54.0
+            },
+            {
+              "x": 73.76,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 87.81,
+              "y": 84.0
+            },
+            {
+              "x": 92.17,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.714,
+          "mae_raw": 13.21,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.97,
+              "y": 54.0
+            },
+            {
+              "x": 74.28,
+              "y": 64.0
+            },
+            {
+              "x": 75.88,
+              "y": 75.0
+            },
+            {
+              "x": 83.88,
+              "y": 84.0
+            },
+            {
+              "x": 90.58,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.118,
+          "mae_raw": 10.766,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 64.25,
+              "y": 54.0
+            },
+            {
+              "x": 71.58,
+              "y": 64.0
+            },
+            {
+              "x": 73.79,
+              "y": 75.0
+            },
+            {
+              "x": 76.33,
+              "y": 84.0
+            },
+            {
+              "x": 83.41,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.528,
+          "mae_raw": 11.908,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_11_12|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 67.06,
+              "y": 54.0
+            },
+            {
+              "x": 74.36,
+              "y": 64.0
+            },
+            {
+              "x": 75.39,
+              "y": 75.0
+            },
+            {
+              "x": 83.03,
+              "y": 84.0
+            },
+            {
+              "x": 90.35,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 3.638,
+          "mae_raw": 11.482,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 61.06,
+              "y": 54.0
+            },
+            {
+              "x": 75.42,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 85.36,
+              "y": 84.0
+            },
+            {
+              "x": 91.81,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.4,
+          "mae_raw": 12.232,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.64,
+              "y": 54.0
+            },
+            {
+              "x": 72.52,
+              "y": 64.0
+            },
+            {
+              "x": 75.64,
+              "y": 75.0
+            },
+            {
+              "x": 75.67,
+              "y": 84.0
+            },
+            {
+              "x": 83.66,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.374,
+          "mae_raw": 11.95,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 53.34,
+              "y": 54.0
+            },
+            {
+              "x": 65.5,
+              "y": 64.0
+            },
+            {
+              "x": 75.97,
+              "y": 75.0
+            },
+            {
+              "x": 84.75,
+              "y": 84.0
+            },
+            {
+              "x": 91.99,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -0.09,
+          "mae_raw": 11.786,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        },
+        "grade_6_7|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 63.32,
+              "y": 54.0
+            },
+            {
+              "x": 73.91,
+              "y": 64.0
+            },
+            {
+              "x": 80.35,
+              "y": 75.0
+            },
+            {
+              "x": 82.95,
+              "y": 84.0
+            },
+            {
+              "x": 92.92,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.29,
+          "mae_raw": 10.15,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|argumentative": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 63.43,
+              "y": 54.0
+            },
+            {
+              "x": 70.35,
+              "y": 64.0
+            },
+            {
+              "x": 77.1,
+              "y": 75.0
+            },
+            {
+              "x": 77.65,
+              "y": 84.0
+            },
+            {
+              "x": 85.13,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 0.332,
+          "mae_raw": 12.952,
+          "mae": 16.0,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.6,
+          "pairwise_order_agreement": 0.6,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.8,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|informational_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 62.73,
+              "y": 54.0
+            },
+            {
+              "x": 73.16,
+              "y": 64.0
+            },
+            {
+              "x": 75.17,
+              "y": 75.0
+            },
+            {
+              "x": 78.91,
+              "y": 84.0
+            },
+            {
+              "x": 83.79,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 0.352,
+          "mae_raw": 11.124,
+          "mae": 12.4,
+          "level_hit_rate": 0.2,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.845,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|literary_analysis": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 64.62,
+              "y": 54.0
+            },
+            {
+              "x": 77.06,
+              "y": 64.0
+            },
+            {
+              "x": 80.38,
+              "y": 75.0
+            },
+            {
+              "x": 84.17,
+              "y": 84.0
+            },
+            {
+              "x": 90.75,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": 4.996,
+          "mae_raw": 10.844,
+          "mae": 8.0,
+          "level_hit_rate": 0.4,
+          "order_position_hit_rate": 0.8,
+          "pairwise_order_agreement": 0.8,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 1.1,
+          "scope_prior": 12.0
+        },
+        "grade_8_10|news_report": {
+          "samples": 5,
+          "observations": 15,
+          "map_points": [
+            {
+              "x": 52.5,
+              "y": 54.0
+            },
+            {
+              "x": 63.4,
+              "y": 64.0
+            },
+            {
+              "x": 72.61,
+              "y": 75.0
+            },
+            {
+              "x": 79.65,
+              "y": 84.0
+            },
+            {
+              "x": 83.08,
+              "y": 95.0
+            }
+          ],
+          "slope": 1.0,
+          "intercept": 0.0,
+          "bias": -4.152,
+          "mae_raw": 11.144,
+          "mae": 12.0,
+          "level_hit_rate": 0.0,
+          "order_position_hit_rate": 0.7,
+          "pairwise_order_agreement": 0.7,
+          "stability_sd": 0.0,
+          "repeat_level_consistency": 1.0,
+          "weight": 0.765,
+          "scope_prior": 12.0
+        }
+      }
+    }
+  },
+  "summary": {
+    "samples": 540,
+    "assessors": 3,
+    "scope_coverage": {
+      "grade_11_12|argumentative": 45,
+      "grade_11_12|informational_report": 45,
+      "grade_11_12|literary_analysis": 45,
+      "grade_11_12|news_report": 45,
+      "grade_6_7|argumentative": 45,
+      "grade_6_7|informational_report": 45,
+      "grade_6_7|literary_analysis": 45,
+      "grade_6_7|news_report": 45,
+      "grade_8_10|argumentative": 45,
+      "grade_8_10|informational_report": 45,
+      "grade_8_10|literary_analysis": 45,
+      "grade_8_10|news_report": 45
+    }
+  }
+}

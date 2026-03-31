@@ -1,0 +1,9 @@
+Schools should permit AI writing tools within a disclosure-based framework that protects authorship and assesses thinking. The instinct to ban AI is understandable: educators want to preserve integrity. Yet prohibition often confuses appearance with learning. A policy that teaches AI literacy, requires transparency, and redesigns assessments around process is both more realistic and more ethical.
+
+Used appropriately, AI can scaffold the writing process without replacing the intellectual work. Students may benefit from help generating an outline, revising for clarity, or diagnosing recurring convention errors. For some learners, especially those with language-processing challenges or limited access to external support, AI feedback can lower barriers. However, this benefit exists only when the student remains the author of the ideas, the structure, and the claims.
+
+The deeper reason to allow AI is that schools already teach tool use. Calculators, citation managers, and grammar checkers are permitted not because they eliminate thinking, but because students are accountable for understanding. AI should be treated similarly, with one crucial addition: AI systems can fabricate and can embed bias confidently. That risk makes explicit literacy and responsibility non-negotiable.
+
+The integrity objection is decisive only if we assume assessments must rely on product alone. They should not. Schools can require evidence of process: drafts with revision notes, annotated sources, in-class writing, and brief oral defenses of key claims. These design choices measure understanding directly and make outsourcing thinking harder and less attractive.
+
+The goal is not to preserve a pre-AI classroom by force. The goal is accurate assessment of student learning in the world students inhabit. Allowing AI with disclosure, accountability, and process-based evaluation serves that goal better than an unenforceable ban.
