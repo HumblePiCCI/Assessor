@@ -1,0 +1,28 @@
+{
+  "dataset_name": "uk_sta_2018_ks2_writing_portfolios",
+  "assessment_unit": "portfolio",
+  "grade": "Key Stage 2 / Year 6",
+  "grade_numeric_equivalent": 6,
+  "country": "England",
+  "language": "English",
+  "genre_form": "mixed writing portfolio",
+  "source_family": "Standards and Testing Agency / GOV.UK",
+  "rubric_family": "2018 KS2 English writing teacher assessment framework",
+  "prompt_shared": false,
+  "cohort_coherence": "same grade band + same STA framework + same portfolio collection form",
+  "sample_count": 4,
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": [
+      "Working towards the expected standard",
+      "Working at the expected standard",
+      "Working at greater depth within the expected standard"
+    ],
+    "numeric_mapping": {
+      "Working towards the expected standard": 1,
+      "Working at the expected standard": 2,
+      "Working at greater depth within the expected standard": 3
+    }
+  },
+  "license_note": "GOV.UK content and PDFs are available under the Open Government Licence v3.0."
+}

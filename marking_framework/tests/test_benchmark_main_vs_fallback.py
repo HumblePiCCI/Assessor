@@ -45,6 +45,7 @@ def test_load_gold_rows_supports_jsonl_and_csv(tmp_path):
     )
     rows = bmf.load_gold_rows(gold_jsonl)
     assert rows[0]["student_id"] == "s001"
+    assert rows[0]["gold_canonical_level"] == "1"
     assert rows[1]["boundary_flag"] is True
     assert rows[1]["gold_neighbors"] == ["s001"]
 
@@ -71,6 +72,26 @@ def test_load_gold_rows_supports_jsonl_and_csv(tmp_path):
 
     broken = tmp_path / "broken.jsonl"
     broken.write_text('{"student_id":"s001","gold_level":"9","gold_band_min":50,"gold_band_max":59,"gold_rank":1}\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        bmf.load_gold_rows(broken)
+
+
+def test_load_gold_rows_supports_source_native_levels_with_canonical_mapping(tmp_path):
+    gold_jsonl = tmp_path / "gold.jsonl"
+    gold_jsonl.write_text(
+        '{"student_id":"s001","gold_level":"Excellent","gold_canonical_level":"4","gold_band_min":85,"gold_band_max":89,"gold_rank":1}\n',
+        encoding="utf-8",
+    )
+    rows = bmf.load_gold_rows(gold_jsonl)
+    assert rows[0]["gold_level"] == "Excellent"
+    assert rows[0]["gold_canonical_level"] == "4"
+    assert rows[0]["gold_level_ordinal"] == 4.0
+
+    broken = tmp_path / "broken_noncanonical.jsonl"
+    broken.write_text(
+        '{"student_id":"s001","gold_level":"Excellent","gold_band_min":85,"gold_band_max":89,"gold_rank":1}\n',
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError):
         bmf.load_gold_rows(broken)
 
@@ -140,6 +161,7 @@ def test_evaluate_run_with_explicit_gold(tmp_path):
         {
             "student_id": "s001",
             "gold_level": "1",
+            "gold_canonical_level": "1",
             "gold_level_ordinal": 1.0,
             "gold_band_min": 50.0,
             "gold_band_max": 59.0,
@@ -153,6 +175,7 @@ def test_evaluate_run_with_explicit_gold(tmp_path):
         {
             "student_id": "s002",
             "gold_level": "2",
+            "gold_canonical_level": "2",
             "gold_level_ordinal": 2.0,
             "gold_band_min": 60.0,
             "gold_band_max": 69.0,
@@ -172,6 +195,49 @@ def test_evaluate_run_with_explicit_gold(tmp_path):
     assert out["cost_usd"] == 1.25
     assert out["latency_seconds"] == 3.5
     assert out["students"]["s001"]["source_file"] == "essay-1.txt"
+    assert out["students"]["s001"]["gold_canonical_level"] == "1"
+
+
+def test_evaluate_run_uses_canonical_level_for_exact_match(tmp_path):
+    run = tmp_path / "run"
+    (run / "processing").mkdir(parents=True)
+    (run / "outputs").mkdir(parents=True)
+    (run / "assessments/pass1_individual").mkdir(parents=True)
+    (run / "processing/submission_metadata.json").write_text(
+        json.dumps([{"student_id": "s001", "display_name": "essay one", "source_file": "essay-1.txt"}]),
+        encoding="utf-8",
+    )
+    _write_consensus(
+        run / "outputs/consensus_scores.csv",
+        [
+            {
+                "student_id": "s001",
+                "adjusted_level": "4",
+                "consensus_rank": "1",
+                "rubric_after_penalty_percent": "86.0",
+            }
+        ],
+    )
+    gold_rows = [
+        {
+            "student_id": "s001",
+            "gold_level": "Excellent",
+            "gold_canonical_level": "4",
+            "gold_level_ordinal": 4.0,
+            "gold_band_min": 85.0,
+            "gold_band_max": 89.0,
+            "gold_rank": 1,
+            "gold_neighbors": [],
+            "boundary_flag": False,
+            "adjudication_notes": "",
+            "source_file": "essay-1.txt",
+            "display_name": "essay one",
+        }
+    ]
+    out = bmf.evaluate_run(run, gold_rows, latency_seconds=1.0)
+    assert out["exact_level_hit_rate"] == 1.0
+    assert out["students"]["s001"]["gold_level"] == "Excellent"
+    assert out["students"]["s001"]["gold_canonical_level"] == "4"
 
 
 def test_summarize_runs_includes_stability():

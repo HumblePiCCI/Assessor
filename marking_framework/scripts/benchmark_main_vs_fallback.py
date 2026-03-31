@@ -59,6 +59,7 @@ except ImportError:  # pragma: no cover
 REPORT_VERSION = 2
 LEVEL_ORDINALS = {"1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "4+": 5.0}
 OPTIONAL_GOLD_FIELDS = {
+    "gold_canonical_level",
     "gold_neighbors",
     "boundary_flag",
     "adjudication_notes",
@@ -149,8 +150,14 @@ def normalize_gold_record(record: dict, source: str) -> dict:
         raise ValueError(f"{source}: missing required gold field(s): {', '.join(sorted(missing))}")
     student_id = str(record["student_id"]).strip()
     gold_level = str(record["gold_level"]).strip()
-    if gold_level not in LEVEL_ORDINALS:
-        raise ValueError(f"{source}: invalid gold_level {gold_level!r}")
+    gold_canonical_level = str(record.get("gold_canonical_level") or gold_level).strip()
+    if gold_canonical_level not in LEVEL_ORDINALS:
+        if gold_level in LEVEL_ORDINALS:
+            raise ValueError(f"{source}: invalid gold_canonical_level {gold_canonical_level!r}")
+        raise ValueError(
+            f"{source}: non-canonical gold_level {gold_level!r} requires a valid gold_canonical_level "
+            f"({', '.join(sorted(LEVEL_ORDINALS))})"
+        )
     try:
         band_min = float(record["gold_band_min"])
         band_max = float(record["gold_band_max"])
@@ -170,7 +177,8 @@ def normalize_gold_record(record: dict, source: str) -> dict:
     return {
         "student_id": student_id,
         "gold_level": gold_level,
-        "gold_level_ordinal": level_to_ordinal(gold_level),
+        "gold_canonical_level": gold_canonical_level,
+        "gold_level_ordinal": level_to_ordinal(gold_canonical_level),
         "gold_band_min": band_min,
         "gold_band_max": band_max,
         "gold_rank": gold_rank,
@@ -375,7 +383,7 @@ def evaluate_run(run_dir: Path, gold_rows: list[dict], latency_seconds: float = 
         if gold.get("source_file") and actual_source_file and gold["source_file"] != actual_source_file:
             raise ValueError(f"{run_dir}: gold source_file mismatch for {sid}: expected {gold['source_file']}, got {actual_source_file}")
 
-        exact = item["predicted_level"] == gold["gold_level"]
+        exact = item["predicted_level"] == gold["gold_canonical_level"]
         within_one = abs(item["predicted_level_ordinal"] - gold["gold_level_ordinal"]) <= 1.0
         band_error = score_band_error(item["predicted_score"], gold["gold_band_min"], gold["gold_band_max"])
         rank_displacement = abs(item["predicted_rank"] - gold["gold_rank"])
@@ -390,6 +398,7 @@ def evaluate_run(run_dir: Path, gold_rows: list[dict], latency_seconds: float = 
             "display_name": gold.get("display_name") or metadata_row.get("display_name", ""),
             "source_file": gold.get("source_file") or metadata_row.get("source_file", ""),
             "gold_level": gold["gold_level"],
+            "gold_canonical_level": gold["gold_canonical_level"],
             "predicted_level": item["predicted_level"],
             "gold_band_min": gold["gold_band_min"],
             "gold_band_max": gold["gold_band_max"],
