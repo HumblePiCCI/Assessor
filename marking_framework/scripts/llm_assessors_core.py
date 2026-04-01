@@ -37,7 +37,18 @@ def estimate_cost(input_tokens: int, output_tokens: int, model: str, pricing: di
     return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
 
 
-def preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits, grade_context="", exemplars=""):
+def preflight_costs(
+    texts,
+    rubric,
+    outline,
+    summaries,
+    routing,
+    pricing,
+    limits,
+    grade_context="",
+    exemplars="",
+    student_count_override: int | None = None,
+):
     pass1_model = routing["tasks"]["pass1_assessor"]["model"]
     pass2_model = routing["tasks"]["pass2_ranker"]["model"]
     pass1_out_est = limits.get("estimates", {}).get("pass1_output_tokens", 300)
@@ -72,7 +83,7 @@ def preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits,
             "reason": f"Pass2 call exceeds per_call_max_tokens ({total_pass2_tokens} > {max_call_tokens}). Reduce summaries or raise limit."
         }
     pass2_cost = estimate_cost(pass2_input_tokens, pass2_out_est, pass2_model, pricing)
-    num_students = len(texts)
+    num_students = int(student_count_override or len(texts) or 0)
     per_student_cost = (sum(pass1_per_student_costs.values()) + pass2_cost) / max(1, num_students)
     total_cost = sum(pass1_per_student_costs.values()) + pass2_cost
     return {

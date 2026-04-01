@@ -24,6 +24,12 @@ from scripts.calibration_contract import build_run_scope
 from scripts.pass1_guard import stabilize_pass1_item
 from scripts.pass1_reconcile import guard_parameters, reconcile_pass1_item, strip_internal_fields
 from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ranking, pass2_text_format
+from scripts.portfolio_pieces import (
+    aggregate_portfolio_piece_assessments,
+    split_portfolio_pieces,
+    summarize_portfolio_pieces,
+    write_report as write_portfolio_piece_report,
+)
 try:
     from scripts.openai_client import responses_create, extract_text, extract_usage
 except ImportError:  # pragma: no cover - Support running as a script without package context
@@ -38,6 +44,45 @@ def ranking_from_scores(scores: dict, known_ids: list) -> list:
     ranked = [(sid, float(scores.get(sid, 0.0) or 0.0)) for sid in known_ids]
     ranked.sort(key=lambda item: (-item[1], item[0].lower()))
     return [sid for sid, _ in ranked]
+
+
+def is_portfolio_scope(metadata: dict, genre: str | None) -> bool:
+    assessment_unit = str((metadata or {}).get("assessment_unit", "") or "").strip().lower()
+    genre_form = str((metadata or {}).get("genre_form", "") or "").strip().lower()
+    return str(genre or "").strip().lower() == "portfolio" or assessment_unit == "portfolio" or "portfolio" in genre_form
+
+
+def build_portfolio_piece_prompt(
+    role_name: str,
+    rubric: str,
+    outline: str,
+    student_id: str,
+    piece: dict,
+    total_pieces: int,
+    grade_context: str = "",
+    exemplars: str = "",
+    criteria_block: str = "",
+    evidence_reqs: dict | None = None,
+) -> str:
+    piece_context = (
+        "PORTFOLIO PIECE CONTEXT:\n"
+        f"- This is piece {piece.get('piece_id')} of {total_pieces} from one student's writing portfolio.\n"
+        f"- Piece title: {piece.get('title', 'Untitled piece')}\n"
+        "- Score this piece on its own quality using the rubric and grade expectations.\n"
+        "- Do not assign a whole-portfolio judgment from this piece alone.\n"
+    )
+    merged_grade_context = f"{grade_context}\n\n{piece_context}".strip() if grade_context else piece_context
+    return build_pass1_prompt(
+        role_name,
+        rubric,
+        outline,
+        f"{student_id}::{piece.get('piece_id')}",
+        str(piece.get("text", "") or ""),
+        merged_grade_context,
+        exemplars,
+        criteria_block,
+        evidence_reqs,
+    )
 
 
 def guard_bias_for_exemplar_scope(match_quality: str | None, score_delta: float, level_gap: int, anchor_blend: float) -> tuple[float, int, float]:
@@ -73,6 +118,7 @@ def main() -> int:
     parser.add_argument("--normalized-rubric", default="outputs/normalized_rubric.json", help="Normalized rubric contract JSON")
     parser.add_argument("--rubric-manifest", default="outputs/rubric_manifest.json", help="Rubric manifest JSON")
     parser.add_argument("--rubric-verification", default="outputs/rubric_verification.json", help="Rubric verification JSON")
+    parser.add_argument("--portfolio-piece-report", default="outputs/portfolio_piece_report.json", help="Portfolio piece scoring report JSON")
     parser.add_argument("--fallback", choices=["none", "deterministic"], default="deterministic", help="Fallback strategy when model output is invalid")
     parser.add_argument("--require-model-usage", action="store_true", help="Fail if no model outputs are accepted")
     args = parser.parse_args()
@@ -125,6 +171,11 @@ def main() -> int:
     if not genre:
         genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
     genre = normalize_genre(genre)
+    portfolio_scope = is_portfolio_scope(metadata, genre)
+    portfolio_pieces_by_student = {
+        student_id: split_portfolio_pieces(text)
+        for student_id, text in texts.items()
+    } if portfolio_scope else {}
     base_exemplars = Path(args.exemplars)
     exemplars_dir = base_exemplars
     exemplar_selection = {
@@ -180,11 +231,38 @@ def main() -> int:
     usage_log.parent.mkdir(parents=True, exist_ok=True)
     failure_log = Path("logs/llm_failures.jsonl")
     failure_log.parent.mkdir(parents=True, exist_ok=True)
-    summaries = [{"student_id": sid, "summary": summarize_text(text, args.max_summary_chars)} for sid, text in texts.items()]
+    pass1_preflight_texts = texts
+    if portfolio_scope:
+        pass1_preflight_texts = {}
+        for student_id, pieces in portfolio_pieces_by_student.items():
+            if len(pieces) > 1:
+                for piece in pieces:
+                    pass1_preflight_texts[f"{student_id}::{piece.get('piece_id')}"] = str(piece.get("text", "") or "")
+            else:
+                pass1_preflight_texts[student_id] = texts.get(student_id, "")
+    summaries = []
+    for sid, text in texts.items():
+        pieces = portfolio_pieces_by_student.get(sid, []) if portfolio_scope else []
+        if len(pieces) > 1:
+            summary = summarize_portfolio_pieces(pieces, args.max_summary_chars)
+        else:
+            summary = summarize_text(text, args.max_summary_chars)
+        summaries.append({"student_id": sid, "summary": summary})
     if mode != "codex_local" and not args.ignore_cost_limits:
         pricing = load_json(Path(args.pricing))
         limits = load_json(Path(args.cost_limits))
-        preflight = preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits, grade_context, exemplar_block)
+        preflight = preflight_costs(
+            pass1_preflight_texts,
+            rubric,
+            outline,
+            summaries,
+            routing,
+            pricing,
+            limits,
+            grade_context,
+            exemplar_block,
+            student_count_override=len(texts),
+        )
         if not preflight.get("ok"):
             print(f"Cost preflight failed: {preflight.get('reason')}")
             if limits.get("abort_on_limit", True):
@@ -211,9 +289,117 @@ def main() -> int:
     pass1_scores_by_assessor = {}
     model_successes = 0
     model_attempts = 0
+    portfolio_piece_report = {"enabled": bool(portfolio_scope), "students": {}}
+    min_piece_success_ratio = 0.6
     for assessor in assessors:
         scores = []
         for student_id, text in texts.items():
+            pieces = portfolio_pieces_by_student.get(student_id, []) if portfolio_scope else []
+            use_piece_mode = len(pieces) > 1
+            model_attempts += 1
+            if use_piece_mode:
+                piece_items = []
+                piece_successes = 0
+                for piece in pieces:
+                    piece_key = f"{student_id}::{piece.get('piece_id')}"
+                    piece_text = str(piece.get("text", "") or "")
+                    anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, required_ids, exemplars)
+                    prompt = build_portfolio_piece_prompt(
+                        assessor,
+                        rubric,
+                        outline,
+                        student_id,
+                        piece,
+                        len(pieces),
+                        grade_context,
+                        exemplar_block,
+                        criteria_block,
+                        reqs,
+                    )
+                    piece_item = None
+                    for attempt in range(3):
+                        try:
+                            response = responses_create(
+                                model=pass1_model,
+                                messages=[{"role": "user", "content": prompt}],
+                                temperature=pass1_temp,
+                                reasoning=pass1_reasoning,
+                                routing_path=args.routing,
+                                text_format=pass1_text_format(require_evidence),
+                                max_output_tokens=pass1_max_tokens,
+                            )
+                            content = extract_text(response)
+                            usage = extract_usage(response)
+                            with usage_log.open("a", encoding="utf-8") as f:
+                                f.write(
+                                    json.dumps(
+                                        {
+                                            "task": "pass1_piece",
+                                            "assessor": assessor,
+                                            "student_id": student_id,
+                                            "piece_id": piece.get("piece_id"),
+                                            "usage": usage,
+                                            "model": pass1_model,
+                                        }
+                                    ) + "\n"
+                                )
+                        except Exception as exc:
+                            content = f"[model_error] {exc}"
+                        try:
+                            if mode == "codex_local" and looks_like_prompt_echo(content, piece_key):
+                                raise ValueError("Model returned prompt echo instead of scored JSON.")
+                            piece_item = parse_pass1_item(content, piece_key, required_ids, reqs, piece_text, strict=False)
+                            if str(piece_item.get("student_id", "")).strip() != piece_key:
+                                raise ValueError("Pass1 response student_id mismatch.")
+                            score = piece_item.get("rubric_total_points")
+                            if not isinstance(score, (int, float)):
+                                raise ValueError("Pass1 response missing numeric rubric_total_points.")
+                            piece_item = strip_internal_fields(reconcile_pass1_item(piece_item, required_ids))
+                            piece_successes += 1
+                            break
+                        except ValueError as exc:
+                            failure = {
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "task": "pass1_piece",
+                                "assessor": assessor,
+                                "student_id": student_id,
+                                "piece_id": piece.get("piece_id"),
+                                "attempt": attempt + 1,
+                                "mode": mode,
+                                "error": str(exc),
+                                "response_preview": content[:2000],
+                            }
+                            with failure_log.open("a", encoding="utf-8") as f:
+                                f.write(json.dumps(failure) + "\n")
+                            prompt = build_pass1_repair_prompt(piece_key, content, bool(required_ids))
+                    if piece_item is None:
+                        if args.fallback == "deterministic":
+                            piece_item = anchor_piece_item
+                        else:
+                            raise ValueError(f"Pass1 portfolio piece response invalid after retry. See {failure_log}.")
+                    piece_items.append(piece_item)
+                item, aggregation = aggregate_portfolio_piece_assessments(student_id, pieces, piece_items, assessor)
+                scores.append(item)
+                student_entry = portfolio_piece_report["students"].setdefault(
+                    student_id,
+                    {
+                        "piece_count": len(pieces),
+                        "pieces": [
+                            {
+                                "piece_id": piece.get("piece_id"),
+                                "title": piece.get("title"),
+                                "word_count": piece.get("word_count"),
+                            }
+                            for piece in pieces
+                        ],
+                        "assessors": {},
+                    },
+                )
+                student_entry["assessors"][assessor] = aggregation
+                if piece_successes > 0 and (piece_successes / max(1, len(pieces))) >= min_piece_success_ratio:
+                    model_successes += 1
+                continue
+
             anchor_item = deterministic_pass1_item(student_id, text, assessor, required_ids, exemplars)
             prompt = build_pass1_prompt(
                 assessor,
@@ -227,9 +413,9 @@ def main() -> int:
                 reqs,
             )
             item = None
+            item_used_model = False
             for attempt in range(3):
                 try:
-                    model_attempts += 1
                     response = responses_create(
                         model=pass1_model,
                         messages=[{"role": "user", "content": prompt}],
@@ -267,7 +453,7 @@ def main() -> int:
                         )
                         item = stabilize_pass1_item(item, anchor_item, dyn_delta, dyn_gap, dyn_blend)
                     item = strip_internal_fields(item)
-                    model_successes += 1
+                    item_used_model = True
                     break
                 except ValueError as exc:
                     failure = {
@@ -288,6 +474,8 @@ def main() -> int:
                     item = anchor_item
                 else:
                     raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
+            if item_used_model:
+                model_successes += 1
             scores.append(item)
         pass1_scores_by_assessor[assessor] = {
             s["student_id"]: float(s.get("rubric_total_points", 0.0) or 0.0) for s in scores
@@ -300,6 +488,8 @@ def main() -> int:
         }
         out_path = Path(args.pass1_out) / f"assessor_{assessor}.json"
         write_text_atomic(out_path, json.dumps(pass1_payload, indent=2))
+    if portfolio_scope:
+        write_portfolio_piece_report(Path(args.portfolio_piece_report), portfolio_piece_report)
     student_summaries = summaries
     known_ids = list(texts.keys())
     for assessor in assessors:

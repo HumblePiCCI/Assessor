@@ -86,6 +86,29 @@ def parse_portfolio_note_signal(note: str | None) -> dict | None:
     }
 
 
+def signal_from_portfolio_fields(score: dict | None) -> dict | None:
+    if not isinstance(score, dict):
+        return None
+    level = str(score.get("portfolio_overall_level", "") or "").strip()
+    if not level:
+        aggregation = score.get("portfolio_aggregation") or {}
+        level = str(aggregation.get("overall_level", "") or "").strip()
+    mapping = {
+        "1": 1.0,
+        "2": 2.0,
+        "3": 3.0,
+        "4": 3.6,
+        "4+": 4.2,
+    }
+    estimate = mapping.get(level)
+    if estimate is None:
+        return None
+    return {
+        "estimate": round(float(estimate), 2),
+        "reasons": ["portfolio_piece_aggregation"],
+    }
+
+
 def _score_range_for_estimate(estimate: float) -> dict:
     value = float(estimate)
     if value >= 3.45:
@@ -96,6 +119,8 @@ def _score_range_for_estimate(estimate: float) -> dict:
         return {"canonical_level": "3", "min_score": 70.0, "max_score": 79.0, "anchor_score": 74.0}
     if value >= 2.2:
         return {"canonical_level": "3", "min_score": 64.0, "max_score": 74.0, "anchor_score": 69.0}
+    if value < 1.75:
+        return {"canonical_level": "1", "min_score": 50.0, "max_score": 59.0, "anchor_score": 54.0}
     return {"canonical_level": "2", "min_score": 60.0, "max_score": 69.0, "anchor_score": 64.0}
 
 
@@ -128,7 +153,7 @@ def apply_portfolio_mode(pass1: list[dict], config: dict, scope: dict | None = N
         assessor_id = str(assessor.get("assessor_id", "")).strip()
         for score in assessor.get("scores", []):
             student_id = str(score.get("student_id", "")).strip()
-            signal = parse_portfolio_note_signal(score.get("notes"))
+            signal = signal_from_portfolio_fields(score) or parse_portfolio_note_signal(score.get("notes"))
             if signal is None:
                 continue
             score_range = _score_range_for_estimate(signal["estimate"])

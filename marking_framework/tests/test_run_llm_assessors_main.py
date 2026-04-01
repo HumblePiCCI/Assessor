@@ -294,6 +294,83 @@ def test_run_llm_assessors_uses_portfolio_metadata_for_criteria(tmp_path, monkey
     assert any("PF1" in prompt and "Cross-piece consistency" in prompt for prompt in pass1_prompts)
 
 
+def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text(
+        "Opening the Fridge\nA polished narrative about sneaking downstairs.\n\n"
+        "The Applause\nA vivid performance recount with sensory detail.\n\n"
+        "How Pointe Shoes Came To Be\nAn explanatory report about ballet shoes.",
+        encoding="utf-8",
+    )
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 6,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        if "Return ONLY valid JSON" not in prompt:
+            return {"output": [{"type": "output_text", "text": "s1"}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        if "s1::p01" in prompt:
+            text = json.dumps({"student_id": "s1::p01", "rubric_total_points": 84, "criteria_points": {}, "notes": "Strong narrative"})
+        elif "s1::p02" in prompt:
+            text = json.dumps({"student_id": "s1::p02", "rubric_total_points": 81, "criteria_points": {}, "notes": "Strong recount"})
+        else:
+            text = json.dumps({"student_id": "s1::p03", "rubric_total_points": 76, "criteria_points": {}, "notes": "Good report"})
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    portfolio_report = tmp_path / "portfolio_piece_report.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--portfolio-piece-report", str(portfolio_report),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    payload = json.loads((pass1_out / "assessor_A.json").read_text(encoding="utf-8"))
+    item = payload["scores"][0]
+    assert item["student_id"] == "s1"
+    assert item["portfolio_piece_count"] == 3
+    assert item["portfolio_overall_level"] == "4"
+    assert len(item["portfolio_piece_scores"]) == 3
+    report = json.loads(portfolio_report.read_text(encoding="utf-8"))
+    assert report["enabled"] is True
+    assert report["students"]["s1"]["piece_count"] == 3
+    pass2_prompts = [prompt for prompt in prompts if "Rank the students best to worst." in prompt]
+    assert any("Opening the Fridge" in prompt and "The Applause" in prompt for prompt in pass2_prompts)
+
+
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
@@ -832,7 +909,7 @@ def test_run_llm_assessors_min_coverage_gate_fails(tmp_path, monkeypatch):
 
     def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
         prompt = messages[0]["content"]
-        if "Score this student" in prompt:
+        if "Return ONLY valid JSON" in prompt:
             return {"output": [{"type": "output_text", "text": "not json"}], "usage": {}}
         return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s1"]})}], "usage": {}}
 
