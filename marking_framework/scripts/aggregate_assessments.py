@@ -29,6 +29,7 @@ try:
         write_ranked_list,
     )
     from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report
+    from scripts.portfolio_aggregation import apply_portfolio_mode, write_report as write_portfolio_report
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import (  # pragma: no cover
         apply_bias_correction,  # pragma: no cover
@@ -55,8 +56,18 @@ except ImportError:  # pragma: no cover - Running as a script
         write_ranked_list,  # pragma: no cover
     )
     from boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report  # pragma: no cover
+    from portfolio_aggregation import apply_portfolio_mode, write_report as write_portfolio_report  # pragma: no cover
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to marking_config.json")
@@ -71,11 +82,15 @@ def main() -> int:
     parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
     parser.add_argument("--grade-profiles", default="config/grade_level_profiles.json", help="Grade level profiles JSON")
     parser.add_argument("--boundary-report", default="outputs/boundary_calibration_report.json", help="Boundary calibration report JSON")
+    parser.add_argument("--portfolio-report", default="outputs/portfolio_mode_report.json", help="Portfolio scoring mode report JSON")
     args = parser.parse_args()
     config = load_config(Path(args.config), logger)
+    scope = load_scope_context(Path(args.class_metadata), Path(args.grade_profiles))
     pass1 = read_pass1(Path(args.pass1), logger)
     pass2 = read_pass2(Path(args.pass2), logger)
     conventions = read_conventions_report(Path(args.conventions), logger)
+    pass1, portfolio_report = apply_portfolio_mode(pass1, config, scope)
+    write_portfolio_report(Path(args.portfolio_report), portfolio_report)
     student_ids = set()
     for assessor in pass1:
         for score in assessor.get("scores", []):
@@ -186,6 +201,13 @@ def main() -> int:
     logger.info(f"  Mean rubric SD: {irr['mean_rubric_sd']:.2f}")
     logger.info(f"  Mean rank SD: {irr['mean_rank_sd']:.2f}")
     weights = config.get("weights", {})
+    if scope.get("is_portfolio"):
+        portfolio_weights = config.get("portfolio_mode", {}).get("weights", {})
+        weights = {
+            "rubric": portfolio_weights.get("rubric", weights.get("rubric", 0.70)),
+            "conventions": portfolio_weights.get("conventions", weights.get("conventions", 0.15)),
+            "comparative": portfolio_weights.get("comparative", weights.get("comparative", 0.15)),
+        }
     rubric_w = weights.get("rubric", 0.70)
     conv_w = weights.get("conventions", 0.15)
     comp_w = weights.get("comparative", 0.15)
@@ -194,6 +216,10 @@ def main() -> int:
     mistake_rate_threshold = conventions_config.get("mistake_rate_threshold", 0.07)
     max_level_drop = conventions_config.get("max_level_drop", 1)
     missing_data_mistake_rate_percent = conventions_config.get("missing_data_mistake_rate_percent", 100.0)
+    if scope.get("is_portfolio"):
+        portfolio_cfg = config.get("portfolio_mode", {})
+        mistake_rate_threshold += (_safe_float(portfolio_cfg.get("conventions_threshold_bonus_percent"), 0.0) / 100.0)
+        max_level_drop = float(max_level_drop) * max(0.0, _safe_float(portfolio_cfg.get("max_level_drop_scale"), 1.0))
     modifier_bands = conventions_config.get(
         "modifier_bands",
         [
@@ -208,6 +234,11 @@ def main() -> int:
     logger.info(f"Weighting: rubric={rubric_w}, conventions={conv_w}, comparative={comp_w}")
     logger.info(f"Conventions penalty: mistake_rate_threshold={mistake_rate_threshold}, max_level_drop={max_level_drop}")
     logger.info(f"Level bands: {', '.join([b['level'] for b in level_bands])}")
+    if portfolio_report.get("enabled"):
+        logger.info(
+            "Portfolio mode normalized %s assessor score(s)",
+            portfolio_report.get("applied", 0),
+        )
     rows = []
     conventions_penalties_applied = 0
     for sid in student_ids:
@@ -250,6 +281,7 @@ def main() -> int:
         composite = (rubric_w * (rubric_after_penalty / 100.0)) + (conv_w * conv_component) + (comp_w * borda_percent)
 
         rank_sd = stdev(rankings_by_student.get(sid, []))
+        portfolio_summary = portfolio_report.get("student_summaries", {}).get(sid, {})
 
         flags = []
         if rubric_sd_points >= config.get("consensus", {}).get("rubric_sd_threshold", 0.8):
@@ -262,6 +294,8 @@ def main() -> int:
             flags.append("missing_rank")
         if not rubric_scores:
             flags.append("missing_rubric")
+        if portfolio_summary.get("note_votes", 0):
+            flags.append("portfolio_mode")
         if conventions_penalty_applied:
             flags.append("conventions_penalty")
 
@@ -293,6 +327,9 @@ def main() -> int:
                 "adjusted_letter": adjusted_letter,
                 "level_modifier": level_modifier,
                 "level_with_modifier": level_with_modifier,
+                "portfolio_note_estimate": portfolio_summary.get("note_estimate_mean", ""),
+                "portfolio_note_level": portfolio_summary.get("note_canonical_level", ""),
+                "portfolio_note_votes": portfolio_summary.get("note_votes", 0),
                 "flags": ";".join(flags),
                 "_level_order": float(adjusted_band.get("min", -1.0) if adjusted_band else (base_band.get("min", -1.0) if base_band else -1.0)),
                 "_composite_bucket": round(composite, 3),
@@ -303,7 +340,6 @@ def main() -> int:
     if conventions_penalties_applied > 0:
         logger.warning(f"Conventions penalty applied to {conventions_penalties_applied} student(s)")
 
-    scope = load_scope_context(Path(args.class_metadata), Path(args.grade_profiles))
     rows, boundary_report = apply_boundary_calibration(rows, config, scope)
     write_report(Path(args.boundary_report), boundary_report)
     if boundary_report.get("movement_count", 0):

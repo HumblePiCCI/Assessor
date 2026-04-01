@@ -175,6 +175,102 @@ def test_aggregate_assessments_boundary_calibration_report(tmp_path, monkeypatch
     assert report["scope"]["is_early_grade_narrative"] is True
 
 
+def test_aggregate_assessments_portfolio_mode_normalizes_scores(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+    (tmp_path / "inputs").mkdir(parents=True)
+    (tmp_path / "config").mkdir(parents=True)
+
+    config = {
+        "weights": {"rubric": 0.7, "conventions": 0.15, "comparative": 0.15},
+        "portfolio_mode": {
+            "enabled": True,
+            "note_clamp_threshold": 4.0,
+            "conventions_threshold_bonus_percent": 5.0,
+            "max_level_drop_scale": 0.35,
+            "weights": {"rubric": 0.78, "conventions": 0.17, "comparative": 0.05},
+        },
+        "consensus": {"rank_disagreement_threshold": 3, "rubric_sd_threshold": 0.8},
+        "rubric": {"points_possible": 100},
+        "conventions": {"mistake_rate_threshold": 0.15, "max_level_drop": 0.5, "missing_data_mistake_rate_percent": 100.0},
+        "boundary_calibration": {"enabled": False},
+        "levels": {
+            "bands": [
+                {"level": "1", "min": 50, "max": 59, "letter": "D"},
+                {"level": "2", "min": 60, "max": 69, "letter": "C"},
+                {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                {"level": "4", "min": 80, "max": 89, "letter": "A"},
+            ]
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    (tmp_path / "inputs/class_metadata.json").write_text(
+        json.dumps({"assessment_unit": "portfolio", "grade_numeric_equivalent": 2, "genre_form": "mixed writing portfolio"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "config/grade_level_profiles.json").write_text(json.dumps({"grade_2": {}}), encoding="utf-8")
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    for assessor, top_score in [("a", 39.15), ("b", 35.71), ("c", 38.52)]:
+        write_pass1(
+            pass1_dir,
+            assessor,
+            [
+                {
+                    "student_id": "s1",
+                    "rubric_total_points": top_score,
+                    "notes": "Overall working at/near greater depth: a strong portfolio showing varied purposes and above expected standard.",
+                },
+                {
+                    "student_id": "s2",
+                    "rubric_total_points": 63.33,
+                    "notes": "Overall working towards expected standard.",
+                },
+            ],
+        )
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["a", "b", "c"]:
+        write_pass2(pass2_dir, assessor, ["s1", "s2"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(
+        conv_path,
+        [
+            {"student_id": "s1", "word_count": 1000, "mistake_rate_percent": 8.0},
+            {"student_id": "s2", "word_count": 500, "mistake_rate_percent": 16.0},
+        ],
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    portfolio_report_path = tmp_path / "outputs/portfolio_mode_report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "agg",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--portfolio-report",
+            str(portfolio_report_path),
+        ],
+    )
+    assert agg.main() == 0
+
+    rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
+    s1 = next(row for row in rows if row["student_id"] == "s1")
+    assert s1["adjusted_level"] == "4"
+    assert s1["portfolio_note_level"] == "4"
+    assert s1["portfolio_note_votes"] == "3"
+    report = json.loads(portfolio_report_path.read_text(encoding="utf-8"))
+    assert report["applied"] == 3
+    assert report["student_summaries"]["s1"]["note_canonical_level"] == "4"
+
+
 def test_aggregate_assessments_missing_data(tmp_path, monkeypatch):
     (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
     (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)

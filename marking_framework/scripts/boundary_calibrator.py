@@ -101,8 +101,35 @@ def _apply_level_modifier(level: str, modifier: str) -> str:
 
 def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | None = None) -> tuple[list[dict], dict]:
     calibration_cfg = (config or {}).get("boundary_calibration", {}) if isinstance(config, dict) else {}
+    scope = scope or {}
     if not calibration_cfg.get("enabled", False) or not rows:
-        return rows, {"enabled": False, "applied": 0, "movements": [], "scope": scope or {}}
+        return rows, {"enabled": False, "applied": 0, "movements": [], "scope": scope}
+    if scope.get("is_portfolio"):
+        updated = []
+        for row in rows:
+            updated_row = dict(row)
+            current_score = round(_num(row.get("rubric_after_penalty_percent"), 0.0), 2)
+            updated_row.setdefault("pre_boundary_calibration_percent", current_score)
+            updated_row.setdefault("boundary_calibrated_percent", current_score)
+            updated_row.setdefault("boundary_calibration_delta", 0.0)
+            updated_row.setdefault("boundary_calibration_reason", "")
+            updated_row.setdefault("boundary_calibration_capped", "false")
+            updated.append(updated_row)
+        return updated, {
+            "enabled": True,
+            "applied": 0,
+            "movement_count": 0,
+            "scope": {
+                "grade_level": scope.get("grade_level"),
+                "genre": scope.get("genre"),
+                "is_portfolio": True,
+                "is_early_grade_narrative": bool(scope.get("is_early_grade_narrative")),
+            },
+            "config": {
+                "mode": "skipped_for_portfolio_scope",
+            },
+            "movements": [],
+        }
 
     level_bands = get_level_bands(config if isinstance(config, dict) else {})
     level_map = _level_order_map(level_bands)
@@ -118,26 +145,11 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     severe_max_adjustment = _num(calibration_cfg.get("severe_collapse_max_adjustment_percent"), 14.0)
     top_boundary_margin = _num(calibration_cfg.get("top_boundary_margin_percent"), 6.0)
     early_bonus = _num(calibration_cfg.get("early_grade_narrative_boundary_bonus_percent"), 2.0)
-    portfolio_bonus = _num(calibration_cfg.get("portfolio_boundary_bonus_percent"), 1.5)
-    portfolio_min_rubric = _num(calibration_cfg.get("portfolio_min_rubric_percent"), 60.0)
-    portfolio_floor = _num(calibration_cfg.get("portfolio_target_floor_percent"), floor_level_3)
     default_max_adjustment = _num(calibration_cfg.get("max_score_adjustment_percent"), 8.0)
     severe_gap_levels = int(_num(calibration_cfg.get("severe_gap_levels"), 2))
 
-    scope = scope or {}
-    grade_level = scope.get("grade_level")
     n_students = len(rows)
     strong_rank_limit = max(1, int(math.ceil(n_students * strong_rank_fraction)))
-    portfolio_rank_limit = max(2, strong_rank_limit)
-    if grade_level is not None and grade_level <= 2:
-        portfolio_rank_limit = max(portfolio_rank_limit, 3)
-    portfolio_borda_min = 0.35 if grade_level is not None and grade_level <= 2 else max(0.45, strong_borda_min - 0.05)
-    top_boundary_borda_min = strong_borda_min
-    if scope.get("is_portfolio"):
-        if grade_level is not None and grade_level >= 5:
-            top_boundary_borda_min = max(0.75, strong_borda_min + 0.15)
-        else:
-            top_boundary_borda_min = max(0.65, strong_borda_min)
 
     provisional = sorted(rows, key=_sort_key)
     provisional_rank_map = {row.get("student_id", ""): idx for idx, row in enumerate(provisional, start=1)}
@@ -178,24 +190,12 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
         boundary_margin = top_boundary_margin
         if scope.get("is_early_grade_narrative"):
             boundary_margin += early_bonus
-        if scope.get("is_portfolio"):
-            boundary_margin += portfolio_bonus
 
         if scope.get("is_early_grade_narrative") and provisional_rank == 1 and adjusted_level in {"1", "2"} and base_score >= 64.0:
             target_score = max(target_score, severe_floor)
             reasons.append("early_grade_narrative_floor")
 
-        if scope.get("is_portfolio"):
-            near_floor = base_score >= (portfolio_floor - 2.5) or current_score >= (portfolio_floor - 2.5)
-            portfolio_supported = provisional_rank <= portfolio_rank_limit and borda_percent >= portfolio_borda_min
-            if adjusted_level == "1" and base_score >= portfolio_min_rubric and portfolio_supported:
-                target_score = max(target_score, portfolio_floor)
-                reasons.append("portfolio_floor")
-            elif adjusted_level == "2" and near_floor and portfolio_supported:
-                target_score = max(target_score, portfolio_floor)
-                reasons.append("portfolio_floor")
-
-        top_boundary_supported = strong_support and borda_percent >= top_boundary_borda_min
+        top_boundary_supported = strong_support
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
             target_score = max(target_score, floor_level_4)
             reasons.append("top_boundary_uplift")

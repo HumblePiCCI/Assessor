@@ -22,9 +22,6 @@ def make_config() -> dict:
             "severe_collapse_target_floor_percent": 70.0,
             "severe_collapse_max_adjustment_percent": 12.0,
             "early_grade_narrative_boundary_bonus_percent": 2.0,
-            "portfolio_boundary_bonus_percent": 1.5,
-            "portfolio_min_rubric_percent": 62.0,
-            "portfolio_target_floor_percent": 70.0,
         },
         "levels": {
             "bands": [
@@ -132,7 +129,7 @@ def test_boundary_calibrator_uplifts_early_grade_narrative_boundary(tmp_path):
     assert report["scope"]["is_early_grade_narrative"] is True
 
 
-def test_boundary_calibrator_handles_portfolio_scope(tmp_path):
+def test_boundary_calibrator_ignores_portfolio_specific_moves(tmp_path):
     scope = write_scope(
         tmp_path,
         {
@@ -184,10 +181,11 @@ def test_boundary_calibrator_handles_portfolio_scope(tmp_path):
 
     updated, report = apply_boundary_calibration(rows, make_config(), scope)
     row = next(item for item in updated if item["student_id"] == "portfolio_a")
-    assert row["adjusted_level"] == "3"
-    assert row["rubric_after_penalty_percent"] == 70.0
-    assert row["boundary_calibration_reason"] in {"portfolio_floor", "severe_collapse_floor"}
+    assert row["adjusted_level"] == "2"
+    assert row["rubric_after_penalty_percent"] == 61.0
+    assert row["boundary_calibration_reason"] == ""
     assert report["scope"]["is_portfolio"] is True
+    assert report["movement_count"] == 0
 
 
 def test_boundary_calibrator_does_not_over_promote_low_support_portfolio_rows(tmp_path):
