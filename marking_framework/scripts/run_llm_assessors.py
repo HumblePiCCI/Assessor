@@ -114,7 +114,14 @@ def main() -> int:
     grade_context = build_grade_context(grade_level, profiles)
     normalized_rubric = rubric_context.get("normalized_rubric", {}) if isinstance(rubric_context.get("normalized_rubric", {}), dict) else {}
     rubric_manifest = load_rubric_json(Path(args.rubric_manifest))
-    genre = args.genre or metadata.get("genre") or metadata.get("assignment_genre") or normalized_rubric.get("genre")
+    genre = (
+        args.genre
+        or metadata.get("genre")
+        or metadata.get("assignment_genre")
+        or metadata.get("genre_form")
+        or metadata.get("assessment_unit")
+        or normalized_rubric.get("genre")
+    )
     if not genre:
         genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
     genre = normalize_genre(genre)

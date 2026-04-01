@@ -29,6 +29,8 @@ def test_load_class_metadata_missing(tmp_path):
 def test_select_grade_level():
     assert select_grade_level(7, {}) == 7
     assert select_grade_level(None, {"grade_level": "8"}) == 8
+    assert select_grade_level(None, {"grade_numeric_equivalent": "2"}) == 2
+    assert select_grade_level(None, {"grade_numeric": "4"}) == 4
     assert select_grade_level(None, {"grade_level": "bad"}) is None
 
 

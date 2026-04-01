@@ -31,6 +31,23 @@
       { "max_mistake_rate_percent": 100.0, "modifier": "--" }
     ]
   },
+  "boundary_calibration": {
+    "enabled": true,
+    "strong_rank_fraction": 0.35,
+    "strong_borda_min": 0.58,
+    "max_rank_sd": 1.75,
+    "max_rubric_sd_points": 8.5,
+    "max_score_adjustment_percent": 6.0,
+    "top_boundary_margin_percent": 4.0,
+    "severe_gap_levels": 2,
+    "severe_collapse_min_rubric_percent": 58.0,
+    "severe_collapse_target_floor_percent": 70.0,
+    "severe_collapse_max_adjustment_percent": 12.0,
+    "early_grade_narrative_boundary_bonus_percent": 2.0,
+    "portfolio_boundary_bonus_percent": 1.5,
+    "portfolio_min_rubric_percent": 62.0,
+    "portfolio_target_floor_percent": 70.0
+  },
   "levels": {
     "bands": [
       { "level": "1", "min": 50, "max": 59, "letter": "D" },

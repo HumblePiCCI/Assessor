@@ -215,6 +215,85 @@ def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch)
     assert any("SP1" in prompt and "Audience engagement" in prompt for prompt in pass1_prompts)
 
 
+def test_run_llm_assessors_uses_portfolio_metadata_for_criteria(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        rla,
+        "infer_genre_from_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not infer")),
+    )
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Portfolio writing sample", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 2,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "portfolio": {
+                        "additional_criteria": [{"id": "PF1", "name": "Cross-piece consistency", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
+        if "Return ONLY valid JSON" not in prompt:
+            text = "s1"
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(criteria_path),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    pass1_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("PF1" in prompt and "Cross-piece consistency" in prompt for prompt in pass1_prompts)
+
+
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test")

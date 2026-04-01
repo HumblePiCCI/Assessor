@@ -28,6 +28,7 @@ try:
         write_irr_metrics,
         write_ranked_list,
     )
+    from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import (  # pragma: no cover
         apply_bias_correction,  # pragma: no cover
@@ -53,6 +54,7 @@ except ImportError:  # pragma: no cover - Running as a script
         write_irr_metrics,  # pragma: no cover
         write_ranked_list,  # pragma: no cover
     )
+    from boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report  # pragma: no cover
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 def main() -> int:
@@ -66,6 +68,9 @@ def main() -> int:
     parser.add_argument("--calibration-bias", default="outputs/calibration_bias.json", help="Calibration bias JSON")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
     parser.add_argument("--scope-key", default="", help="Optional calibration scope key (e.g. grade_6_7|literary_analysis)")
+    parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
+    parser.add_argument("--grade-profiles", default="config/grade_level_profiles.json", help="Grade level profiles JSON")
+    parser.add_argument("--boundary-report", default="outputs/boundary_calibration_report.json", help="Boundary calibration report JSON")
     args = parser.parse_args()
     config = load_config(Path(args.config), logger)
     pass1 = read_pass1(Path(args.pass1), logger)
@@ -297,6 +302,19 @@ def main() -> int:
     
     if conventions_penalties_applied > 0:
         logger.warning(f"Conventions penalty applied to {conventions_penalties_applied} student(s)")
+
+    scope = load_scope_context(Path(args.class_metadata), Path(args.grade_profiles))
+    rows, boundary_report = apply_boundary_calibration(rows, config, scope)
+    write_report(Path(args.boundary_report), boundary_report)
+    if boundary_report.get("movement_count", 0):
+        logger.info(
+            "Boundary calibration applied to %s student(s) for scope grade=%s genre=%s",
+            boundary_report.get("movement_count", 0),
+            boundary_report.get("scope", {}).get("grade_level"),
+            boundary_report.get("scope", {}).get("genre"),
+        )
+    else:
+        logger.info("Boundary calibration made no score adjustments")
 
     logger.info("Sorting by composite score (weighted: rubric + conventions + comparative)")
     rows_sorted = sorted(

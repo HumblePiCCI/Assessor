@@ -344,6 +344,28 @@
         }
       ]
     },
+    "portfolio": {
+      "additional_criteria": [
+        {
+          "id": "PF1",
+          "name": "Cross-piece consistency",
+          "description": "Quality and control are sustained across the pieces included in the portfolio",
+          "weight_override": null
+        },
+        {
+          "id": "PF2",
+          "name": "Range of writing performance",
+          "description": "Portfolio demonstrates breadth of writing skill across tasks, forms, or purposes",
+          "weight_override": null
+        },
+        {
+          "id": "PF3",
+          "name": "Portfolio evidence sufficiency",
+          "description": "The collection provides enough strong evidence to justify the overall portfolio judgment",
+          "weight_override": null
+        }
+      ]
+    },
     "news_report": {
       "additional_criteria": [
         {

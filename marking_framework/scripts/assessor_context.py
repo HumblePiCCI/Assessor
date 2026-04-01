@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-from scripts.assessor_utils import load_file_text, resolve_input_path
+try:
+    from scripts.assessor_utils import load_file_text, resolve_input_path
+except ImportError:  # pragma: no cover - Support running as a script module copy
+    from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
 
 
 EXEMPLAR_SPECS = [
@@ -85,11 +88,12 @@ def load_class_metadata(path: Path) -> dict:
 def select_grade_level(explicit: int | None, metadata: dict) -> int | None:
     if explicit is not None:
         return explicit
-    try:
-        if "grade_level" in metadata:
-            return int(metadata["grade_level"])
-    except (TypeError, ValueError):
-        return None
+    for key in ("grade_level", "grade_numeric_equivalent", "grade_numeric"):
+        try:
+            if key in metadata:
+                return int(metadata[key])
+        except (TypeError, ValueError):
+            continue
     return None
 
 
@@ -153,6 +157,8 @@ def normalize_genre(value: str | None) -> str | None:
     if not value:
         return None
     lowered = value.strip().lower()
+    if "portfolio" in lowered:
+        return "portfolio"
     for key, aliases in GENRE_ALIASES.items():
         if lowered == key or lowered in aliases:
             return CANONICAL_GENRE_MAP.get(key, key)
