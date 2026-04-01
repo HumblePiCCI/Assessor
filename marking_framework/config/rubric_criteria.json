@@ -146,6 +146,50 @@
   },
 
   "genre_specific_criteria": {
+    "narrative": {
+      "additional_criteria": [
+        {
+          "id": "N1",
+          "name": "Narrative development",
+          "description": "Development of events, characters, and setting into a coherent story",
+          "weight_override": null
+        },
+        {
+          "id": "N2",
+          "name": "Sequencing and pacing",
+          "description": "Clear sequencing of events with effective pacing and transitions",
+          "weight_override": null
+        },
+        {
+          "id": "N3",
+          "name": "Voice and detail",
+          "description": "Use of detail, voice, and reflection to make the writing engaging and meaningful",
+          "weight_override": null
+        }
+      ]
+    },
+    "book_review": {
+      "additional_criteria": [
+        {
+          "id": "BR1",
+          "name": "Judgment and recommendation",
+          "description": "Clear opinion about the book and a convincing recommendation or critique",
+          "weight_override": null
+        },
+        {
+          "id": "BR2",
+          "name": "Support from the text",
+          "description": "Use of specific details from the book to support judgments",
+          "weight_override": null
+        },
+        {
+          "id": "BR3",
+          "name": "Audience awareness",
+          "description": "Writing anticipates what another reader would want to know before reading the book",
+          "weight_override": null
+        }
+      ]
+    },
     "literary_analysis": {
       "additional_criteria": [
         {
@@ -208,6 +252,94 @@
           "id": "IR3",
           "name": "Source integration",
           "description": "Attribution and integration of sources",
+          "weight_override": null
+        }
+      ]
+    },
+    "informative_letter": {
+      "additional_criteria": [
+        {
+          "id": "IL1",
+          "name": "Purpose clarity",
+          "description": "Clear statement of purpose and relevant context for the reader",
+          "weight_override": null
+        },
+        {
+          "id": "IL2",
+          "name": "Information selection",
+          "description": "Selection of relevant and sufficient facts, examples, or explanations",
+          "weight_override": null
+        },
+        {
+          "id": "IL3",
+          "name": "Tone and audience fit",
+          "description": "Tone, format, and explanations are appropriate for the intended recipient",
+          "weight_override": null
+        }
+      ]
+    },
+    "summary_report": {
+      "additional_criteria": [
+        {
+          "id": "SR1",
+          "name": "Main idea capture",
+          "description": "Captures the central idea and most important supporting points accurately",
+          "weight_override": null
+        },
+        {
+          "id": "SR2",
+          "name": "Accuracy and concision",
+          "description": "Accurate summary with concise selection of information and minimal distortion",
+          "weight_override": null
+        },
+        {
+          "id": "SR3",
+          "name": "Paraphrase and synthesis",
+          "description": "Uses the writer's own words while combining ideas into a coherent summary",
+          "weight_override": null
+        }
+      ]
+    },
+    "instructions": {
+      "additional_criteria": [
+        {
+          "id": "IN1",
+          "name": "Procedural completeness",
+          "description": "Includes the materials, conditions, and steps needed to complete the task",
+          "weight_override": null
+        },
+        {
+          "id": "IN2",
+          "name": "Sequence clarity",
+          "description": "Steps are ordered clearly so the procedure can be followed accurately",
+          "weight_override": null
+        },
+        {
+          "id": "IN3",
+          "name": "Precision and safety",
+          "description": "Language is precise and includes cautions, measurements, or safety details when needed",
+          "weight_override": null
+        }
+      ]
+    },
+    "speech": {
+      "additional_criteria": [
+        {
+          "id": "SP1",
+          "name": "Audience engagement",
+          "description": "Language, examples, and appeals are shaped for the intended audience",
+          "weight_override": null
+        },
+        {
+          "id": "SP2",
+          "name": "Rhetorical effectiveness",
+          "description": "Uses persuasive or rhetorical choices effectively to strengthen the speech",
+          "weight_override": null
+        },
+        {
+          "id": "SP3",
+          "name": "Speech structure",
+          "description": "Opening, development, and closing work together as an effective speech",
           "weight_override": null
         }
       ]

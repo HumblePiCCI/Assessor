@@ -163,9 +163,29 @@ def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch)
     )
     (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
     (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "speech": {
+                        "additional_criteria": [{"id": "SP1", "name": "Audience engagement", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
 
     def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
         prompt = messages[0]["content"]
+        prompts.append(prompt)
         text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
         if "Return ONLY valid JSON" not in prompt:
             text = "s1"
@@ -182,15 +202,17 @@ def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch)
             "--routing", str(tmp_path / "routing.json"),
             "--rubric", str(tmp_path / "rubric.md"),
             "--outline", str(tmp_path / "outline.md"),
-            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--rubric-criteria", str(criteria_path),
             "--pass1-out", str(pass1_out),
             "--pass2-out", str(pass2_out),
             "--assessors", "A",
-            "--genre", "argumentative",
+            "--genre", "speech",
             "--ignore-cost-limits",
         ],
     )
     assert rla.main() == 0
+    pass1_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("SP1" in prompt and "Audience engagement" in prompt for prompt in pass1_prompts)
 
 
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):

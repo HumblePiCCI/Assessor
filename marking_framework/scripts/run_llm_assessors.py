@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.assessor_context import (
-    build_grade_context, format_exemplars, grade_band_for_level, infer_genre_from_text, load_class_metadata,
-    load_exemplars, load_grade_profiles, normalize_genre, resolve_exemplars_dir, select_grade_level,
+    build_grade_context, format_exemplars, infer_genre_from_text, load_class_metadata, load_exemplars,
+    load_grade_profiles, normalize_genre, resolve_exemplar_selection, select_grade_level,
 )
 from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria
 from scripts.assessor_utils import extract_docx_text, load_file_text, normalize_ranking_ids, resolve_input_path, summarize_text
@@ -38,6 +38,19 @@ def ranking_from_scores(scores: dict, known_ids: list) -> list:
     ranked = [(sid, float(scores.get(sid, 0.0) or 0.0)) for sid in known_ids]
     ranked.sort(key=lambda item: (-item[1], item[0].lower()))
     return [sid for sid, _ in ranked]
+
+
+def guard_bias_for_exemplar_scope(match_quality: str | None, score_delta: float, level_gap: int, anchor_blend: float) -> tuple[float, int, float]:
+    quality = str(match_quality or "").strip().lower()
+    if quality == "exact_scope":
+        return float(score_delta), int(level_gap), float(anchor_blend)
+    if quality in {"band_fallback", "genre_library", "genre_library_fallback"}:
+        return max(float(score_delta), 8.0), max(int(level_gap), 2), min(float(anchor_blend), 0.12)
+    if quality in {"cross_band", "root_library", "missing"}:
+        return max(float(score_delta), 12.0), max(int(level_gap), 2), 0.0
+    return float(score_delta), int(level_gap), float(anchor_blend)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run LLM assessors for Pass 1 and Pass 2")
     parser.add_argument("--texts", default="processing/normalized_text", help="Normalized text directory")
@@ -107,13 +120,22 @@ def main() -> int:
     genre = normalize_genre(genre)
     base_exemplars = Path(args.exemplars)
     exemplars_dir = base_exemplars
+    exemplar_selection = {
+        "path": base_exemplars,
+        "requested_band": None,
+        "requested_genre": genre,
+        "selected_band": None,
+        "selected_genre": None,
+        "match_quality": "custom",
+    }
     if str(args.exemplars) == "inputs/exemplars":
-        exemplars_dir = resolve_exemplars_dir(base_exemplars, grade_level, genre)
+        exemplar_selection = resolve_exemplar_selection(base_exemplars, grade_level, genre)
+        exemplars_dir = exemplar_selection["path"]
     exemplars = load_exemplars(exemplars_dir)
     exemplar_block = format_exemplars(exemplars)
     criteria_cfg = load_rubric_criteria(Path(args.rubric_criteria))
-    criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
-    required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
+    criteria_block = criteria_prompt(criteria_cfg, genre) if criteria_cfg else ""
+    required_ids = criteria_ids(criteria_cfg, genre) if criteria_cfg else []
     reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
     require_evidence = bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False))
     if reqs and require_evidence:
@@ -227,8 +249,14 @@ def main() -> int:
                         raise ValueError("Pass1 response missing numeric rubric_total_points.")
                     item = reconcile_pass1_item(item, required_ids)
                     if guard_enabled:
+                        scope_delta, scope_gap, scope_blend = guard_bias_for_exemplar_scope(
+                            exemplar_selection.get("match_quality"),
+                            guard_max_score_delta,
+                            guard_max_level_gap,
+                            guard_anchor_blend,
+                        )
                         dyn_delta, dyn_gap, dyn_blend = guard_parameters(
-                            item, guard_max_score_delta, guard_max_level_gap, guard_anchor_blend
+                            item, scope_delta, scope_gap, scope_blend
                         )
                         item = stabilize_pass1_item(item, anchor_item, dyn_delta, dyn_gap, dyn_blend)
                     item = strip_internal_fields(item)

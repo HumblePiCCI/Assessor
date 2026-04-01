@@ -91,6 +91,12 @@ def test_run_llm_assessors_helper_functions(tmp_path):
     assert missing_path == inputs / "nope.md"
 
 
+def test_guard_bias_for_exemplar_scope_reduces_anchor_on_weak_match():
+    assert rla.guard_bias_for_exemplar_scope("exact_scope", 5.0, 1, 0.35) == (5.0, 1, 0.35)
+    assert rla.guard_bias_for_exemplar_scope("genre_library", 5.0, 1, 0.35) == (8.0, 2, 0.12)
+    assert rla.guard_bias_for_exemplar_scope("cross_band", 5.0, 1, 0.35) == (12.0, 2, 0.0)
+
+
 def test_runtime_rubric_context_prefers_normalized_contract(tmp_path):
     rubric = tmp_path / "rubric.md"
     rubric.write_text("Ideas and analysis\nLevel 4 80-100", encoding="utf-8")
