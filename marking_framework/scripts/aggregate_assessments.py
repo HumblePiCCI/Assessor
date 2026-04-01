@@ -29,7 +29,11 @@ try:
         write_ranked_list,
     )
     from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report
-    from scripts.portfolio_aggregation import apply_portfolio_mode, write_report as write_portfolio_report
+    from scripts.portfolio_aggregation import (
+        apply_portfolio_mode,
+        apply_portfolio_scale_calibration,
+        write_report as write_portfolio_report,
+    )
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import (  # pragma: no cover
         apply_bias_correction,  # pragma: no cover
@@ -56,7 +60,11 @@ except ImportError:  # pragma: no cover - Running as a script
         write_ranked_list,  # pragma: no cover
     )
     from boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report  # pragma: no cover
-    from portfolio_aggregation import apply_portfolio_mode, write_report as write_portfolio_report  # pragma: no cover
+    from portfolio_aggregation import (  # pragma: no cover
+        apply_portfolio_mode,  # pragma: no cover
+        apply_portfolio_scale_calibration,  # pragma: no cover
+        write_report as write_portfolio_report,  # pragma: no cover
+    )
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -90,7 +98,6 @@ def main() -> int:
     pass2 = read_pass2(Path(args.pass2), logger)
     conventions = read_conventions_report(Path(args.conventions), logger)
     pass1, portfolio_report = apply_portfolio_mode(pass1, config, scope)
-    write_portfolio_report(Path(args.portfolio_report), portfolio_report)
     student_ids = set()
     for assessor in pass1:
         for score in assessor.get("scores", []):
@@ -339,6 +346,16 @@ def main() -> int:
     
     if conventions_penalties_applied > 0:
         logger.warning(f"Conventions penalty applied to {conventions_penalties_applied} student(s)")
+
+    rows, portfolio_scale_report = apply_portfolio_scale_calibration(rows, config, scope, level_bands)
+    if portfolio_report.get("enabled"):
+        portfolio_report["scale_calibration"] = portfolio_scale_report
+    write_portfolio_report(Path(args.portfolio_report), portfolio_report)
+    if portfolio_scale_report.get("applied", 0):
+        logger.info(
+            "Portfolio ordinal-scale calibration adjusted %s student(s)",
+            portfolio_scale_report.get("applied", 0),
+        )
 
     rows, boundary_report = apply_boundary_calibration(rows, config, scope)
     write_report(Path(args.boundary_report), boundary_report)

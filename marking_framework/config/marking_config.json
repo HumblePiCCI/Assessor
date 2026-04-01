@@ -50,6 +50,18 @@
     "note_clamp_threshold": 4.0,
     "conventions_threshold_bonus_percent": 5.0,
     "max_level_drop_scale": 0.35,
+    "ordinal_scale_calibration": {
+      "enabled": true,
+      "top_fraction": 0.25,
+      "bottom_fraction": 0.25,
+      "top_min_percent": 74.0,
+      "middle_min_percent": 66.0,
+      "early_grade_top_min_percent": 72.0,
+      "early_grade_middle_min_percent": 63.25,
+      "bottom_max_percent": 70.0,
+      "max_rank_sd": 1.5,
+      "band_floor_offset_percent": 1.5
+    },
     "weights": {
       "rubric": 0.78,
       "conventions": 0.17,

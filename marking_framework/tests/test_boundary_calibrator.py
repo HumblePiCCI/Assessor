@@ -136,6 +136,11 @@ def test_boundary_calibrator_ignores_portfolio_specific_moves(tmp_path):
             "assessment_unit": "portfolio",
             "grade_numeric_equivalent": 2,
             "genre_form": "mixed writing portfolio",
+            "sample_count": 3,
+            "scoring_scale": {
+                "type": "ordinal",
+                "labels": ["WTS", "EXS", "GDS"],
+            },
         },
     )
     rows = [
@@ -186,6 +191,7 @@ def test_boundary_calibrator_ignores_portfolio_specific_moves(tmp_path):
     assert row["boundary_calibration_reason"] == ""
     assert report["scope"]["is_portfolio"] is True
     assert report["movement_count"] == 0
+    assert scope["is_small_ordinal_portfolio"] is True
 
 
 def test_boundary_calibrator_does_not_over_promote_low_support_portfolio_rows(tmp_path):

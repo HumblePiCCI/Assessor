@@ -138,6 +138,183 @@ def _student_summary(votes: list[dict]) -> dict:
     }
 
 
+def _level_value(level: str) -> int:
+    token = str(level or "").strip().replace("+", "")
+    try:
+        return int(token)
+    except ValueError:
+        return 0
+
+
+def _three_band_counts(count: int, top_fraction: float, bottom_fraction: float) -> tuple[int, int, int]:
+    if count <= 0:
+        return 0, 0, 0
+    if count == 1:
+        return 0, 1, 0
+    if count == 2:
+        return 1, 0, 1
+    top = max(1, int(round(count * max(0.0, top_fraction))))
+    bottom = max(1, int(round(count * max(0.0, bottom_fraction))))
+    while top + bottom >= count and (top > 1 or bottom > 1):
+        if top >= bottom and top > 1:
+            top -= 1
+        elif bottom > 1:
+            bottom -= 1
+    middle = count - top - bottom
+    if middle <= 0:
+        middle = 1
+        if top >= bottom and top > 1:
+            top -= 1
+        elif bottom > 1:
+            bottom -= 1
+    return top, middle, bottom
+
+
+def _band_for_level(level_bands: list[dict], level: str) -> dict | None:
+    token = str(level or "").strip()
+    for band in level_bands:
+        if str(band.get("level", "")).strip() == token:
+            return band
+    return None
+
+
+def _project_score_to_band(current_score: float, band: dict | None, floor_offset: float) -> float:
+    if not band:
+        return round(float(current_score), 2)
+    band_min = _num(band.get("min"), current_score)
+    band_max = _num(band.get("max"), current_score)
+    offset = max(0.5, float(floor_offset or 0.0))
+    if current_score < band_min:
+        return round(min(band_max, band_min + offset), 2)
+    if current_score > band_max:
+        return round(max(band_min, band_max - offset), 2)
+    return round(float(current_score), 2)
+
+
+def _portfolio_sort_key(row: dict) -> tuple:
+    return (
+        -_num(row.get("_level_order"), -1.0),
+        -_num(row.get("_composite_bucket"), 0.0),
+        -_num(row.get("_borda_bucket"), 0.0),
+        -_num(row.get("rubric_after_penalty_percent"), 0.0),
+        _num(row.get("conventions_mistake_rate_percent"), 100.0),
+        str(row.get("student_id", "")).lower(),
+    )
+
+
+def apply_portfolio_scale_calibration(
+    rows: list[dict],
+    config: dict,
+    scope: dict | None,
+    level_bands: list[dict],
+) -> tuple[list[dict], dict]:
+    scope = scope or {}
+    portfolio_cfg = (config or {}).get("portfolio_mode", {}) if isinstance(config, dict) else {}
+    scale_cfg = portfolio_cfg.get("ordinal_scale_calibration", {}) if isinstance(portfolio_cfg, dict) else {}
+    if not scale_cfg.get("enabled", True):
+        return rows, {"enabled": False, "applied": 0, "reason": "disabled"}
+    if not scope.get("is_small_ordinal_portfolio"):
+        return rows, {"enabled": False, "applied": 0, "reason": "scope_not_eligible"}
+    if len(rows) < 3:
+        return rows, {"enabled": False, "applied": 0, "reason": "insufficient_cohort"}
+
+    sorted_rows = [dict(row) for row in sorted(rows, key=_portfolio_sort_key)]
+    top_count, middle_count, bottom_count = _three_band_counts(
+        len(sorted_rows),
+        _num(scale_cfg.get("top_fraction"), 0.25),
+        _num(scale_cfg.get("bottom_fraction"), 0.25),
+    )
+    target_levels = {}
+    for idx, row in enumerate(sorted_rows, start=1):
+        if idx <= top_count:
+            target_levels[str(row.get("student_id", "")).strip()] = "4"
+        elif idx > len(sorted_rows) - bottom_count:
+            target_levels[str(row.get("student_id", "")).strip()] = "2"
+        else:
+            target_levels[str(row.get("student_id", "")).strip()] = "3"
+
+    early_grade = bool(scope.get("grade_level") is not None and int(scope.get("grade_level")) <= 3)
+    top_min_percent = _num(scale_cfg.get("early_grade_top_min_percent" if early_grade else "top_min_percent"), 74.0 if not early_grade else 72.0)
+    middle_min_percent = _num(scale_cfg.get("early_grade_middle_min_percent" if early_grade else "middle_min_percent"), 66.0 if not early_grade else 63.25)
+    bottom_max_percent = _num(scale_cfg.get("bottom_max_percent"), 70.0)
+    max_rank_sd = _num(scale_cfg.get("max_rank_sd"), 1.5)
+    floor_offset = _num(scale_cfg.get("band_floor_offset_percent"), 1.5)
+
+    updated = []
+    movements = []
+    top_ids = {
+        str(row.get("student_id", "")).strip()
+        for idx, row in enumerate(sorted_rows, start=1)
+        if idx <= top_count
+    }
+    for row in rows:
+        updated_row = dict(row)
+        student_id = str(row.get("student_id", "")).strip()
+        current_level = str(row.get("adjusted_level", "") or "").strip()
+        current_score = _num(row.get("rubric_after_penalty_percent"), 0.0)
+        rubric_mean = _num(row.get("rubric_mean_percent"), current_score)
+        rank_sd = _num(row.get("rank_sd"), 0.0)
+        note_votes = int(_num(row.get("portfolio_note_votes"), 0))
+        current_value = _level_value(current_level)
+        target_level = target_levels.get(student_id, "")
+        if student_id not in top_ids and current_value <= 2 and rubric_mean >= middle_min_percent:
+            target_level = "3"
+        target_value = _level_value(target_level)
+        eligible = bool(target_level and note_votes > 0 and rank_sd <= max_rank_sd)
+        if target_level == "4":
+            eligible = eligible and rubric_mean >= top_min_percent
+        elif target_level == "3" and current_value < target_value:
+            eligible = eligible and rubric_mean >= middle_min_percent
+        elif target_level == "2" and current_value > target_value:
+            eligible = eligible and rubric_mean <= bottom_max_percent
+
+        if eligible and target_level and current_level != target_level and abs(target_value - current_value) <= 1:
+            band = _band_for_level(level_bands, target_level)
+            projected_score = _project_score_to_band(current_score, band, floor_offset)
+            updated_row["rubric_after_penalty_percent"] = projected_score
+            updated_row["adjusted_level"] = target_level
+            updated_row["adjusted_letter"] = str((band or {}).get("letter", "") or "")
+            updated_row["_level_order"] = _num((band or {}).get("min"), updated_row.get("_level_order", 0.0))
+            modifier = str(updated_row.get("level_modifier", "") or "").strip()
+            if target_level.endswith("+") and modifier in {"", "+"}:
+                updated_row["level_with_modifier"] = target_level
+            else:
+                updated_row["level_with_modifier"] = f"{target_level}{modifier}"
+            updated_row["portfolio_scale_target_level"] = target_level
+            updated_row["portfolio_scale_adjusted"] = "true"
+            updated_row["portfolio_scale_reason"] = "ordinal_portfolio_rank_projection"
+            flags = [item for item in str(updated_row.get("flags", "") or "").split(";") if item]
+            if "portfolio_scale_calibration" not in flags:
+                flags.append("portfolio_scale_calibration")
+            updated_row["flags"] = ";".join(flags)
+            movements.append(
+                {
+                    "student_id": student_id,
+                    "from_level": current_level,
+                    "to_level": target_level,
+                    "from_score": round(current_score, 2),
+                    "to_score": projected_score,
+                }
+            )
+        else:
+            updated_row.setdefault("portfolio_scale_target_level", target_level)
+            updated_row.setdefault("portfolio_scale_adjusted", "false")
+            updated_row.setdefault("portfolio_scale_reason", "")
+        updated.append(updated_row)
+
+    return updated, {
+        "enabled": True,
+        "applied": len(movements),
+        "bucket_counts": {"top": top_count, "middle": middle_count, "bottom": bottom_count},
+        "movements": movements,
+        "scope": {
+            "grade_level": scope.get("grade_level"),
+            "genre": scope.get("genre"),
+            "is_small_ordinal_portfolio": bool(scope.get("is_small_ordinal_portfolio")),
+        },
+    }
+
+
 def apply_portfolio_mode(pass1: list[dict], config: dict, scope: dict | None = None) -> tuple[list[dict], dict]:
     portfolio_cfg = (config or {}).get("portfolio_mode", {}) if isinstance(config, dict) else {}
     scope = scope or {}

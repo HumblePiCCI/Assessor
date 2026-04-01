@@ -48,6 +48,17 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
     is_portfolio = genre == "portfolio" or assessment_unit == "portfolio" or "portfolio" in genre_form
     is_early_grade_narrative = bool(grade_level is not None and grade_level <= 3 and genre == "narrative")
     profile = profiles.get(f"grade_{grade_level}", {}) if grade_level is not None else {}
+    scoring_scale = metadata.get("scoring_scale") if isinstance(metadata.get("scoring_scale"), dict) else {}
+    scoring_labels = scoring_scale.get("labels") if isinstance(scoring_scale.get("labels"), list) else []
+    numeric_mapping = scoring_scale.get("numeric_mapping") if isinstance(scoring_scale.get("numeric_mapping"), dict) else {}
+    scoring_scale_size = len(scoring_labels) or len(numeric_mapping)
+    scoring_scale_type = str(scoring_scale.get("type", "") or "").strip().lower()
+    small_ordinal_portfolio = bool(
+        is_portfolio
+        and scoring_scale_type == "ordinal"
+        and scoring_scale_size == 3
+        and 0 < int(_num(metadata.get("sample_count"), 0)) <= 6
+    )
     return {
         "metadata": metadata,
         "profiles": profiles,
@@ -57,6 +68,10 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
         "genre_form": genre_form,
         "is_portfolio": is_portfolio,
         "is_early_grade_narrative": is_early_grade_narrative,
+        "scoring_scale": scoring_scale,
+        "scoring_scale_type": scoring_scale_type,
+        "scoring_scale_size": scoring_scale_size,
+        "is_small_ordinal_portfolio": small_ordinal_portfolio,
         "grade_profile": profile if isinstance(profile, dict) else {},
     }
 

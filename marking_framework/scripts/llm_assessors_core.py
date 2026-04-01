@@ -331,11 +331,21 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
     return item
 
 
-def build_pass1_repair_prompt(student_id: str, raw: str, require_evidence: bool) -> str:
+def build_pass1_repair_prompt(student_id: str, raw: str, require_evidence: bool, context_prompt: str | None = None) -> str:
     base = ("You returned invalid JSON. Return ONLY valid JSON with keys "
             "student_id, rubric_total_points, criteria_points, notes")
     if require_evidence:
         base += ", criteria_evidence"
+    if context_prompt:
+        return (
+            base
+            + f'. Student ID must be "{student_id}".\n\n'
+            + "Re-score the same submission from scratch using the original context below.\n\n"
+            + context_prompt.rstrip()
+            + "\n\nPrevious invalid output:\n"
+            + raw
+            + "\n"
+        )
     return base + f'. Student ID must be "{student_id}".\n\nPrevious output:\n{raw}\n'
 
 

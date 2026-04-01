@@ -194,6 +194,8 @@ def main() -> int:
     criteria_cfg = load_rubric_criteria(Path(args.rubric_criteria))
     criteria_block = criteria_prompt(criteria_cfg, genre) if criteria_cfg else ""
     required_ids = criteria_ids(criteria_cfg, genre) if criteria_cfg else []
+    piece_criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
+    piece_required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
     reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
     require_evidence = bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False))
     if reqs and require_evidence:
@@ -303,8 +305,8 @@ def main() -> int:
                 for piece in pieces:
                     piece_key = f"{student_id}::{piece.get('piece_id')}"
                     piece_text = str(piece.get("text", "") or "")
-                    anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, required_ids, exemplars)
-                    prompt = build_portfolio_piece_prompt(
+                    anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, piece_required_ids, exemplars)
+                    base_prompt = build_portfolio_piece_prompt(
                         assessor,
                         rubric,
                         outline,
@@ -313,9 +315,10 @@ def main() -> int:
                         len(pieces),
                         grade_context,
                         exemplar_block,
-                        criteria_block,
+                        piece_criteria_block,
                         reqs,
                     )
+                    prompt = base_prompt
                     piece_item = None
                     for attempt in range(3):
                         try:
@@ -348,13 +351,13 @@ def main() -> int:
                         try:
                             if mode == "codex_local" and looks_like_prompt_echo(content, piece_key):
                                 raise ValueError("Model returned prompt echo instead of scored JSON.")
-                            piece_item = parse_pass1_item(content, piece_key, required_ids, reqs, piece_text, strict=False)
+                            piece_item = parse_pass1_item(content, piece_key, piece_required_ids, reqs, piece_text, strict=False)
                             if str(piece_item.get("student_id", "")).strip() != piece_key:
                                 raise ValueError("Pass1 response student_id mismatch.")
                             score = piece_item.get("rubric_total_points")
                             if not isinstance(score, (int, float)):
                                 raise ValueError("Pass1 response missing numeric rubric_total_points.")
-                            piece_item = strip_internal_fields(reconcile_pass1_item(piece_item, required_ids))
+                            piece_item = strip_internal_fields(reconcile_pass1_item(piece_item, piece_required_ids))
                             piece_successes += 1
                             break
                         except ValueError as exc:
@@ -371,7 +374,12 @@ def main() -> int:
                             }
                             with failure_log.open("a", encoding="utf-8") as f:
                                 f.write(json.dumps(failure) + "\n")
-                            prompt = build_pass1_repair_prompt(piece_key, content, bool(required_ids))
+                            prompt = build_pass1_repair_prompt(
+                                piece_key,
+                                content,
+                                bool(piece_required_ids),
+                                context_prompt=base_prompt,
+                            )
                     if piece_item is None:
                         if args.fallback == "deterministic":
                             piece_item = anchor_piece_item
@@ -412,6 +420,7 @@ def main() -> int:
                 criteria_block,
                 reqs,
             )
+            base_prompt = prompt
             item = None
             item_used_model = False
             for attempt in range(3):
@@ -468,7 +477,12 @@ def main() -> int:
                     }
                     with failure_log.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(failure) + "\n")
-                    prompt = build_pass1_repair_prompt(student_id, content, bool(required_ids))
+                    prompt = build_pass1_repair_prompt(
+                        student_id,
+                        content,
+                        bool(required_ids),
+                        context_prompt=base_prompt,
+                    )
             if item is None:
                 if args.fallback == "deterministic":
                     item = anchor_item

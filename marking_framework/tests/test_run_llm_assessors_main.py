@@ -321,6 +321,24 @@ def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monk
         ),
         encoding="utf-8",
     )
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "portfolio": {
+                        "additional_criteria": [{"id": "PF1", "name": "Cross-piece consistency", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     prompts = []
 
     def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
@@ -349,7 +367,7 @@ def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monk
             "--rubric", str(tmp_path / "rubric.md"),
             "--outline", str(tmp_path / "outline.md"),
             "--class-metadata", str(tmp_path / "class_metadata.json"),
-            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--rubric-criteria", str(criteria_path),
             "--pass1-out", str(pass1_out),
             "--pass2-out", str(pass2_out),
             "--portfolio-piece-report", str(portfolio_report),
@@ -367,6 +385,9 @@ def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monk
     report = json.loads(portfolio_report.read_text(encoding="utf-8"))
     assert report["enabled"] is True
     assert report["students"]["s1"]["piece_count"] == 3
+    piece_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("C1" in prompt for prompt in piece_prompts)
+    assert all("PF1" not in prompt for prompt in piece_prompts)
     pass2_prompts = [prompt for prompt in prompts if "Rank the students best to worst." in prompt]
     assert any("Opening the Fridge" in prompt and "The Applause" in prompt for prompt in pass2_prompts)
 

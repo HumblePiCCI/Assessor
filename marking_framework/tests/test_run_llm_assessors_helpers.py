@@ -31,6 +31,9 @@ def test_run_llm_assessors_helpers():
     assert "min 3 words" in prompt_with_criteria
     repair = rla.build_pass1_repair_prompt("s1", "raw", True)
     assert "criteria_evidence" in repair
+    contextual_repair = rla.build_pass1_repair_prompt("s1", "raw", False, context_prompt="Rubric:\nX\nEssay:\nY")
+    assert "Re-score the same submission from scratch" in contextual_repair
+    assert "Essay:\nY" in contextual_repair
     pass2_repair = rla.build_pass2_repair_prompt(["s1", "s2"], "raw", [])
     assert "Missing IDs:" not in pass2_repair
     assert rla.ranking_from_scores({"s1": 70, "s2": 90}, ["s1", "s2"]) == ["s2", "s1"]
