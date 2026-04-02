@@ -3,6 +3,7 @@ from pathlib import Path
 
 from scripts.assessor_context import (
     build_grade_context,
+    choose_preferred_genre,
     exemplar_genre_order,
     format_exemplars,
     resolve_exemplar_selection,
@@ -70,6 +71,13 @@ def test_infer_genre_from_text():
     assert infer_genre_from_text("Explain facts and details", "") == "informational_report"
     assert infer_genre_from_text("Analyze theme and character", "") == "literary_analysis"
     assert infer_genre_from_text("Free writing", "journal entry") is None
+
+
+def test_choose_preferred_genre_uses_more_specific_inference():
+    assert choose_preferred_genre("informational_report", "instructions") == "instructions"
+    assert choose_preferred_genre("argumentative", "informative_letter") == "informative_letter"
+    assert choose_preferred_genre("narrative", "narrative") == "narrative"
+    assert choose_preferred_genre(None, "summary report") == "summary_report"
 
 
 def test_grade_band_for_level():

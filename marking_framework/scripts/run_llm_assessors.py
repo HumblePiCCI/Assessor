@@ -8,10 +8,18 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.assessor_context import (
-    build_grade_context, format_exemplars, infer_genre_from_text, load_class_metadata, load_exemplars,
+    build_grade_context, choose_preferred_genre, format_exemplars, genre_specificity, infer_genre_from_text, load_class_metadata, load_exemplars,
     load_grade_profiles, normalize_genre, resolve_exemplar_selection, select_grade_level,
 )
-from scripts.rubric_criteria import criteria_ids, criteria_prompt, evidence_requirements, load_rubric_criteria
+from scripts.rubric_criteria import (
+    contract_criteria_ids,
+    contract_criteria_prompt,
+    contract_prompt,
+    criteria_ids,
+    criteria_prompt,
+    evidence_requirements,
+    load_rubric_criteria,
+)
 from scripts.assessor_utils import extract_docx_text, load_file_text, normalize_ranking_ids, resolve_input_path, summarize_text
 from scripts.rubric_contract import load_json as load_rubric_json, runtime_rubric_context
 from scripts.llm_assessors_core import (
@@ -96,6 +104,37 @@ def guard_bias_for_exemplar_scope(match_quality: str | None, score_delta: float,
     return float(score_delta), int(level_gap), float(anchor_blend)
 
 
+def resolve_pass1_contract(criteria_cfg: dict, genre: str | None, routing_require_evidence: bool) -> dict:
+    if not criteria_cfg:
+        return {
+            "criteria_block": "",
+            "required_ids": [],
+            "require_evidence": bool(routing_require_evidence),
+            "reqs": {},
+        }
+    criteria_block = contract_criteria_prompt(criteria_cfg, genre)
+    guidance_block = contract_prompt(criteria_cfg, genre)
+    if guidance_block:
+        criteria_block = f"{criteria_block}\n\n{guidance_block}".strip() if criteria_block else guidance_block
+    required_ids = contract_criteria_ids(criteria_cfg, genre)
+    reqs = evidence_requirements(criteria_cfg, genre)
+    require_evidence = bool(routing_require_evidence or reqs.get("force_require_evidence", False))
+    if reqs and require_evidence:
+        reqs = dict(reqs)
+        strict_evidence_contract = bool(reqs.get("preserve_validation", False) or reqs.get("hard_fail_on_evidence_errors", False))
+        if not strict_evidence_contract:
+            reqs["quote_validation"] = False
+            reqs["rationale_min_words"] = 0
+    else:
+        reqs = {}
+    return {
+        "criteria_block": criteria_block,
+        "required_ids": required_ids,
+        "require_evidence": require_evidence,
+        "reqs": reqs,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run LLM assessors for Pass 1 and Pass 2")
     parser.add_argument("--texts", default="processing/normalized_text", help="Normalized text directory")
@@ -160,17 +199,20 @@ def main() -> int:
     grade_context = build_grade_context(grade_level, profiles)
     normalized_rubric = rubric_context.get("normalized_rubric", {}) if isinstance(rubric_context.get("normalized_rubric", {}), dict) else {}
     rubric_manifest = load_rubric_json(Path(args.rubric_manifest))
-    genre = (
-        args.genre
-        or metadata.get("genre")
+    explicit_genre = normalize_genre(args.genre)
+    rubric_genre = normalize_genre(normalized_rubric.get("genre"))
+    metadata_genre = normalize_genre(
+        metadata.get("genre")
         or metadata.get("assignment_genre")
         or metadata.get("genre_form")
         or metadata.get("assessment_unit")
-        or normalized_rubric.get("genre")
     )
+    inferred_genre = None
+    if not explicit_genre and not rubric_genre and genre_specificity(metadata_genre) < 4:
+        inferred_genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
+    genre = explicit_genre or rubric_genre or choose_preferred_genre(metadata_genre, inferred_genre)
     if not genre:
-        genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
-    genre = normalize_genre(genre)
+        genre = normalize_genre(inferred_genre)
     portfolio_scope = is_portfolio_scope(metadata, genre)
     portfolio_pieces_by_student = {
         student_id: split_portfolio_pieces(text)
@@ -192,18 +234,17 @@ def main() -> int:
     exemplars = load_exemplars(exemplars_dir)
     exemplar_block = format_exemplars(exemplars)
     criteria_cfg = load_rubric_criteria(Path(args.rubric_criteria))
-    criteria_block = criteria_prompt(criteria_cfg, genre) if criteria_cfg else ""
-    required_ids = criteria_ids(criteria_cfg, genre) if criteria_cfg else []
+    contract = resolve_pass1_contract(
+        criteria_cfg,
+        genre,
+        bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False)),
+    )
+    criteria_block = contract["criteria_block"]
+    required_ids = contract["required_ids"]
     piece_criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
     piece_required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
-    reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
-    require_evidence = bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False))
-    if reqs and require_evidence:
-        reqs = dict(reqs)
-        reqs["quote_validation"] = False
-        reqs["rationale_min_words"] = 0
-    else:
-        reqs = {}
+    reqs = contract["reqs"]
+    require_evidence = contract["require_evidence"]
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
     run_scope = build_run_scope(
         metadata=metadata | {"grade_level": grade_level, "genre": genre},

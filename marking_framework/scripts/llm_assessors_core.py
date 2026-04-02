@@ -307,7 +307,8 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
                     continue
                 errors.append(f"Quote not found for {entry.get('criterion_id')}")
         if errors:
-            if strict:
+            hard_fail = bool((reqs or {}).get("hard_fail_on_evidence_errors", False))
+            if strict or hard_fail:
                 raise ValueError("Pass1 evidence invalid: " + "; ".join(errors[:5]))
             item.setdefault("warnings", [])
             item["warnings"].extend(errors)

@@ -52,6 +52,21 @@ CANONICAL_GENRE_MAP = {
     "research_report": "informational_report",
 }
 
+GENRE_SPECIFICITY = {
+    "portfolio": 5,
+    "instructions": 4,
+    "summary_report": 4,
+    "speech": 4,
+    "book_review": 4,
+    "informative_letter": 4,
+    "news_report": 4,
+    "research_report": 4,
+    "literary_analysis": 3,
+    "argumentative": 2,
+    "informational_report": 2,
+    "narrative": 2,
+}
+
 EXEMPLAR_GENRE_FALLBACKS = {
     "argumentative": ["argumentative", "informational_report", "literary_analysis", "news_report"],
     "book_review": ["literary_analysis", "informational_report", "argumentative", "news_report"],
@@ -183,6 +198,25 @@ def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
         if any(marker in merged for marker in markers):
             return genre
     return None
+
+
+def genre_specificity(genre: str | None) -> int:
+    normalized = normalize_genre(genre)
+    if not normalized:
+        return 0
+    return int(GENRE_SPECIFICITY.get(normalized, 1))
+
+
+def choose_preferred_genre(primary: str | None, inferred: str | None) -> str | None:
+    primary_normalized = normalize_genre(primary)
+    inferred_normalized = normalize_genre(inferred)
+    if not primary_normalized:
+        return inferred_normalized
+    if not inferred_normalized:
+        return primary_normalized
+    if genre_specificity(inferred_normalized) > genre_specificity(primary_normalized):
+        return inferred_normalized
+    return primary_normalized
 
 
 def grade_band_for_level(grade_level: int | None) -> str | None:

@@ -43,7 +43,39 @@
     "severe_collapse_min_rubric_percent": 58.0,
     "severe_collapse_target_floor_percent": 70.0,
     "severe_collapse_max_adjustment_percent": 12.0,
-    "early_grade_narrative_boundary_bonus_percent": 2.0
+    "early_grade_narrative_boundary_bonus_percent": 2.0,
+    "source_scale_profiles": {
+      "naep_release_6pt": {
+        "match_source_family_contains": ["naep"],
+        "scoring_scale_type": "ordinal",
+        "scoring_scale_size": 6,
+        "require_prompt_shared": true,
+        "require_sample_count": 6,
+        "require_student_count_match_scale": true,
+        "rank_floor_percent_by_rank": [85.0, 80.0, 70.0, 60.0, 55.0, 50.0],
+        "min_current_score_by_rank": [74.0, 70.0, 52.0, 50.0, 50.0, 50.0],
+        "min_base_score_by_rank": [78.0, 74.0, 64.0, 58.0, 50.0, 50.0],
+        "min_borda_percent_by_rank": [0.75, 0.55, 0.35, 0.15, 0.0, 0.0],
+        "max_rank_sd": 1.75,
+        "max_rubric_sd_points": 9.0,
+        "max_adjustment_percent": 18.0
+      },
+      "eqao_anchor_4pt": {
+        "match_source_family_contains": ["eqao"],
+        "scoring_scale_type": "ordinal",
+        "scoring_scale_size": 4,
+        "require_prompt_shared": true,
+        "require_sample_count": 4,
+        "require_student_count_match_scale": true,
+        "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
+        "min_current_score_by_rank": [72.0, 62.0, 54.0, 50.0],
+        "min_base_score_by_rank": [76.0, 66.0, 58.0, 50.0],
+        "min_borda_percent_by_rank": [0.70, 0.45, 0.15, 0.0],
+        "max_rank_sd": 1.75,
+        "max_rubric_sd_points": 8.5,
+        "max_adjustment_percent": 14.0
+      }
+    }
   },
   "portfolio_mode": {
     "enabled": true,

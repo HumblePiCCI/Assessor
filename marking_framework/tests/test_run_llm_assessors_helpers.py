@@ -39,6 +39,43 @@ def test_run_llm_assessors_helpers():
     assert rla.ranking_from_scores({"s1": 70, "s2": 90}, ["s1", "s2"]) == ["s2", "s1"]
 
 
+def test_resolve_pass1_contract_for_instructions_forces_evidence():
+    criteria_cfg = {
+        "categories": {
+            "communication": {
+                "criteria": [
+                    {"id": "C1", "name": "Expression", "description": "desc"},
+                    {"id": "C2", "name": "Conventions", "description": "desc"},
+                ]
+            }
+        },
+        "evidence_requirements": {"quote_validation": True, "rationale_min_words": 20},
+        "genre_specific_criteria": {
+            "instructions": {
+                "contract_criteria_ids": ["IN1", "C2"],
+                "contract_guidance": ["Score this as executable procedure."],
+                "evidence_requirements": {
+                    "force_require_evidence": True,
+                    "quote_validation": True,
+                    "rationale_min_words": 12,
+                    "hard_fail_on_evidence_errors": True,
+                    "preserve_validation": True,
+                },
+                "additional_criteria": [{"id": "IN1", "name": "Procedural completeness", "description": "Steps and materials"}],
+            }
+        },
+    }
+    contract = rla.resolve_pass1_contract(criteria_cfg, "instructions", False)
+    assert contract["require_evidence"] is True
+    assert contract["reqs"]["hard_fail_on_evidence_errors"] is True
+    assert contract["reqs"]["quote_validation"] is True
+    assert contract["reqs"]["rationale_min_words"] == 12
+    assert "SCORING CONTRACT:" in contract["criteria_block"]
+    assert "executable procedure" in contract["criteria_block"]
+    assert contract["required_ids"] == ["C2", "IN1"]
+    assert "C1" not in contract["criteria_block"]
+
+
 def test_run_llm_assessors_file_helpers(tmp_path):
     path = tmp_path / "out.txt"
     rla.write_text_atomic(path, "x")
@@ -180,6 +217,25 @@ def test_parse_pass1_item_invalid_quote():
     })
     with pytest.raises(ValueError):
         rla.parse_pass1_item(raw, "s1", ["K1"], {"quote_validation": True, "rationale_min_words": 1}, "hello world")
+
+
+def test_parse_pass1_item_hard_fails_on_evidence_errors_even_in_lenient_mode():
+    raw = json.dumps({
+        "student_id": "s1",
+        "rubric_total_points": 80,
+        "criteria_points": {"K1": 80},
+        "criteria_evidence": [],
+        "notes": "ok",
+    })
+    with pytest.raises(ValueError):
+        rla.parse_pass1_item(
+            raw,
+            "s1",
+            ["K1"],
+            {"quote_validation": True, "rationale_min_words": 1, "hard_fail_on_evidence_errors": True},
+            "hello world",
+            strict=False,
+        )
 
 
 def test_parse_pass1_item_skips_quote_validation_on_errors():

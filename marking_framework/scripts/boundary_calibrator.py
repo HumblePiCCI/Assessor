@@ -71,9 +71,57 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
         "scoring_scale": scoring_scale,
         "scoring_scale_type": scoring_scale_type,
         "scoring_scale_size": scoring_scale_size,
+        "source_family": str(metadata.get("source_family", "") or "").strip(),
+        "rubric_family": str(metadata.get("rubric_family", "") or "").strip(),
+        "prompt_shared": bool(metadata.get("prompt_shared", False)),
+        "sample_count": int(_num(metadata.get("sample_count"), 0)),
         "is_small_ordinal_portfolio": small_ordinal_portfolio,
         "grade_profile": profile if isinstance(profile, dict) else {},
     }
+
+
+def _list_float(values, default: float = 0.0) -> list[float]:
+    if not isinstance(values, list):
+        return []
+    return [_num(value, default) for value in values]
+
+
+def _contains_any(text: str, tokens: list[str]) -> bool:
+    lowered = str(text or "").lower()
+    return any(str(token or "").lower() in lowered for token in tokens if str(token or "").strip())
+
+
+def resolve_source_scale_profile(scope: dict, calibration_cfg: dict, student_count: int) -> tuple[str, dict]:
+    profiles = calibration_cfg.get("source_scale_profiles", {}) if isinstance(calibration_cfg, dict) else {}
+    if not isinstance(profiles, dict):
+        return "", {}
+    source_family = str(scope.get("source_family", "") or "")
+    rubric_family = str(scope.get("rubric_family", "") or "")
+    scoring_scale_type = str(scope.get("scoring_scale_type", "") or "").strip().lower()
+    scoring_scale_size = int(_num(scope.get("scoring_scale_size"), 0))
+    sample_count = int(_num(scope.get("sample_count"), 0))
+    prompt_shared = bool(scope.get("prompt_shared", False))
+    for name, profile in profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        tokens = [str(token or "").strip() for token in profile.get("match_source_family_contains", []) if str(token or "").strip()]
+        if tokens and not (_contains_any(source_family, tokens) or _contains_any(rubric_family, tokens)):
+            continue
+        required_scale_type = str(profile.get("scoring_scale_type", "") or "").strip().lower()
+        if required_scale_type and required_scale_type != scoring_scale_type:
+            continue
+        required_scale_size = int(_num(profile.get("scoring_scale_size"), 0))
+        if required_scale_size and required_scale_size != scoring_scale_size:
+            continue
+        required_sample_count = int(_num(profile.get("require_sample_count"), 0))
+        if required_sample_count and required_sample_count != sample_count:
+            continue
+        if bool(profile.get("require_prompt_shared", False)) and not prompt_shared:
+            continue
+        if bool(profile.get("require_student_count_match_scale", False)) and scoring_scale_size and student_count != scoring_scale_size:
+            continue
+        return str(name), profile
+    return "", {}
 
 
 def _sort_key(row: dict) -> tuple:
@@ -165,6 +213,14 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
 
     n_students = len(rows)
     strong_rank_limit = max(1, int(math.ceil(n_students * strong_rank_fraction)))
+    source_scale_profile_name, source_scale_profile = resolve_source_scale_profile(scope, calibration_cfg, n_students)
+    source_rank_floors = _list_float(source_scale_profile.get("rank_floor_percent_by_rank", []))
+    source_min_current = _list_float(source_scale_profile.get("min_current_score_by_rank", []))
+    source_min_base = _list_float(source_scale_profile.get("min_base_score_by_rank", []))
+    source_min_borda = _list_float(source_scale_profile.get("min_borda_percent_by_rank", []))
+    source_max_rank_sd = _num(source_scale_profile.get("max_rank_sd"), max_rank_sd)
+    source_max_rubric_sd = _num(source_scale_profile.get("max_rubric_sd_points"), max_rubric_sd_points)
+    source_max_adjustment = _num(source_scale_profile.get("max_adjustment_percent"), default_max_adjustment)
 
     provisional = sorted(rows, key=_sort_key)
     provisional_rank_map = {row.get("student_id", ""): idx for idx, row in enumerate(provisional, start=1)}
@@ -210,6 +266,23 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             target_score = max(target_score, severe_floor)
             reasons.append("early_grade_narrative_floor")
 
+        if source_scale_profile_name and provisional_rank <= len(source_rank_floors):
+            rank_idx = provisional_rank - 1
+            source_floor = source_rank_floors[rank_idx]
+            current_gate = source_min_current[rank_idx] if rank_idx < len(source_min_current) else 0.0
+            base_gate = source_min_base[rank_idx] if rank_idx < len(source_min_base) else current_gate
+            borda_gate = source_min_borda[rank_idx] if rank_idx < len(source_min_borda) else 0.0
+            source_supported = (
+                current_score >= current_gate
+                and base_score >= base_gate
+                and borda_percent >= borda_gate
+                and rank_sd <= source_max_rank_sd
+                and rubric_sd <= source_max_rubric_sd
+            )
+            if source_supported and current_score < source_floor:
+                target_score = max(target_score, source_floor)
+                reasons.append(f"source_scale_floor:{source_scale_profile_name}")
+
         top_boundary_supported = strong_support
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
             target_score = max(target_score, floor_level_4)
@@ -219,6 +292,8 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             reasons.append("early_grade_narrative_boundary")
 
         max_adjustment = severe_max_adjustment if "severe_collapse_floor" in reasons else default_max_adjustment
+        if any(reason.startswith("source_scale_floor:") for reason in reasons):
+            max_adjustment = max(max_adjustment, source_max_adjustment)
         target_score, capped = _cap_adjustment(current_score, target_score, max_adjustment)
         target_score = round(float(target_score), 2)
 
@@ -272,12 +347,15 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             "genre": scope.get("genre"),
             "is_portfolio": bool(scope.get("is_portfolio")),
             "is_early_grade_narrative": bool(scope.get("is_early_grade_narrative")),
+            "source_family": scope.get("source_family"),
+            "source_scale_profile": source_scale_profile_name,
         },
         "config": {
             "strong_rank_fraction": strong_rank_fraction,
             "strong_borda_min": strong_borda_min,
             "top_boundary_margin_percent": top_boundary_margin,
             "severe_collapse_target_floor_percent": severe_floor,
+            "source_max_adjustment_percent": source_max_adjustment if source_scale_profile_name else 0.0,
         },
         "movements": movements,
     }

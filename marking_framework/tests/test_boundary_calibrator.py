@@ -254,6 +254,169 @@ def test_boundary_calibrator_does_not_over_promote_low_support_portfolio_rows(tm
     assert report["movement_count"] == 0
 
 
+def test_boundary_calibrator_applies_naep_source_scale_profile(tmp_path):
+    scope = write_scope(
+        tmp_path,
+        {
+            "grade_numeric": 4,
+            "genre_form": "narrative",
+            "source_family": "NAEP / NCES",
+            "rubric_family": "NAEP 1998 focused holistic writing scoring",
+            "prompt_shared": True,
+            "sample_count": 6,
+            "scoring_scale": {
+                "type": "ordinal",
+                "labels": ["Unsatisfactory", "Insufficient", "Uneven", "Sufficient", "Skillful", "Excellent"],
+            },
+        },
+    )
+    config = make_config()
+    config["boundary_calibration"]["source_scale_profiles"] = {
+        "naep_release_6pt": {
+            "match_source_family_contains": ["naep"],
+            "scoring_scale_type": "ordinal",
+            "scoring_scale_size": 6,
+            "require_prompt_shared": True,
+            "require_sample_count": 6,
+            "require_student_count_match_scale": True,
+            "rank_floor_percent_by_rank": [85.0, 80.0, 70.0, 60.0, 55.0, 50.0],
+            "min_current_score_by_rank": [74.0, 70.0, 52.0, 50.0, 50.0, 50.0],
+            "min_base_score_by_rank": [78.0, 74.0, 64.0, 58.0, 50.0, 50.0],
+            "min_borda_percent_by_rank": [0.75, 0.55, 0.35, 0.15, 0.0, 0.0],
+            "max_rank_sd": 1.75,
+            "max_rubric_sd_points": 9.0,
+            "max_adjustment_percent": 18.0,
+        }
+    }
+    rows = [
+        {
+            "student_id": "s1",
+            "rubric_mean_percent": 79.5,
+            "rubric_after_penalty_percent": 76.0,
+            "adjusted_level": "3",
+            "adjusted_letter": "B",
+            "base_level": "4",
+            "base_letter": "A",
+            "level_modifier": "",
+            "level_with_modifier": "3",
+            "borda_percent": 0.88,
+            "rank_sd": 0.4,
+            "rubric_sd_points": 1.8,
+            "flags": "",
+            "_level_order": 70.0,
+            "_composite_bucket": 0.88,
+            "_borda_bucket": 88.0,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
+            "student_id": "s2",
+            "rubric_mean_percent": 66.0,
+            "rubric_after_penalty_percent": 55.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "3",
+            "base_letter": "B",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.40,
+            "rank_sd": 0.6,
+            "rubric_sd_points": 2.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.40,
+            "_borda_bucket": 40.0,
+            "conventions_mistake_rate_percent": 2.0,
+        },
+        {
+            "student_id": "s3",
+            "rubric_mean_percent": 61.0,
+            "rubric_after_penalty_percent": 61.0,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 0.2,
+            "rank_sd": 0.8,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.20,
+            "_borda_bucket": 20.0,
+            "conventions_mistake_rate_percent": 3.0,
+        },
+        {
+            "student_id": "s4",
+            "rubric_mean_percent": 58.0,
+            "rubric_after_penalty_percent": 58.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.1,
+            "rank_sd": 0.9,
+            "rubric_sd_points": 3.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.10,
+            "_borda_bucket": 10.0,
+            "conventions_mistake_rate_percent": 3.5,
+        },
+        {
+            "student_id": "s5",
+            "rubric_mean_percent": 54.0,
+            "rubric_after_penalty_percent": 54.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.05,
+            "rank_sd": 1.0,
+            "rubric_sd_points": 4.0,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.05,
+            "_borda_bucket": 5.0,
+            "conventions_mistake_rate_percent": 4.0,
+        },
+        {
+            "student_id": "s6",
+            "rubric_mean_percent": 51.0,
+            "rubric_after_penalty_percent": 51.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.0,
+            "rank_sd": 1.1,
+            "rubric_sd_points": 4.4,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.0,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 4.2,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    top = next(item for item in updated if item["student_id"] == "s1")
+    middle = next(item for item in updated if item["student_id"] == "s2")
+    assert top["adjusted_level"] == "4"
+    assert top["rubric_after_penalty_percent"] == 85.0
+    assert "source_scale_floor:naep_release_6pt" in top["boundary_calibration_reason"]
+    assert middle["adjusted_level"] == "3"
+    assert middle["rubric_after_penalty_percent"] == 70.0
+    assert report["scope"]["source_scale_profile"] == "naep_release_6pt"
+    assert report["movement_count"] >= 2
+
+
 def test_boundary_calibrator_imports_as_standalone_module(tmp_path):
     repo_scripts = Path(__file__).resolve().parents[1] / "scripts"
     for filename in (

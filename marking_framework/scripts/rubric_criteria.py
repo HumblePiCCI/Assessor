@@ -32,15 +32,26 @@ def criteria_for_genre(criteria: dict, genre: str | None) -> list:
     return items + list(extras)
 
 
+def genre_criteria_entry(criteria: dict, genre: str | None) -> dict:
+    if not genre:
+        return {}
+    entry = criteria.get("genre_specific_criteria", {}).get(genre, {})
+    return entry if isinstance(entry, dict) else {}
+
+
 def criteria_ids(criteria: dict, genre: str | None) -> list:
     return [c.get("id") for c in criteria_for_genre(criteria, genre) if c.get("id")]
 
 
 def criteria_prompt(criteria: dict, genre: str | None) -> str:
-    if not criteria:
+    return _criteria_prompt(criteria_for_genre(criteria, genre))
+
+
+def _criteria_prompt(items: list) -> str:
+    if not items:
         return ""
     parts = ["CRITERIA (use these IDs exactly):"]
-    for item in criteria_for_genre(criteria, genre):
+    for item in items:
         cid = item.get("id")
         name = item.get("name", "")
         desc = item.get("description", "")
@@ -53,8 +64,47 @@ def criteria_prompt(criteria: dict, genre: str | None) -> str:
     return "\n".join(parts)
 
 
-def evidence_requirements(criteria: dict) -> dict:
-    return criteria.get("evidence_requirements", {})
+def contract_criteria(criteria: dict, genre: str | None) -> list:
+    items = criteria_for_genre(criteria, genre)
+    entry = genre_criteria_entry(criteria, genre)
+    allowed_ids = entry.get("contract_criteria_ids", [])
+    if not isinstance(allowed_ids, list) or not allowed_ids:
+        return items
+    allowed = {str(cid or "").strip() for cid in allowed_ids if str(cid or "").strip()}
+    filtered = [item for item in items if str(item.get("id", "")).strip() in allowed]
+    return filtered or items
+
+
+def contract_criteria_ids(criteria: dict, genre: str | None) -> list:
+    return [c.get("id") for c in contract_criteria(criteria, genre) if c.get("id")]
+
+
+def contract_criteria_prompt(criteria: dict, genre: str | None) -> str:
+    if not criteria:
+        return ""
+    return _criteria_prompt(contract_criteria(criteria, genre))
+
+
+def evidence_requirements(criteria: dict, genre: str | None = None) -> dict:
+    merged = dict(criteria.get("evidence_requirements", {}) or {})
+    entry = genre_criteria_entry(criteria, genre)
+    overrides = entry.get("evidence_requirements", {})
+    if isinstance(overrides, dict):
+        merged.update(overrides)
+    return merged
+
+
+def contract_prompt(criteria: dict, genre: str | None) -> str:
+    entry = genre_criteria_entry(criteria, genre)
+    guidance = entry.get("contract_guidance", [])
+    if not isinstance(guidance, list) or not guidance:
+        return ""
+    parts = ["SCORING CONTRACT:"]
+    for item in guidance:
+        text = str(item or "").strip()
+        if text:
+            parts.append(f"- {text}")
+    return "\n".join(parts)
 
 
 def _canonical_token(value) -> str:

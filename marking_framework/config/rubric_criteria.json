@@ -301,6 +301,19 @@
       ]
     },
     "instructions": {
+      "contract_criteria_ids": ["IN1", "IN2", "IN3", "C2", "C3"],
+      "contract_guidance": [
+        "Score this as executable procedural writing, not generic informational prose.",
+        "A top score requires complete, usable sequencing with the materials, setup, and steps needed to carry out the task.",
+        "Missing safety cautions, measurements, or key procedural details must lower the score even when the prose sounds polished."
+      ],
+      "evidence_requirements": {
+        "force_require_evidence": true,
+        "quote_validation": false,
+        "rationale_min_words": 12,
+        "hard_fail_on_evidence_errors": true,
+        "preserve_validation": true
+      },
       "additional_criteria": [
         {
           "id": "IN1",
