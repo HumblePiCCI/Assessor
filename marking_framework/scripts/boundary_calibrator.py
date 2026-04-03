@@ -45,6 +45,7 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
     genre = normalize_genre(raw_genre)
     assessment_unit = str(metadata.get("assessment_unit", "") or "").strip().lower()
     genre_form = str(metadata.get("genre_form", "") or "").strip().lower()
+    cohort_shape = str(metadata.get("cohort_shape") or metadata.get("cohort_coherence") or "").strip()
     is_portfolio = genre == "portfolio" or assessment_unit == "portfolio" or "portfolio" in genre_form
     is_early_grade_narrative = bool(grade_level is not None and grade_level <= 3 and genre == "narrative")
     profile = profiles.get(f"grade_{grade_level}", {}) if grade_level is not None else {}
@@ -77,6 +78,7 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
         "sample_count": int(_num(metadata.get("sample_count"), 0)),
         "is_small_ordinal_portfolio": small_ordinal_portfolio,
         "grade_profile": profile if isinstance(profile, dict) else {},
+        "cohort_shape": cohort_shape,
     }
 
 
@@ -100,12 +102,28 @@ def resolve_source_scale_profile(scope: dict, calibration_cfg: dict, student_cou
     scoring_scale_type = str(scope.get("scoring_scale_type", "") or "").strip().lower()
     scoring_scale_size = int(_num(scope.get("scoring_scale_size"), 0))
     sample_count = int(_num(scope.get("sample_count"), 0))
+    effective_sample_count = sample_count or int(student_count)
+    grade_level = scope.get("grade_level")
+    genre = str(scope.get("genre", "") or "").strip().lower()
+    cohort_shape = str(scope.get("cohort_shape", "") or "").strip()
     prompt_shared = bool(scope.get("prompt_shared", False))
     for name, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
         tokens = [str(token or "").strip() for token in profile.get("match_source_family_contains", []) if str(token or "").strip()]
         if tokens and not (_contains_any(source_family, tokens) or _contains_any(rubric_family, tokens)):
+            continue
+        genre_tokens = [str(token or "").strip().lower() for token in profile.get("match_genres", []) if str(token or "").strip()]
+        if genre_tokens and genre not in genre_tokens:
+            continue
+        cohort_tokens = [str(token or "").strip() for token in profile.get("match_cohort_shape_contains", []) if str(token or "").strip()]
+        if cohort_tokens and not _contains_any(cohort_shape, cohort_tokens):
+            continue
+        min_grade_level = int(_num(profile.get("min_grade_level"), 0))
+        if min_grade_level and (grade_level is None or int(grade_level) < min_grade_level):
+            continue
+        max_grade_level = int(_num(profile.get("max_grade_level"), 0))
+        if max_grade_level and (grade_level is None or int(grade_level) > max_grade_level):
             continue
         required_scale_type = str(profile.get("scoring_scale_type", "") or "").strip().lower()
         if required_scale_type and required_scale_type != scoring_scale_type:
@@ -114,7 +132,10 @@ def resolve_source_scale_profile(scope: dict, calibration_cfg: dict, student_cou
         if required_scale_size and required_scale_size != scoring_scale_size:
             continue
         required_sample_count = int(_num(profile.get("require_sample_count"), 0))
-        if required_sample_count and required_sample_count != sample_count:
+        if required_sample_count and required_sample_count != effective_sample_count:
+            continue
+        required_student_count = int(_num(profile.get("require_student_count"), 0))
+        if required_student_count and required_student_count != student_count:
             continue
         if bool(profile.get("require_prompt_shared", False)) and not prompt_shared:
             continue

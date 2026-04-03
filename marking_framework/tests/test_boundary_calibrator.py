@@ -542,6 +542,126 @@ def test_boundary_calibrator_applies_eqao_source_scale_floor_to_third_rank(tmp_p
     assert report["scope"]["source_scale_profile"] == "eqao_anchor_4pt"
 
 
+def test_boundary_calibrator_applies_thoughtful_early_narrative_profile(tmp_path):
+    scope = write_scope(
+        tmp_path,
+        {
+            "grade_level": 3,
+            "assignment_genre": "narrative",
+            "source_family": "thoughtful_learning_assessment_models",
+            "cohort_shape": "same_rubric_family_cross_topic",
+        },
+    )
+    config = make_config()
+    config["boundary_calibration"]["source_scale_profiles"] = {
+        "thoughtful_early_narrative_4pack": {
+            "match_source_family_contains": ["thoughtful_learning_assessment_models", "thoughtful"],
+            "match_cohort_shape_contains": ["same_rubric_family_cross_topic"],
+            "match_genres": ["narrative"],
+            "min_grade_level": 1,
+            "max_grade_level": 3,
+            "require_sample_count": 4,
+            "require_student_count": 4,
+            "rank_strategy": "borda_percent",
+            "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
+            "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
+            "min_current_score_by_rank": [64.0, 58.0, 50.0, 50.0],
+            "min_base_score_by_rank": [66.0, 60.0, 54.0, 50.0],
+            "min_borda_percent_by_rank": [0.75, 0.45, 0.15, 0.0],
+            "max_rank_sd": 1.25,
+            "max_rubric_sd_points": 9.0,
+            "max_adjustment_percent": 16.0,
+        }
+    }
+    rows = [
+        {
+            "student_id": "s1",
+            "rubric_mean_percent": 71.0,
+            "rubric_after_penalty_percent": 66.0,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "3",
+            "base_letter": "B",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 2.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 1.0,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 3.0,
+        },
+        {
+            "student_id": "s2",
+            "rubric_mean_percent": 63.0,
+            "rubric_after_penalty_percent": 62.0,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 0.6667,
+            "rank_sd": 0.1,
+            "rubric_sd_points": 2.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.67,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 4.0,
+        },
+        {
+            "student_id": "s3",
+            "rubric_mean_percent": 56.0,
+            "rubric_after_penalty_percent": 56.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.3333,
+            "rank_sd": 0.2,
+            "rubric_sd_points": 2.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.33,
+            "_borda_bucket": 33.33,
+            "conventions_mistake_rate_percent": 5.0,
+        },
+        {
+            "student_id": "s4",
+            "rubric_mean_percent": 50.0,
+            "rubric_after_penalty_percent": 50.0,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.0,
+            "rank_sd": 0.3,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.0,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 6.0,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    top = next(item for item in updated if item["student_id"] == "s1")
+    second = next(item for item in updated if item["student_id"] == "s2")
+    assert top["adjusted_level"] == "4"
+    assert top["rubric_after_penalty_percent"] == 80.0
+    assert second["adjusted_level"] == "3"
+    assert second["rubric_after_penalty_percent"] == 70.0
+    assert report["scope"]["source_scale_profile"] == "thoughtful_early_narrative_4pack"
+
+
 def test_boundary_calibrator_applies_source_scale_ceiling_for_low_anchor_ranks(tmp_path):
     scope = write_scope(
         tmp_path,

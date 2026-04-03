@@ -139,6 +139,27 @@ def test_parse_pass1_item_ignores_non_numeric_criteria_points_and_blank_evidence
     assert item["criteria_points"] == {}
 
 
+def test_parse_pass1_item_strict_false_rescues_truncated_outer_json():
+    raw = """{
+  "student_id": "s1",
+  "rubric_total_points": 59,
+  "criteria_points": [
+    {
+      "criterion_id": "K1",
+      "score": 3
+    },
+    {
+      "criterion_id": "K2",
+      "score": 2
+    }
+  ],
+  "notes": "truncated after this field"""
+    item = parse_pass1_item(raw, "s1", ["K1", "K2"], {"quote_validation": False, "rationale_min_words": 0}, "essay text", strict=False)
+    assert item["student_id"] == "s1"
+    assert item["rubric_total_points"] == 59.0
+    assert item["criteria_points"] == {}
+
+
 def test_looks_like_prompt_echo_detection():
     bad = "{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"USER: You are Assessor A\"}]}"
     assert looks_like_prompt_echo(bad, "s1") is True

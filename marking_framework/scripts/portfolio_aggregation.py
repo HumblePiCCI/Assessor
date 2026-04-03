@@ -247,6 +247,11 @@ def apply_portfolio_scale_calibration(
         for idx, row in enumerate(sorted_rows, start=1)
         if idx <= top_count
     }
+    bottom_ids = {
+        str(row.get("student_id", "")).strip()
+        for idx, row in enumerate(sorted_rows, start=1)
+        if idx > len(sorted_rows) - bottom_count
+    }
     for row in rows:
         updated_row = dict(row)
         student_id = str(row.get("student_id", "")).strip()
@@ -257,7 +262,7 @@ def apply_portfolio_scale_calibration(
         note_votes = int(_num(row.get("portfolio_note_votes"), 0))
         current_value = _level_value(current_level)
         target_level = target_levels.get(student_id, "")
-        if student_id not in top_ids and current_value <= 2 and rubric_mean >= middle_min_percent:
+        if student_id not in top_ids and student_id not in bottom_ids and current_value <= 2 and rubric_mean >= middle_min_percent:
             target_level = "3"
         target_value = _level_value(target_level)
         eligible = bool(target_level and note_votes > 0 and rank_sd <= max_rank_sd)

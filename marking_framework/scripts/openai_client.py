@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,6 +21,26 @@ def _timeout_seconds() -> float:
     except ValueError:
         return 180.0
     return value if value > 0 else 180.0
+
+
+def _retry_attempts() -> int:
+    raw = os.environ.get("OPENAI_MAX_RETRIES", "5").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 5
+    return min(8, max(1, value))
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    raw = os.environ.get("OPENAI_RETRY_BACKOFF_SECONDS", "0.75").strip()
+    try:
+        base = float(raw)
+    except ValueError:
+        base = 0.75
+    base = min(2.0, max(0.05, base))
+    step = max(0, int(attempt) - 1)
+    return min(4.0, base * (2 ** step))
 
 
 def _cache_enabled() -> bool:
@@ -84,9 +105,14 @@ def _unsupported_parameter(error_body: str) -> str | None:
     return error_body[start:end]
 
 
+def _retryable_http_status(code: int) -> bool:
+    return code in {408, 409, 429} or 500 <= int(code) <= 599
+
+
 def _post_openai_with_compat(url: str, api_key: str, payload: dict) -> dict:
     request_payload = dict(payload)
-    for _ in range(3):
+    attempts = _retry_attempts()
+    for attempt in range(1, attempts + 1):
         try:
             return _post_json(url, api_key, request_payload)
         except urllib.error.HTTPError as exc:
@@ -95,10 +121,16 @@ def _post_openai_with_compat(url: str, api_key: str, payload: dict) -> dict:
             if exc.code == 400 and unsupported in {"temperature", "reasoning"} and unsupported in request_payload:
                 request_payload.pop(unsupported, None)
                 continue
+            if _retryable_http_status(exc.code) and attempt < attempts:
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
             raise RuntimeError(f"OpenAI API error {exc.code}: {body[:500]}") from exc
         except urllib.error.URLError as exc:
+            if attempt < attempts:
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
             raise RuntimeError(f"OpenAI API network error: {exc}") from exc
-    raise RuntimeError("OpenAI API request failed after compatibility retries.")
+    raise RuntimeError("OpenAI API request failed after retry/compatibility attempts.")
 
 
 def _messages_to_prompt(messages: list) -> str:

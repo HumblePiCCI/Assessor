@@ -217,6 +217,7 @@ def _normalize_for_match(text: str) -> str:
 def parse_pass1_item(text: str, student_id: str, required_ids: list | None = None,
                      reqs: dict | None = None, essay_text: str = "", strict: bool = True) -> dict:
     lookup = criterion_lookup(required_ids)
+    expected_keys = ("student_id", "rubric_total_points", "criteria_points", "notes")
     try:
         item = json_from_text(text)
     except ValueError:
@@ -225,8 +226,17 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
         item = rescue_pass1_item(text, student_id, required_ids)
         if item.get("rubric_total_points") is None and not item.get("criteria_points"):
             raise ValueError("Unable to parse pass1 response.")
+    else:
+        if not isinstance(item, dict) or not any(key in item for key in expected_keys):
+            if strict:
+                raise ValueError("Unable to parse pass1 response.")
+            item = rescue_pass1_item(text, student_id, required_ids)
+        elif not strict and any(key not in item for key in expected_keys):
+            rescued = rescue_pass1_item(text, student_id, required_ids)
+            if rescued.get("rubric_total_points") is not None or rescued.get("criteria_points"):
+                item = rescued
     if strict:
-        missing = [k for k in ("student_id", "rubric_total_points", "criteria_points", "notes") if k not in item]
+        missing = [k for k in expected_keys if k not in item]
         if missing:
             raise ValueError(f"Pass1 response missing keys: {', '.join(missing)}")
     else:
