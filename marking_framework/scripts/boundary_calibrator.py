@@ -135,6 +135,24 @@ def _sort_key(row: dict) -> tuple:
     )
 
 
+def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
+    strategy = str(strategy or "").strip().lower()
+    if strategy == "borda_percent":
+        return (
+            -_num(row.get("borda_percent"), 0.0),
+            -_num(row.get("rubric_after_penalty_percent"), 0.0),
+            -_num(row.get("rubric_mean_percent"), 0.0),
+            _num(row.get("rank_sd"), 99.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    return _sort_key(row)
+
+
+def _source_rank_map(rows: list[dict], strategy: str) -> dict[str, int]:
+    ranked = sorted(rows, key=lambda row: _source_rank_sort_key(row, strategy))
+    return {str(row.get("student_id", "")).strip(): idx for idx, row in enumerate(ranked, start=1)}
+
+
 def _cap_adjustment(current: float, target: float, max_adjustment: float) -> tuple[float, bool]:
     cap = max(0.0, float(max_adjustment or 0.0))
     if cap <= 0.0:
@@ -215,12 +233,15 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     strong_rank_limit = max(1, int(math.ceil(n_students * strong_rank_fraction)))
     source_scale_profile_name, source_scale_profile = resolve_source_scale_profile(scope, calibration_cfg, n_students)
     source_rank_floors = _list_float(source_scale_profile.get("rank_floor_percent_by_rank", []))
+    source_rank_ceilings = _list_float(source_scale_profile.get("rank_ceiling_percent_by_rank", []))
     source_min_current = _list_float(source_scale_profile.get("min_current_score_by_rank", []))
     source_min_base = _list_float(source_scale_profile.get("min_base_score_by_rank", []))
     source_min_borda = _list_float(source_scale_profile.get("min_borda_percent_by_rank", []))
     source_max_rank_sd = _num(source_scale_profile.get("max_rank_sd"), max_rank_sd)
     source_max_rubric_sd = _num(source_scale_profile.get("max_rubric_sd_points"), max_rubric_sd_points)
     source_max_adjustment = _num(source_scale_profile.get("max_adjustment_percent"), default_max_adjustment)
+    source_rank_strategy = str(source_scale_profile.get("rank_strategy", "") or "").strip().lower()
+    source_rank_map = _source_rank_map(rows, source_rank_strategy) if source_scale_profile_name else {}
 
     provisional = sorted(rows, key=_sort_key)
     provisional_rank_map = {row.get("student_id", ""): idx for idx, row in enumerate(provisional, start=1)}
@@ -266,9 +287,11 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             target_score = max(target_score, severe_floor)
             reasons.append("early_grade_narrative_floor")
 
-        if source_scale_profile_name and provisional_rank <= len(source_rank_floors):
-            rank_idx = provisional_rank - 1
+        source_rank = int(source_rank_map.get(student_id, provisional_rank))
+        if source_scale_profile_name and source_rank <= len(source_rank_floors):
+            rank_idx = source_rank - 1
             source_floor = source_rank_floors[rank_idx]
+            source_ceiling = source_rank_ceilings[rank_idx] if rank_idx < len(source_rank_ceilings) else 0.0
             current_gate = source_min_current[rank_idx] if rank_idx < len(source_min_current) else 0.0
             base_gate = source_min_base[rank_idx] if rank_idx < len(source_min_base) else current_gate
             borda_gate = source_min_borda[rank_idx] if rank_idx < len(source_min_borda) else 0.0
@@ -282,6 +305,9 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             if source_supported and current_score < source_floor:
                 target_score = max(target_score, source_floor)
                 reasons.append(f"source_scale_floor:{source_scale_profile_name}")
+            if source_supported and source_ceiling > 0.0 and current_score > source_ceiling:
+                target_score = min(target_score, source_ceiling)
+                reasons.append(f"source_scale_ceiling:{source_scale_profile_name}")
 
         top_boundary_supported = strong_support
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
@@ -328,6 +354,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                     "from_level": adjusted_level,
                     "to_level": calibrated_level,
                     "provisional_rank": provisional_rank,
+                    "source_rank": source_rank,
                     "borda_percent": round(borda_percent, 4),
                     "rank_sd": round(rank_sd, 2),
                     "rubric_sd_points": round(rubric_sd, 2),
@@ -356,6 +383,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             "top_boundary_margin_percent": top_boundary_margin,
             "severe_collapse_target_floor_percent": severe_floor,
             "source_max_adjustment_percent": source_max_adjustment if source_scale_profile_name else 0.0,
+            "source_rank_strategy": source_rank_strategy,
         },
         "movements": movements,
     }
