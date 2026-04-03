@@ -139,3 +139,76 @@ def test_portfolio_scale_calibration_does_not_promote_bottom_bucket_to_three():
     assert rows_by_id["s3"]["adjusted_level"] == "2"
     assert rows_by_id["s3"].get("portfolio_scale_adjusted", "false") != "true"
     assert report["applied"] == 1
+
+
+def test_portfolio_scale_calibration_allows_small_early_grade_middle_margin():
+    config = {
+        "portfolio_mode": {
+            "ordinal_scale_calibration": {
+                "enabled": True,
+                "top_fraction": 0.25,
+                "bottom_fraction": 0.25,
+                "early_grade_top_min_percent": 72.0,
+                "early_grade_middle_min_percent": 63.25,
+                "early_grade_middle_margin_percent": 0.5,
+                "bottom_max_percent": 70.0,
+                "max_rank_sd": 1.5,
+                "band_floor_offset_percent": 1.5,
+            }
+        }
+    }
+    scope = {"is_small_ordinal_portfolio": True, "grade_level": 2}
+    level_bands = [
+        {"level": "1", "min": 50, "max": 59, "letter": "D"},
+        {"level": "2", "min": 60, "max": 69, "letter": "C"},
+        {"level": "3", "min": 70, "max": 79, "letter": "B"},
+        {"level": "4", "min": 80, "max": 89, "letter": "A"},
+    ]
+    rows = [
+        {
+            "student_id": "s1",
+            "adjusted_level": "4",
+            "adjusted_letter": "A",
+            "rubric_after_penalty_percent": 81.5,
+            "rubric_mean_percent": 74.09,
+            "rank_sd": 0.0,
+            "portfolio_note_votes": 3,
+            "_level_order": 80.0,
+            "_composite_bucket": 0.78,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 8.35,
+        },
+        {
+            "student_id": "s2",
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "rubric_after_penalty_percent": 63.16,
+            "rubric_mean_percent": 63.16,
+            "rank_sd": 0.0,
+            "portfolio_note_votes": 3,
+            "_level_order": 60.0,
+            "_composite_bucket": 0.66,
+            "_borda_bucket": 50.0,
+            "conventions_mistake_rate_percent": 15.41,
+        },
+        {
+            "student_id": "s3",
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "rubric_after_penalty_percent": 60.49,
+            "rubric_mean_percent": 60.54,
+            "rank_sd": 0.0,
+            "portfolio_note_votes": 3,
+            "_level_order": 60.0,
+            "_composite_bucket": 0.60,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 20.56,
+        },
+    ]
+
+    updated, report = apply_portfolio_scale_calibration(rows, config, scope, level_bands)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["s2"]["adjusted_level"] == "3"
+    assert rows_by_id["s2"]["rubric_after_penalty_percent"] == 71.5
+    assert rows_by_id["s3"]["adjusted_level"] == "2"
+    assert report["applied"] == 1

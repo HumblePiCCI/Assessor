@@ -113,7 +113,7 @@
         "min_borda_percent_by_rank": [0.75, 0.45, 0.15, 0.0],
         "max_rank_sd": 1.5,
         "max_rubric_sd_points": 9.0,
-        "max_adjustment_percent": 18.0
+        "max_adjustment_percent": 24.0
       }
     }
   },
@@ -130,6 +130,7 @@
       "middle_min_percent": 66.0,
       "early_grade_top_min_percent": 72.0,
       "early_grade_middle_min_percent": 63.25,
+      "early_grade_middle_margin_percent": 0.5,
       "bottom_max_percent": 70.0,
       "max_rank_sd": 1.5,
       "band_floor_offset_percent": 1.5

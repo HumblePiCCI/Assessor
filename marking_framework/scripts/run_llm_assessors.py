@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -158,6 +159,141 @@ def _criterion_scores_from_item(item: dict) -> dict[str, float]:
     return scores
 
 
+def _is_fallback_deterministic_note(note: str | None) -> bool:
+    return str(note or "").strip().lower().startswith("fallback deterministic score")
+
+
+def _mean_numeric(values: list[float]) -> float:
+    return (sum(values) / len(values)) if values else 0.0
+
+
+def _word_count(text: str | None) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", str(text or "")))
+
+
+def _resolve_consensus_pass2_item(student_id: str, assessor_items: dict, genre: str | None) -> dict:
+    direct_item = assessor_items.get(student_id)
+    if isinstance(direct_item, dict) and direct_item.get("student_id"):
+        return direct_item
+    collected = []
+    for items_by_assessor in assessor_items.values():
+        if not isinstance(items_by_assessor, dict):
+            continue
+        item = items_by_assessor.get(student_id)
+        if isinstance(item, dict) and item.get("student_id"):
+            collected.append(item)
+    if not collected:
+        return {}
+    normalized_genre = str(genre or "").strip().lower()
+    if normalized_genre != "summary_report":
+        preferred = [item for item in collected if not _is_fallback_deterministic_note(item.get("notes"))]
+        return dict(preferred[0] if preferred else collected[0])
+
+    preferred = [item for item in collected if not _is_fallback_deterministic_note(item.get("notes"))]
+    selected = preferred or collected
+    criteria_by_id: dict[str, list[float]] = {}
+    rubric_scores = []
+    notes = []
+    for item in selected:
+        score = item.get("rubric_total_points")
+        if isinstance(score, (int, float)):
+            rubric_scores.append(float(score))
+        for cid, value in _criterion_scores_from_item(item).items():
+            criteria_by_id.setdefault(cid, []).append(float(value))
+        note_text = " ".join(str(item.get("notes", "") or "").split())
+        if note_text and note_text not in notes:
+            notes.append(note_text)
+    consensus = dict(selected[0])
+    if rubric_scores:
+        consensus["rubric_total_points"] = round(_mean_numeric(rubric_scores), 2)
+    if criteria_by_id:
+        consensus["criteria_points"] = {
+            cid: round(_mean_numeric(values), 2)
+            for cid, values in sorted(criteria_by_id.items())
+            if values
+        }
+    if notes:
+        consensus["notes"] = " ".join(notes[:2])
+    return consensus
+
+
+def _summary_signal_bonus_penalty(note_text: str, word_count: int, median_word_count: float) -> float:
+    lowered = str(note_text or "").lower()
+    penalty = 0.0
+    bonus = 0.0
+    if (
+        "clear ending summary paragraph" in lowered
+        or "final paragraph functions as a reasonable summary" in lowered
+        or "solid summary" in lowered
+    ):
+        bonus += 6.0
+    if "reasonable summary" in lowered:
+        bonus += 2.0
+    if "personal opinion" in lowered or "opinion-based" in lowered:
+        penalty += 18.0
+    if "food list" in lowered:
+        penalty += 4.0
+    if "repeats the same information again" in lowered or "padded by duplication" in lowered:
+        penalty += 6.0
+    elif "repeats information" in lowered or "repeats points" in lowered or "repeats the main idea" in lowered:
+        penalty += 4.0
+    if "copied/extraction-heavy" in lowered or "closely mirrored from the source" in lowered:
+        penalty += 6.0
+    elif (
+        "source-like/copying" in lowered
+        or "source-like wording" in lowered
+        or "source-like sentences" in lowered
+        or "closely match source wording" in lowered
+        or "near-copied" in lowered
+        or "copied or very closely mirrored" in lowered
+        or "copied source sentences" in lowered
+    ):
+        penalty += 5.0
+    elif "source-like" in lowered or "copied" in lowered:
+        penalty += 4.0
+    if "far too detailed" in lowered or "overly long" in lowered or "too long for a summary" in lowered:
+        penalty += 5.0
+    elif "not concise" in lowered:
+        penalty += 4.0
+    length_penalty = 0.0
+    if median_word_count > 0 and word_count > median_word_count:
+        length_penalty = min(10.0, (word_count - median_word_count) * 0.14)
+    return bonus - penalty - length_penalty
+
+
+def build_summary_seed_order(
+    known_ids: list[str],
+    texts: dict[str, str],
+    assessor_items: dict[str, dict],
+) -> list[str] | None:
+    if not known_ids:
+        return None
+    word_counts = {sid: _word_count(texts.get(sid, "")) for sid in known_ids}
+    nonzero_counts = sorted(count for count in word_counts.values() if count > 0)
+    median_word_count = float(nonzero_counts[len(nonzero_counts) // 2]) if nonzero_counts else 0.0
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "summary_report")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        sr1 = float(criteria_points.get("SR1", 0.0) or 0.0)
+        sr2 = float(criteria_points.get("SR2", 0.0) or 0.0)
+        sr3 = float(criteria_points.get("SR3", 0.0) or 0.0)
+        c1 = float(criteria_points.get("C1", 0.0) or 0.0)
+        c2 = float(criteria_points.get("C2", 0.0) or 0.0)
+        base_signal = (0.20 * sr1) + (0.30 * sr2) + (0.30 * sr3) + (0.10 * c1) + (0.10 * c2)
+        note_signal = _summary_signal_bonus_penalty(
+            str(item.get("notes", "") or ""),
+            word_counts.get(sid, 0),
+            median_word_count,
+        )
+        scores[sid] = round(base_signal + note_signal, 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
 def build_summary_report_ranking_summary(item: dict, fallback_summary: str, max_chars: int = 280) -> str:
     if not isinstance(item, dict):
         return _truncate_compact(fallback_summary, max_chars)
@@ -231,6 +367,13 @@ def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool) -> st
     return ""
 
 
+def use_summary_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    if portfolio_scope or str(genre or "").strip().lower() != "summary_report":
+        return False
+    cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
+    return "same_prompt" in cohort_shape
+
+
 def build_pass2_student_summaries(
     known_ids: list[str],
     raw_summaries: dict[str, str],
@@ -243,7 +386,7 @@ def build_pass2_student_summaries(
     normalized_genre = str(genre or "").strip().lower()
     for sid in known_ids:
         raw_summary = raw_summaries.get(sid, "")
-        item = assessor_items.get(sid, {})
+        item = _resolve_consensus_pass2_item(sid, assessor_items, genre)
         if portfolio_scope:
             summary = summarize_portfolio_for_ranking(item, max_chars=max_chars)
         elif normalized_genre == "summary_report":
@@ -687,13 +830,14 @@ def main() -> int:
         write_portfolio_piece_report(Path(args.portfolio_piece_report), portfolio_piece_report)
     known_ids = list(texts.keys())
     portfolio_seed_order = unanimous_portfolio_seed_order(pass1_scores_by_assessor, known_ids) if portfolio_scope else None
+    summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
         ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope)
         student_summaries = build_pass2_student_summaries(
             known_ids,
             raw_summary_map,
-            pass1_items_by_assessor.get(assessor, {}),
+            pass1_items_by_assessor if genre == "summary_report" else pass1_items_by_assessor.get(assessor, {}),
             genre,
             portfolio_scope,
             args.max_summary_chars,
@@ -782,6 +926,8 @@ def main() -> int:
             lines = list(score_order)
         if portfolio_seed_order:
             lines = list(portfolio_seed_order)
+        elif summary_seed_order:
+            lines = list(summary_seed_order)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
         write_text_atomic(out_path, "\n".join(lines))
     if mode == "openai":

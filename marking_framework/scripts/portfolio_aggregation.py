@@ -236,6 +236,10 @@ def apply_portfolio_scale_calibration(
     early_grade = bool(scope.get("grade_level") is not None and int(scope.get("grade_level")) <= 3)
     top_min_percent = _num(scale_cfg.get("early_grade_top_min_percent" if early_grade else "top_min_percent"), 74.0 if not early_grade else 72.0)
     middle_min_percent = _num(scale_cfg.get("early_grade_middle_min_percent" if early_grade else "middle_min_percent"), 66.0 if not early_grade else 63.25)
+    middle_margin = _num(
+        scale_cfg.get("early_grade_middle_margin_percent" if early_grade else "middle_margin_percent"),
+        0.0,
+    )
     bottom_max_percent = _num(scale_cfg.get("bottom_max_percent"), 70.0)
     max_rank_sd = _num(scale_cfg.get("max_rank_sd"), 1.5)
     floor_offset = _num(scale_cfg.get("band_floor_offset_percent"), 1.5)
@@ -262,14 +266,20 @@ def apply_portfolio_scale_calibration(
         note_votes = int(_num(row.get("portfolio_note_votes"), 0))
         current_value = _level_value(current_level)
         target_level = target_levels.get(student_id, "")
-        if student_id not in top_ids and student_id not in bottom_ids and current_value <= 2 and rubric_mean >= middle_min_percent:
+        middle_projection_floor = max(0.0, middle_min_percent - max(0.0, middle_margin))
+        if (
+            student_id not in top_ids
+            and student_id not in bottom_ids
+            and current_value <= 2
+            and max(current_score, rubric_mean) >= middle_projection_floor
+        ):
             target_level = "3"
         target_value = _level_value(target_level)
         eligible = bool(target_level and note_votes > 0 and rank_sd <= max_rank_sd)
         if target_level == "4":
             eligible = eligible and rubric_mean >= top_min_percent
         elif target_level == "3" and current_value < target_value:
-            eligible = eligible and rubric_mean >= middle_min_percent
+            eligible = eligible and max(current_score, rubric_mean) >= middle_projection_floor
         elif target_level == "2" and current_value > target_value:
             eligible = eligible and rubric_mean <= bottom_max_percent
 

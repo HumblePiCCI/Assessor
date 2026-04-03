@@ -1,0 +1,66 @@
+{
+  "report_date": "2026-04-03",
+  "branch": "codex/stable-bell-curve",
+  "validated_changes": [
+    "same-prompt summary seed ordering from consensus summary-quality signals",
+    "thoughtful summary source-scale max adjustment increase",
+    "early-grade ordinal-portfolio middle-band promotion margin"
+  ],
+  "datasets": [
+    {
+      "dataset": "thoughtful_assessment_grade6_8_summary_iron",
+      "report_path": "/tmp/targeted_rerun_summary_2026-04-03_v4/benchmark_report.json",
+      "candidate": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 0.0,
+        "mean_rank_displacement": 0.0,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "final_levels": {
+          "s001": "4",
+          "s002": "3",
+          "s003": "2",
+          "s004": "1"
+        }
+      },
+      "baseline": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 0.0,
+        "mean_rank_displacement": 0.0,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0
+      }
+    },
+    {
+      "dataset": "uk_sta_2018_ks1_writing_portfolios",
+      "report_path": "/tmp/targeted_rerun_ks1_2026-04-03_v2/benchmark_report.json",
+      "candidate": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 0.0,
+        "mean_rank_displacement": 0.0,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "final_levels": {
+          "s001": "4",
+          "s002": "3",
+          "s003": "2"
+        }
+      },
+      "baseline": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 0.0,
+        "mean_rank_displacement": 0.0,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0
+      }
+    }
+  ]
+}

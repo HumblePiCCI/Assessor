@@ -145,6 +145,88 @@ def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal()
     assert "heavy source lifting" in summary
 
 
+def test_build_pass2_student_summaries_uses_consensus_summary_signal_and_ignores_fallback_only_note():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "Raw student response excerpt"},
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 76.0,
+                    "criteria_points": {"SR1": 86, "SR2": 68, "SR3": 66, "C1": 72, "C2": 84},
+                    "notes": "Accurate but not an effective summary because it repeats source detail and is too long.",
+                }
+            },
+            "B": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 74.0,
+                    "criteria_points": {"SR1": 84, "SR2": 70, "SR3": 68, "C1": 74, "C2": 82},
+                    "notes": "Shows understanding, but paraphrasing is weak and the response is not concise enough for a strong summary.",
+                }
+            },
+            "C": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 92.0,
+                    "criteria_points": {"SR1": 92, "SR2": 92, "SR3": 92, "C1": 92, "C2": 92},
+                    "notes": "Fallback deterministic score for assessor C.",
+                }
+            },
+        },
+        "summary_report",
+        False,
+        260,
+    )
+    summary = entries[0]["summary"]
+    assert "Summary writing score 75.00." in summary
+    assert "concision 69" in summary
+    assert "Fallback deterministic score" not in summary
+    assert "too much source detail" in summary
+
+
+def test_build_summary_seed_order_prefers_concise_and_non_opinion_summary_signals():
+    order = rla.build_summary_seed_order(
+        ["s1", "s2", "s3", "s4"],
+        {
+            "s1": "word " * 300,
+            "s2": "word " * 290,
+            "s3": "word " * 360,
+            "s4": "word " * 288,
+        },
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "criteria_points": {"SR1": 75, "SR2": 54, "SR3": 64, "C1": 64, "C2": 84},
+                    "rubric_total_points": 80.5,
+                    "notes": "Includes accurate information and a clear ending summary paragraph, but the overall response is not concise and reads like the full source/article reproduced rather than a selective summary.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "criteria_points": {"SR1": 75, "SR2": 64, "SR3": 54, "C1": 64, "C2": 75},
+                    "rubric_total_points": 79.8,
+                    "notes": "Shows understanding, but it is not an effective summary: much of the response is source-like/copying, it includes non-essential food list detail, and it repeats the main idea in the final paragraph.",
+                },
+                "s3": {
+                    "student_id": "s3",
+                    "criteria_points": {"SR1": 75, "SR2": 64, "SR3": 64, "C1": 64, "C2": 75},
+                    "rubric_total_points": 83.4,
+                    "notes": "Shows understanding, but the response is overly long, repeats the same information again, and large portions closely match source wording.",
+                },
+                "s4": {
+                    "student_id": "s4",
+                    "criteria_points": {"SR1": 75, "SR2": 64, "SR3": 64, "C1": 64, "C2": 64},
+                    "rubric_total_points": 80.1,
+                    "notes": "The piece is too long for a summary, includes personal opinion, and relies heavily on copied source sentences.",
+                },
+            }
+        },
+    )
+    assert order == ["s1", "s2", "s3", "s4"]
+
+
 def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],

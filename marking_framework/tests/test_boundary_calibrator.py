@@ -447,7 +447,7 @@ def test_boundary_calibrator_applies_thoughtful_summary_source_profile(tmp_path)
             "min_borda_percent_by_rank": [0.75, 0.45, 0.15, 0.0],
             "max_rank_sd": 1.5,
             "max_rubric_sd_points": 9.0,
-            "max_adjustment_percent": 18.0,
+            "max_adjustment_percent": 24.0,
         }
     }
     rows = [
@@ -536,8 +536,8 @@ def test_boundary_calibrator_applies_thoughtful_summary_source_profile(tmp_path)
     assert ordered["s2"]["adjusted_level"] == "3"
     assert ordered["s3"]["rubric_after_penalty_percent"] == 69.0
     assert ordered["s3"]["adjusted_level"] == "2"
-    assert ordered["s4"]["rubric_after_penalty_percent"] == 61.0
-    assert ordered["s4"]["adjusted_level"] == "2"
+    assert ordered["s4"]["rubric_after_penalty_percent"] == 59.0
+    assert ordered["s4"]["adjusted_level"] == "1"
     assert report["scope"]["source_scale_profile"] == "thoughtful_summary_4pack"
 
 
