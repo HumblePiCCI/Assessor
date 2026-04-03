@@ -76,6 +76,113 @@ def test_resolve_pass1_contract_for_instructions_forces_evidence():
     assert "C1" not in contract["criteria_block"]
 
 
+def test_resolve_pass1_contract_for_summary_report_prioritizes_summary_quality():
+    criteria_cfg = {
+        "categories": {
+            "communication": {
+                "criteria": [
+                    {"id": "C1", "name": "Expression", "description": "desc"},
+                    {"id": "C2", "name": "Conventions", "description": "desc"},
+                    {"id": "C3", "name": "Vocabulary", "description": "desc"},
+                ]
+            }
+        },
+        "genre_specific_criteria": {
+            "summary_report": {
+                "contract_criteria_ids": ["SR1", "SR2", "SR3", "C1", "C2"],
+                "contract_guidance": ["Score this as summary writing."],
+                "evidence_requirements": {
+                    "force_require_evidence": True,
+                    "quote_validation": False,
+                    "rationale_min_words": 10,
+                    "hard_fail_on_evidence_errors": True,
+                    "preserve_validation": True,
+                },
+                "additional_criteria": [
+                    {"id": "SR1", "name": "Main idea capture", "description": "desc"},
+                    {"id": "SR2", "name": "Concision", "description": "desc"},
+                    {"id": "SR3", "name": "Paraphrase", "description": "desc"},
+                ],
+            }
+        },
+    }
+    contract = rla.resolve_pass1_contract(criteria_cfg, "summary_report", False)
+    assert contract["require_evidence"] is True
+    assert contract["required_ids"] == ["C1", "C2", "SR1", "SR2", "SR3"]
+    assert "summary writing" in contract["criteria_block"]
+    assert "C3" not in contract["criteria_block"]
+    assert contract["reqs"]["quote_validation"] is False
+    assert contract["reqs"]["rationale_min_words"] == 10
+
+
+def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "Raw student response excerpt"},
+        {
+            "s1": {
+                "student_id": "s1",
+                "rubric_total_points": 74.33,
+                "criteria_points": {"SR1": 95, "SR2": 88, "SR3": 88, "C1": 88, "C2": 95},
+                "criteria_evidence": [
+                    {"criterion_id": "SR1", "score": 84},
+                    {"criterion_id": "SR2", "score": 64},
+                    {"criterion_id": "SR3", "score": 64},
+                    {"criterion_id": "C1", "score": 75},
+                    {"criterion_id": "C2", "score": 84},
+                ],
+                "notes": "Accurate content but copied source detail leaves it not concise enough for a strong summary.",
+            }
+        },
+        "summary_report",
+        False,
+        240,
+    )
+    summary = entries[0]["summary"]
+    assert "Summary writing score 74.33." in summary
+    assert "concision 64" in summary
+    assert "too much source detail" in summary
+    assert "heavy source lifting" in summary
+
+
+def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "Opening the Fridge: raw snippet"},
+        {
+            "s1": {
+                "student_id": "s1",
+                "rubric_total_points": 63.88,
+                "portfolio_overall_level": "2",
+                "portfolio_piece_scores": [
+                    {"piece_id": "p01", "title": "Yesterday we went to bishops Wood to", "rubric_total_points": 76.0, "level": "3"},
+                    {"piece_id": "p02", "title": "Missing one dragon", "rubric_total_points": 69.0, "level": "2"},
+                    {"piece_id": "p03", "title": "Meet Fred. Fred loves to find things.", "rubric_total_points": 61.78, "level": "2"},
+                ],
+                "notes": "Overall working towards the expected standard across the portfolio.",
+            }
+        },
+        "portfolio",
+        True,
+        260,
+    )
+    summary = entries[0]["summary"]
+    assert "Portfolio overall score 63.88 (level 2)." in summary
+    assert "Piece profile:" in summary
+    assert "Yesterday we went to bishops Wood to" in summary
+
+
+def test_unanimous_portfolio_seed_order_requires_full_agreement():
+    scores = {
+        "A": {"s1": 80, "s2": 70, "s3": 60},
+        "B": {"s1": 81, "s2": 71, "s3": 61},
+        "C": {"s1": 82, "s2": 72, "s3": 62},
+    }
+    assert rla.unanimous_portfolio_seed_order(scores, ["s1", "s2", "s3"]) == ["s1", "s2", "s3"]
+    scores["C"] = {"s1": 82, "s2": 60, "s3": 72}
+    assert rla.unanimous_portfolio_seed_order(scores, ["s1", "s2", "s3"]) is None
+
+
 def test_run_llm_assessors_file_helpers(tmp_path):
     path = tmp_path / "out.txt"
     rla.write_text_atomic(path, "x")

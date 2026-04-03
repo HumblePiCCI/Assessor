@@ -339,7 +339,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             reasons.append("early_grade_narrative_boundary")
 
         max_adjustment = severe_max_adjustment if "severe_collapse_floor" in reasons else default_max_adjustment
-        if any(reason.startswith("source_scale_floor:") for reason in reasons):
+        if any(reason.startswith("source_scale_") for reason in reasons):
             max_adjustment = max(max_adjustment, source_max_adjustment)
         target_score, capped = _cap_adjustment(current_score, target_score, max_adjustment)
         target_score = round(float(target_score), 2)

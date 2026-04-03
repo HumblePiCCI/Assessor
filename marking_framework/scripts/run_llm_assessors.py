@@ -35,6 +35,7 @@ from scripts.pass2_contract import build_pass2_repair_prompt, normalize_full_ran
 from scripts.portfolio_pieces import (
     aggregate_portfolio_piece_assessments,
     split_portfolio_pieces,
+    summarize_portfolio_for_ranking,
     summarize_portfolio_pieces,
     write_report as write_portfolio_piece_report,
 )
@@ -133,6 +134,139 @@ def resolve_pass1_contract(criteria_cfg: dict, genre: str | None, routing_requir
         "require_evidence": require_evidence,
         "reqs": reqs,
     }
+
+
+def _truncate_compact(text: str, max_chars: int) -> str:
+    compact = " ".join(str(text or "").split())
+    if max_chars and len(compact) > max_chars:
+        return compact[:max_chars].rstrip() + "..."
+    return compact
+
+
+def _criterion_scores_from_item(item: dict) -> dict[str, float]:
+    scores = {}
+    for key, value in (item.get("criteria_points") or {}).items():
+        if isinstance(value, (int, float)):
+            scores[str(key)] = float(value)
+    for entry in item.get("criteria_evidence") or []:
+        if not isinstance(entry, dict):
+            continue
+        cid = str(entry.get("criterion_id") or "").strip()
+        score = entry.get("score")
+        if cid and isinstance(score, (int, float)):
+            scores[cid] = float(score)
+    return scores
+
+
+def build_summary_report_ranking_summary(item: dict, fallback_summary: str, max_chars: int = 280) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    sr1 = float(criteria_points.get("SR1", 0.0) or 0.0)
+    sr2 = float(criteria_points.get("SR2", 0.0) or 0.0)
+    sr3 = float(criteria_points.get("SR3", 0.0) or 0.0)
+    c1 = float(criteria_points.get("C1", 0.0) or 0.0)
+    c2 = float(criteria_points.get("C2", 0.0) or 0.0)
+    parts = [f"Summary writing score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("main-idea capture", sr1),
+        ("concision", sr2),
+        ("paraphrase", sr3),
+        ("organization", c1),
+        ("conventions", c2),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    strengths = []
+    cautions = []
+    if sr1 >= 80:
+        strengths.append("accurate main ideas")
+    elif sr1 and sr1 < 68:
+        cautions.append("missing or inaccurate key points")
+    if sr2 >= 80:
+        strengths.append("concise information selection")
+    elif sr2 and sr2 < 70:
+        cautions.append("too much source detail")
+    if sr3 >= 80:
+        strengths.append("clear paraphrase and synthesis")
+    elif sr3 and sr3 < 70:
+        cautions.append("too close to source phrasing")
+    note_text = str(item.get("notes", "") or fallback_summary)
+    lowered_note = note_text.lower()
+    if "personal opinion" in lowered_note or "unsupported conclusion" in lowered_note or "irrelevant personal" in lowered_note:
+        cautions.append("drifts into personal opinion")
+    if "copied" in lowered_note or "source-like" in lowered_note or "verbatim" in lowered_note or "extraction" in lowered_note:
+        cautions.append("heavy source lifting")
+    if "decent summary" in lowered_note or "clear summary" in lowered_note or "effective summary" in lowered_note:
+        strengths.append("clear summary focus")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(strengths) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(cautions) + ".")
+    note = _truncate_compact(note_text, 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
+
+
+def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool) -> str:
+    if portfolio_scope:
+        return (
+            "RANKING CONTRACT:\n"
+            "- Student summaries already reflect piece-level portfolio scoring.\n"
+            "- Compare the overall portfolio judgment, piece profile, and strongest pieces rather than isolated excerpts.\n"
+            "- A portfolio with stronger piece distribution and stronger top pieces should outrank a flatter lower portfolio."
+        )
+    if str(genre or "").strip().lower() == "summary_report":
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as summaries, not generic informational responses.\n"
+            "- Accurate main-idea capture, concision, and paraphrase should outweigh raw length or copied source detail.\n"
+            "- A concise accurate paraphrase should outrank a longer extraction-heavy response."
+        )
+    return ""
+
+
+def build_pass2_student_summaries(
+    known_ids: list[str],
+    raw_summaries: dict[str, str],
+    assessor_items: dict[str, dict],
+    genre: str | None,
+    portfolio_scope: bool,
+    max_chars: int,
+) -> list[dict]:
+    entries = []
+    normalized_genre = str(genre or "").strip().lower()
+    for sid in known_ids:
+        raw_summary = raw_summaries.get(sid, "")
+        item = assessor_items.get(sid, {})
+        if portfolio_scope:
+            summary = summarize_portfolio_for_ranking(item, max_chars=max_chars)
+        elif normalized_genre == "summary_report":
+            summary = build_summary_report_ranking_summary(item, raw_summary, max_chars=max_chars)
+        else:
+            summary = raw_summary
+        entries.append({"student_id": sid, "summary": summary or _truncate_compact(raw_summary, max_chars)})
+    return entries
+
+
+def unanimous_portfolio_seed_order(pass1_scores_by_assessor: dict[str, dict], known_ids: list[str]) -> list[str] | None:
+    orders = []
+    for assessor in sorted(pass1_scores_by_assessor):
+        scores = pass1_scores_by_assessor.get(assessor, {})
+        if not isinstance(scores, dict) or not scores:
+            continue
+        orders.append(ranking_from_scores(scores, known_ids))
+    if not orders:
+        return None
+    first = orders[0]
+    if all(order == first for order in orders[1:]):
+        return list(first)
+    return None
 
 
 def main() -> int:
@@ -284,12 +418,14 @@ def main() -> int:
             else:
                 pass1_preflight_texts[student_id] = texts.get(student_id, "")
     summaries = []
+    raw_summary_map = {}
     for sid, text in texts.items():
         pieces = portfolio_pieces_by_student.get(sid, []) if portfolio_scope else []
         if len(pieces) > 1:
             summary = summarize_portfolio_pieces(pieces, args.max_summary_chars)
         else:
             summary = summarize_text(text, args.max_summary_chars)
+        raw_summary_map[sid] = summary
         summaries.append({"student_id": sid, "summary": summary})
     if mode != "codex_local" and not args.ignore_cost_limits:
         pricing = load_json(Path(args.pricing))
@@ -330,6 +466,7 @@ def main() -> int:
             if per_job_max and total_cost > (per_job_max * (alert_at / 100.0)):
                 print(f"Warning: estimated total cost ${total_cost:.2f} is above {alert_at}% of job limit ${per_job_max:.2f}")
     pass1_scores_by_assessor = {}
+    pass1_items_by_assessor = {}
     model_successes = 0
     model_attempts = 0
     portfolio_piece_report = {"enabled": bool(portfolio_scope), "students": {}}
@@ -535,6 +672,9 @@ def main() -> int:
         pass1_scores_by_assessor[assessor] = {
             s["student_id"]: float(s.get("rubric_total_points", 0.0) or 0.0) for s in scores
         }
+        pass1_items_by_assessor[assessor] = {
+            s["student_id"]: s for s in scores
+        }
         pass1_payload = {
             "assessor_id": f"assessor_{assessor}",
             "role": "llm_assessor",
@@ -545,11 +685,26 @@ def main() -> int:
         write_text_atomic(out_path, json.dumps(pass1_payload, indent=2))
     if portfolio_scope:
         write_portfolio_piece_report(Path(args.portfolio_piece_report), portfolio_piece_report)
-    student_summaries = summaries
     known_ids = list(texts.keys())
+    portfolio_seed_order = unanimous_portfolio_seed_order(pass1_scores_by_assessor, known_ids) if portfolio_scope else None
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
-        prompt = build_pass2_prompt(assessor, rubric, outline, student_summaries, grade_context)
+        ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope)
+        student_summaries = build_pass2_student_summaries(
+            known_ids,
+            raw_summary_map,
+            pass1_items_by_assessor.get(assessor, {}),
+            genre,
+            portfolio_scope,
+            args.max_summary_chars,
+        )
+        prompt = build_pass2_prompt(
+            assessor,
+            rubric,
+            outline,
+            student_summaries,
+            grade_context + ("\n\n" + ranking_contract if ranking_contract else ""),
+        )
         error = ""
         try:
             model_attempts += 1
@@ -625,6 +780,8 @@ def main() -> int:
                     f.write(json.dumps(failure) + "\n")
         if not lines:
             lines = list(score_order)
+        if portfolio_seed_order:
+            lines = list(portfolio_seed_order)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
         write_text_atomic(out_path, "\n".join(lines))
     if mode == "openai":

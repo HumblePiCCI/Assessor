@@ -389,7 +389,7 @@ def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monk
     assert any("C1" in prompt for prompt in piece_prompts)
     assert all("PF1" not in prompt for prompt in piece_prompts)
     pass2_prompts = [prompt for prompt in prompts if "Rank the students best to worst." in prompt]
-    assert any("Opening the Fridge" in prompt and "The Applause" in prompt for prompt in pass2_prompts)
+    assert any("Portfolio overall score" in prompt and "Piece profile:" in prompt for prompt in pass2_prompts)
 
 
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
@@ -443,6 +443,87 @@ def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
     assert rla.main() == 0
     ranking = (pass2_out / "assessor_A.txt").read_text(encoding="utf-8").strip().splitlines()
     assert ranking == ["s2", "s1"]
+
+
+def test_run_llm_assessors_uses_unanimous_portfolio_seed_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Title A\nStrong first piece.\n\nTitle B\nStrong second piece.", encoding="utf-8")
+    (texts_dir / "s2.txt").write_text("Title C\nMiddle piece.\n\nTitle D\nMiddle follow-up.", encoding="utf-8")
+    (texts_dir / "s3.txt").write_text("Title E\nWeak piece.\n\nTitle F\nWeak follow-up.", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 2,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    score_map = {
+        ("A", "s1::p01"): 84,
+        ("A", "s1::p02"): 82,
+        ("A", "s2::p01"): 72,
+        ("A", "s2::p02"): 70,
+        ("A", "s3::p01"): 60,
+        ("A", "s3::p02"): 58,
+        ("B", "s1::p01"): 85,
+        ("B", "s1::p02"): 83,
+        ("B", "s2::p01"): 73,
+        ("B", "s2::p02"): 71,
+        ("B", "s3::p01"): 61,
+        ("B", "s3::p02"): 59,
+        ("C", "s1::p01"): 86,
+        ("C", "s1::p02"): 84,
+        ("C", "s2::p01"): 74,
+        ("C", "s2::p02"): 72,
+        ("C", "s3::p01"): 62,
+        ("C", "s3::p02"): 60,
+    }
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            student_piece = prompt.split("Student ID: ", 1)[1].splitlines()[0].strip()
+            assessor = prompt.split("You are Assessor ", 1)[1].split(".", 1)[0].strip()
+            score = score_map[(assessor, student_piece)]
+            text = json.dumps({"student_id": student_piece, "rubric_total_points": score, "criteria_points": {}, "notes": "ok"})
+            return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s3", "s2", "s1"]})}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "no_criteria.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A,B,C",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    for assessor in ("A", "B", "C"):
+        ranking = (pass2_out / f"assessor_{assessor}.txt").read_text(encoding="utf-8").strip().splitlines()
+        assert ranking == ["s1", "s2", "s3"]
 
 
 def test_run_llm_assessors_pass2_repair_fallback(tmp_path, monkeypatch):

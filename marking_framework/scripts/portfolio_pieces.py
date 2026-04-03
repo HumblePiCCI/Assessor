@@ -88,6 +88,52 @@ def summarize_portfolio_pieces(pieces: list[dict], max_chars: int) -> str:
     return _truncate(" | ".join(parts), max_chars)
 
 
+def summarize_portfolio_for_ranking(item: dict, max_chars: int = 280) -> str:
+    if not isinstance(item, dict):
+        return ""
+    piece_rows = item.get("portfolio_piece_scores") or []
+    overall_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    overall_level = str(item.get("portfolio_overall_level") or _piece_band(overall_score))
+    counts: dict[str, int] = {}
+    for piece in piece_rows:
+        level = str(piece.get("level") or _piece_band(piece.get("rubric_total_points", 0.0)))
+        counts[level] = counts.get(level, 0) + 1
+    profile = ", ".join(
+        f"{counts[level]} at level {level}"
+        for level in ("4+", "4", "3", "2", "1")
+        if counts.get(level)
+    )
+    strongest = sorted(
+        piece_rows,
+        key=lambda row: (-float(row.get("rubric_total_points", 0.0) or 0.0), str(row.get("piece_id", ""))),
+    )[:2]
+    weakest = sorted(
+        piece_rows,
+        key=lambda row: (float(row.get("rubric_total_points", 0.0) or 0.0), str(row.get("piece_id", ""))),
+    )[:1]
+    parts = [f"Portfolio overall score {overall_score:.2f} (level {overall_level})."]
+    if profile:
+        parts.append(f"Piece profile: {profile}.")
+    if strongest:
+        parts.append(
+            "Strongest pieces: "
+            + ", ".join(
+                f"{str(piece.get('title') or piece.get('piece_id') or 'Piece')} ({float(piece.get('rubric_total_points', 0.0) or 0.0):.2f})"
+                for piece in strongest
+            )
+            + "."
+        )
+    if weakest and len(piece_rows) > 2:
+        piece = weakest[0]
+        parts.append(
+            f"Lowest piece: {str(piece.get('title') or piece.get('piece_id') or 'Piece')} ({float(piece.get('rubric_total_points', 0.0) or 0.0):.2f})."
+        )
+    note = _truncate(str(item.get("notes", "") or ""), 120)
+    if note:
+        parts.append(note)
+    return _truncate(" ".join(part for part in parts if part).strip(), max_chars)
+
+
 def _piece_band(score: float) -> str:
     level = normalize_level(score)
     return level or "1"

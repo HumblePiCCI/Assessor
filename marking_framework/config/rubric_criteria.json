@@ -279,6 +279,19 @@
       ]
     },
     "summary_report": {
+      "contract_criteria_ids": ["SR1", "SR2", "SR3", "C1", "C2"],
+      "contract_guidance": [
+        "Score this as summary writing, not generic informative prose.",
+        "A top summary captures the main idea accurately, selects only essential information, and paraphrases in the student's own words.",
+        "Copied or extraction-heavy detail must lower the score even when the content is factually accurate."
+      ],
+      "evidence_requirements": {
+        "force_require_evidence": true,
+        "quote_validation": false,
+        "rationale_min_words": 10,
+        "hard_fail_on_evidence_errors": true,
+        "preserve_validation": true
+      },
       "additional_criteria": [
         {
           "id": "SR1",
