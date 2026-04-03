@@ -1,0 +1,3798 @@
+{
+  "candidate_level_confusion": {
+    "1": {
+      "1": 14,
+      "2": 2,
+      "3": 1
+    },
+    "2": {
+      "1": 3,
+      "2": 11,
+      "3": 2
+    },
+    "3": {
+      "3": 15,
+      "4": 2
+    },
+    "4": {
+      "1": 1,
+      "2": 1,
+      "3": 4,
+      "4": 13
+    }
+  },
+  "candidate_mismatches": [
+    {
+      "dataset": "thoughtful_assessment_grade6_8_instructions_hydrochloric",
+      "display_name": "Using Hydrochloric Acid (Strong)",
+      "gold_canonical_level": "4",
+      "gold_level": "4",
+      "gold_rank": 1,
+      "predicted_level": "1",
+      "predicted_rank": 3,
+      "predicted_score": 59.0,
+      "rank_displacement": 2,
+      "score_band_error": 21.0,
+      "student_id": "s001"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade9_10_argument",
+      "display_name": "Grading Students on Effort",
+      "gold_canonical_level": "1",
+      "gold_level": "1",
+      "gold_rank": 4,
+      "predicted_level": "3",
+      "predicted_rank": 4,
+      "predicted_score": 78.89,
+      "rank_displacement": 0,
+      "score_band_error": 19.89,
+      "student_id": "s004"
+    },
+    {
+      "dataset": "internet_samples",
+      "display_name": "sample_level4_internet",
+      "gold_canonical_level": "4",
+      "gold_level": "4",
+      "gold_rank": 1,
+      "predicted_level": "2",
+      "predicted_rank": 3,
+      "predicted_score": 68.41,
+      "rank_displacement": 2,
+      "score_band_error": 11.59,
+      "student_id": "s004"
+    },
+    {
+      "dataset": "naep_1998_g4_narrative_castle",
+      "display_name": "NAEP Skillful",
+      "gold_canonical_level": "4",
+      "gold_level": "Skillful",
+      "gold_rank": 2,
+      "predicted_level": "3",
+      "predicted_rank": 2,
+      "predicted_score": 70.0,
+      "rank_displacement": 0,
+      "score_band_error": 10.0,
+      "student_id": "s002"
+    },
+    {
+      "dataset": "naep_1998_g8_informative_tv_show",
+      "display_name": "NAEP Skillful",
+      "gold_canonical_level": "4",
+      "gold_level": "Skillful",
+      "gold_rank": 2,
+      "predicted_level": "3",
+      "predicted_rank": 2,
+      "predicted_score": 70.0,
+      "rank_displacement": 0,
+      "score_band_error": 10.0,
+      "student_id": "s002"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade2_book_review",
+      "display_name": "Julius the Baby of the World",
+      "gold_canonical_level": "4",
+      "gold_level": "4",
+      "gold_rank": 1,
+      "predicted_level": "3",
+      "predicted_rank": 1,
+      "predicted_score": 70.0,
+      "rank_displacement": 0,
+      "score_band_error": 10.0,
+      "student_id": "s001"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade9_10_argument",
+      "display_name": "The Right to Dress",
+      "gold_canonical_level": "2",
+      "gold_level": "2",
+      "gold_rank": 3,
+      "predicted_level": "3",
+      "predicted_rank": 3,
+      "predicted_score": 76.64,
+      "rank_displacement": 0,
+      "score_band_error": 7.64,
+      "student_id": "s003"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade6_8_persuasive_letter",
+      "display_name": "Dear Dr. Larson (Strong)",
+      "gold_canonical_level": "4",
+      "gold_level": "4",
+      "gold_rank": 1,
+      "predicted_level": "3",
+      "predicted_rank": 1,
+      "predicted_score": 73.67,
+      "rank_displacement": 0,
+      "score_band_error": 6.33,
+      "student_id": "s001"
+    },
+    {
+      "dataset": "naep_1998_g4_narrative_castle",
+      "display_name": "NAEP Uneven",
+      "gold_canonical_level": "2",
+      "gold_level": "Uneven",
+      "gold_rank": 4,
+      "predicted_level": "1",
+      "predicted_rank": 5,
+      "predicted_score": 55.0,
+      "rank_displacement": 1,
+      "score_band_error": 5.0,
+      "student_id": "s004"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade2_book_review",
+      "display_name": "Dear Mr. Marc Brown",
+      "gold_canonical_level": "2",
+      "gold_level": "2",
+      "gold_rank": 3,
+      "predicted_level": "1",
+      "predicted_rank": 4,
+      "predicted_score": 56.08,
+      "rank_displacement": 1,
+      "score_band_error": 3.92,
+      "student_id": "s003"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade11_12_speech",
+      "display_name": "What I Will Do for This Country",
+      "gold_canonical_level": "1",
+      "gold_level": "1",
+      "gold_rank": 4,
+      "predicted_level": "2",
+      "predicted_rank": 4,
+      "predicted_score": 62.33,
+      "rank_displacement": 0,
+      "score_band_error": 3.33,
+      "student_id": "s004"
+    },
+    {
+      "dataset": "internet_samples",
+      "display_name": "sample_level2_internet",
+      "gold_canonical_level": "2",
+      "gold_level": "2",
+      "gold_rank": 3,
+      "predicted_level": "3",
+      "predicted_rank": 1,
+      "predicted_score": 71.81,
+      "rank_displacement": 2,
+      "score_band_error": 2.81,
+      "student_id": "s002"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade6_8_persuasive_letter",
+      "display_name": "Dear Dr. Larson (Okay)",
+      "gold_canonical_level": "2",
+      "gold_level": "2",
+      "gold_rank": 3,
+      "predicted_level": "1",
+      "predicted_rank": 3,
+      "predicted_score": 57.8,
+      "rank_displacement": 0,
+      "score_band_error": 2.2,
+      "student_id": "s003"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade11_12_speech",
+      "display_name": "Inauguration Speech of the 49th U.S. President",
+      "gold_canonical_level": "3",
+      "gold_level": "3",
+      "gold_rank": 2,
+      "predicted_level": "4",
+      "predicted_rank": 2,
+      "predicted_score": 80.83,
+      "rank_displacement": 0,
+      "score_band_error": 1.83,
+      "student_id": "s002"
+    },
+    {
+      "dataset": "naep_1998_g4_narrative_castle",
+      "display_name": "NAEP Insufficient",
+      "gold_canonical_level": "1",
+      "gold_level": "Insufficient",
+      "gold_rank": 5,
+      "predicted_level": "2",
+      "predicted_rank": 4,
+      "predicted_score": 60.64,
+      "rank_displacement": 1,
+      "score_band_error": 1.64,
+      "student_id": "s005"
+    },
+    {
+      "dataset": "thoughtful_assessment_grade9_10_argument",
+      "display_name": "Lack of Respect a Growing Problem",
+      "gold_canonical_level": "3",
+      "gold_level": "3",
+      "gold_rank": 2,
+      "predicted_level": "4",
+      "predicted_rank": 2,
+      "predicted_score": 80.0,
+      "rank_displacement": 0,
+      "score_band_error": 1.0,
+      "student_id": "s002"
+    }
+  ],
+  "comparison": {
+    "baseline_mode": "fallback",
+    "baseline_weighted_summary": {
+      "cost_usd_mean": 0.0,
+      "exact_level_hit_rate_mean": 0.724638,
+      "kendall_tau_mean": 0.918841,
+      "latency_seconds_mean": 117.336148,
+      "max_rank_displacement_mean": 0.347826,
+      "mean_rank_displacement_mean": 0.144927,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.95942,
+      "score_band_mae_mean": 1.87913,
+      "within_one_level_hit_rate_mean": 0.985507
+    },
+    "candidate_mode": "main",
+    "candidate_weighted_summary": {
+      "cost_usd_mean": 0.324031,
+      "exact_level_hit_rate_mean": 0.768116,
+      "kendall_tau_mean": 0.86087,
+      "latency_seconds_mean": 236.261556,
+      "max_rank_displacement_mean": 0.463768,
+      "mean_rank_displacement_mean": 0.202898,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.930435,
+      "score_band_mae_mean": 1.940435,
+      "within_one_level_hit_rate_mean": 0.956522
+    },
+    "delta": {
+      "cost_usd_mean": 0.324031,
+      "exact_level_hit_rate_mean": 0.043478,
+      "kendall_tau_mean": -0.057971,
+      "latency_seconds_mean": 118.925408,
+      "max_rank_displacement_mean": 0.115942,
+      "mean_rank_displacement_mean": 0.057971,
+      "model_usage_ratio_mean": 0.0,
+      "pairwise_order_agreement_mean": -0.028985,
+      "score_band_mae_mean": 0.061305,
+      "within_one_level_hit_rate_mean": -0.028985
+    }
+  },
+  "dataset_count": 16,
+  "datasets": [
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.25,
+        "kendall_tau_mean": 0.666667,
+        "latency_seconds_mean": 94.494915,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.5,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.833333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 3.835,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                63.34
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                75.25
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                74.25
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                75.25
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.230519,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 0.0,
+        "latency_seconds_mean": 173.359793,
+        "max_rank_displacement_mean": 2.0,
+        "mean_rank_displacement_mean": 1.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.5,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 3.71,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.44
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.81
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.09
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                68.41
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 0.75
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.230519,
+          "exact_level_hit_rate": 0.25,
+          "kendall_tau": -0.666667,
+          "latency_seconds": 78.864878,
+          "max_rank_displacement": 1.0,
+          "mean_rank_displacement": 0.5,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": -0.333333,
+          "score_band_mae": -0.125,
+          "within_one_level_hit_rate": -0.25
+        },
+        "present": true
+      },
+      "name": "internet_samples",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/internet_samples",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 98.186908,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.85
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.185644,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 141.152941,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.5
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.185644,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 42.966033,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "internet_samples_eqao_orq",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/internet_samples_eqao_orq",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 62.82499,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 1.145,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                56.82
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                72.58
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                84.08
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.15155,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 112.39363,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                53.93
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.98
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                74.38
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                84.28
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.15155,
+          "exact_level_hit_rate": 0.5,
+          "kendall_tau": 0.0,
+          "latency_seconds": 49.56864,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -1.145,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "internet_samples_thoughtful",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/internet_samples_thoughtful",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 0.866667,
+        "latency_seconds_mean": 107.641545,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.333333,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.933333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                85.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.08
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                72.17
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                61.58
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                58.17
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.0
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.294175,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 0.866667,
+        "latency_seconds_mean": 218.826828,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.333333,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.933333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                85.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.0
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.0
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.294175,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 111.185283,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "naep_1998_g12_persuasive_one_vote",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/naep_1998_g12_persuasive_one_vote",
+      "student_count": 6
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.666667,
+        "kendall_tau_mean": 0.866667,
+        "latency_seconds_mean": 98.938944,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.333333,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.933333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 4.166667,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                56.08
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.0
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.222714,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 0.866667,
+        "latency_seconds_mean": 159.75484,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.333333,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.933333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 5.285,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                55.0
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.64
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                39.93
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.222714,
+          "exact_level_hit_rate": -0.166667,
+          "kendall_tau": 0.0,
+          "latency_seconds": 60.815896,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 1.118333,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "naep_1998_g4_narrative_castle",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/naep_1998_g4_narrative_castle",
+      "student_count": 6
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.833333,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 102.313485,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.5,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.88
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.0
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.246043,
+        "exact_level_hit_rate_mean": 0.833333,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 164.480624,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 1.666667,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                85.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.2
+              ]
+            },
+            "s005": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                5
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.88
+              ]
+            },
+            "s006": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                6
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.0
+              ]
+            }
+          }
+        },
+        "student_count": 6,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.246043,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 62.167139,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -0.833333,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "naep_1998_g8_informative_tv_show",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/naep_1998_g8_informative_tv_show",
+      "student_count": 6
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.25,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 71.037933,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.3125,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.03
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                66.22
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.236134,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 164.275704,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 1.29,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                86.34
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.83
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                65.37
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.33
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.236134,
+          "exact_level_hit_rate": 0.25,
+          "kendall_tau": 0.0,
+          "latency_seconds": 93.237771,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -1.0225,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade11_12_speech",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade11_12_speech",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 71.103702,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.9575,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                58.17
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.28
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.19972,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 0.666667,
+        "latency_seconds_mean": 145.763516,
+        "max_rank_displacement_mean": 1.0,
+        "mean_rank_displacement_mean": 0.5,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.833333,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 3.48,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                56.08
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.19972,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": -0.333333,
+          "latency_seconds": 74.659814,
+          "max_rank_displacement": 1.0,
+          "mean_rank_displacement": 0.5,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": -0.166667,
+          "score_band_mae": 0.5225,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade2_book_review",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade2_book_review",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 62.807542,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                72.17
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.28
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.88
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.209678,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 152.667891,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                55.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.209678,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 89.860349,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade3_personal_narrative",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade3_personal_narrative",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.75,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 100.833794,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                72.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                64.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.88
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.255049,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 183.054727,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.05,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                82.2
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                72.8
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                68.4
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.2
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.255049,
+          "exact_level_hit_rate": 0.25,
+          "kendall_tau": 0.0,
+          "latency_seconds": 82.220933,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -1.95,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade4_5_research",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade4_5_research",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.75,
+        "kendall_tau_mean": 0.333333,
+        "latency_seconds_mean": 98.371076,
+        "max_rank_displacement_mean": 2.0,
+        "mean_rank_displacement_mean": 1.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.666667,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 5.765,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                56.94
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                75.35
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                60.42
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                55.89
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 0.75
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.240455,
+        "exact_level_hit_rate_mean": 0.75,
+        "kendall_tau_mean": 0.333333,
+        "latency_seconds_mean": 176.030728,
+        "max_rank_displacement_mean": 2.0,
+        "mean_rank_displacement_mean": 1.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 0.666667,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 5.25,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                74.51
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.72
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                56.4
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 0.75
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.240455,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 77.659652,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -0.515,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade6_8_instructions_hydrochloric",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade6_8_instructions_hydrochloric",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 64.927597,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.865,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                58.54
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.6
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.177604,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 126.759298,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 2.1325,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                73.67
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                70.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                57.8
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                54.6
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.177604,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 61.831701,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": -0.7325,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade6_8_persuasive_letter",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade6_8_persuasive_letter",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 108.071188,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                82.28
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                79.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                69.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.307025,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 227.366845,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.77
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                79.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                69.0
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "1"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                59.0
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.307025,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 119.295657,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade6_8_summary_iron",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade6_8_summary_iron",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 0.5,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 74.530158,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 1.535,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                82.33
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                81.81
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                64.35
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.33
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.245651,
+        "exact_level_hit_rate_mean": 0.25,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 174.650648,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 7.1325,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                86.92
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                80.0
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                76.64
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                78.89
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 0.75
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.245651,
+          "exact_level_hit_rate": -0.25,
+          "kendall_tau": 0.0,
+          "latency_seconds": 100.12049,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 5.5975,
+          "within_one_level_hit_rate": -0.25
+        },
+        "present": true
+      },
+      "name": "thoughtful_assessment_grade9_10_argument",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/thoughtful_assessment_grade9_10_argument",
+      "student_count": 4
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 285.436894,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                81.5
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.5
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.95
+              ]
+            }
+          }
+        },
+        "student_count": 3,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 0.951111,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 714.356758,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                81.5
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.5
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.07
+              ]
+            }
+          }
+        },
+        "student_count": 3,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 0.951111,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 428.919864,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "uk_sta_2018_ks1_writing_portfolios",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/uk_sta_2018_ks1_writing_portfolios",
+      "student_count": 3
+    },
+    {
+      "baseline_summary": {
+        "cost_usd_mean": 0.0,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 439.44011,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                81.5
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.04
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.5
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.91
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "candidate_summary": {
+        "cost_usd_mean": 1.292767,
+        "exact_level_hit_rate_mean": 1.0,
+        "kendall_tau_mean": 1.0,
+        "latency_seconds_mean": 947.67511,
+        "max_rank_displacement_mean": 0.0,
+        "mean_rank_displacement_mean": 0.0,
+        "model_usage_ratio_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "runs_attempted": 1,
+        "runs_successful": 1,
+        "score_band_mae_mean": 0.0,
+        "stability": {
+          "cohort_metric_variance": {
+            "cost_usd": 0.0,
+            "exact_level_hit_rate": 0.0,
+            "kendall_tau": 0.0,
+            "latency_seconds": 0.0,
+            "max_rank_displacement": 0.0,
+            "mean_rank_displacement": 0.0,
+            "model_usage_ratio": 0.0,
+            "pairwise_order_agreement": 0.0,
+            "score_band_mae": 0.0,
+            "within_one_level_hit_rate": 0.0
+          },
+          "max_student_level_variance": 0.0,
+          "max_student_rank_variance": 0.0,
+          "max_student_score_variance": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "per_student": {
+            "s001": {
+              "level_variance": 0.0,
+              "levels": [
+                "4"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                1
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                81.5
+              ]
+            },
+            "s002": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                2
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.11
+              ]
+            },
+            "s003": {
+              "level_variance": 0.0,
+              "levels": [
+                "3"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                3
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                71.5
+              ]
+            },
+            "s004": {
+              "level_variance": 0.0,
+              "levels": [
+                "2"
+              ],
+              "rank_variance": 0.0,
+              "ranks": [
+                4
+              ],
+              "score_variance": 0.0,
+              "scores": [
+                62.92
+              ]
+            }
+          }
+        },
+        "student_count": 4,
+        "within_one_level_hit_rate_mean": 1.0
+      },
+      "comparison": {
+        "baseline_mode": "fallback",
+        "candidate_mode": "main",
+        "delta": {
+          "cost_usd": 1.292767,
+          "exact_level_hit_rate": 0.0,
+          "kendall_tau": 0.0,
+          "latency_seconds": 508.235,
+          "max_rank_displacement": 0.0,
+          "mean_rank_displacement": 0.0,
+          "mean_student_level_variance": 0.0,
+          "mean_student_rank_variance": 0.0,
+          "mean_student_score_variance": 0.0,
+          "model_usage_ratio": 0.0,
+          "pairwise_order_agreement": 0.0,
+          "score_band_mae": 0.0,
+          "within_one_level_hit_rate": 0.0
+        },
+        "present": true
+      },
+      "name": "uk_sta_2018_ks2_writing_portfolios",
+      "path": "/Users/bldt/Desktop/Essays/marking_framework/bench/uk_sta_2018_ks2_writing_portfolios",
+      "student_count": 4
+    }
+  ],
+  "failed_datasets": [],
+  "generated_at": "2026-04-03T21:12:16.910241+00:00",
+  "runs_per_dataset_mode": 1,
+  "student_count": 69,
+  "summary_version": 1
+}
