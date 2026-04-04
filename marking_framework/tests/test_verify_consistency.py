@@ -71,7 +71,7 @@ def test_verify_consistency_collects_normalized_judgments(tmp_path, monkeypatch)
     assert data["comparison_window"] == 2
     assert data["checks"][0]["pair"] == ["s1", "s2"]
     assert data["checks"][0]["decision"] == "SWAP"
-    assert data["checks"][0]["model_metadata"]["requested_model"] == "gpt-5.2"
+    assert data["checks"][0]["model_metadata"]["requested_model"] == "gpt-5.4-mini"
 
 
 def test_verify_consistency_apply_runs_global_reranker(tmp_path, monkeypatch):
