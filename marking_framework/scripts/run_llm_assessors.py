@@ -218,7 +218,7 @@ def _resolve_consensus_pass2_item(student_id: str, assessor_items: dict, genre: 
     if not collected:
         return {}
     normalized_genre = str(genre or "").strip().lower()
-    if normalized_genre != "summary_report":
+    if normalized_genre not in {"summary_report", "argumentative"}:
         preferred = [item for item in collected if not _is_fallback_deterministic_note(item.get("notes"))]
         return dict(preferred[0] if preferred else collected[0])
 
@@ -382,7 +382,171 @@ def build_summary_report_ranking_summary(item: dict, fallback_summary: str, max_
     return _truncate_compact(" ".join(parts), max_chars)
 
 
-def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool) -> str:
+def _argumentative_signal_bonus_penalty(note_text: str) -> float:
+    lowered = str(note_text or "").lower()
+    bonus = 0.0
+    penalty = 0.0
+    if (
+        "clear claim" in lowered
+        or "strong claim" in lowered
+        or "arguable claim" in lowered
+        or "focused argument" in lowered
+    ):
+        bonus += 5.0
+    if (
+        "well-supported" in lowered
+        or "effective evidence" in lowered
+        or "strong evidence" in lowered
+        or "relevant evidence" in lowered
+        or "credible evidence" in lowered
+    ):
+        bonus += 6.0
+    if (
+        "addresses counterargument" in lowered
+        or "engages counterargument" in lowered
+        or "acknowledges opposition" in lowered
+        or "responds to opposing views" in lowered
+    ):
+        bonus += 4.0
+    if "convincing" in lowered or "persuasive" in lowered or "strong reasoning" in lowered:
+        bonus += 4.0
+    if "effective organization" in lowered or "logical progression" in lowered:
+        bonus += 2.5
+
+    if (
+        "unclear claim" in lowered
+        or "weak claim" in lowered
+        or "claim is vague" in lowered
+        or "lacks a clear claim" in lowered
+    ):
+        penalty += 7.0
+    if (
+        "limited evidence" in lowered
+        or "thin evidence" in lowered
+        or "unsupported" in lowered
+        or "underdeveloped evidence" in lowered
+        or "few specifics" in lowered
+    ):
+        penalty += 8.0
+    if (
+        "ignores counterargument" in lowered
+        or "no counterargument" in lowered
+        or "one-sided" in lowered
+        or "does not address opposing views" in lowered
+    ):
+        penalty += 4.5
+    if (
+        "repetitive" in lowered
+        or "formulaic" in lowered
+        or "list-like" in lowered
+        or "loosely connected reasons" in lowered
+    ):
+        penalty += 3.5
+    if "off-topic" in lowered or "drifts" in lowered or "summary of the topic" in lowered:
+        penalty += 4.0
+    return bonus - penalty
+
+
+def build_argumentative_seed_order(known_ids: list[str], assessor_items: dict[str, dict]) -> list[str] | None:
+    if not known_ids:
+        return None
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "argumentative")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        weighted_components = []
+        total_weight = 0.0
+        for cid, weight in (
+            ("AR1", 0.26),
+            ("AR2", 0.30),
+            ("AR3", 0.18),
+            ("C1", 0.10),
+            ("C3", 0.08),
+            ("T1", 0.08),
+        ):
+            value = criteria_points.get(cid)
+            if isinstance(value, (int, float)):
+                weighted_components.append(weight * float(value))
+                total_weight += weight
+        rubric_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+        base_signal = (sum(weighted_components) / total_weight) if total_weight > 0 else rubric_score
+        note_signal = _argumentative_signal_bonus_penalty(str(item.get("notes", "") or ""))
+        scores[sid] = round((0.72 * base_signal) + (0.28 * rubric_score) + note_signal, 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
+def build_argumentative_report_ranking_summary(item: dict, fallback_summary: str, max_chars: int = 280) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    ar1 = float(criteria_points.get("AR1", 0.0) or 0.0)
+    ar2 = float(criteria_points.get("AR2", 0.0) or 0.0)
+    ar3 = float(criteria_points.get("AR3", 0.0) or 0.0)
+    c1 = float(criteria_points.get("C1", 0.0) or 0.0)
+    c3 = float(criteria_points.get("C3", 0.0) or 0.0)
+    parts = [f"Argument score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("claim", ar1),
+        ("evidence", ar2),
+        ("counterargument", ar3),
+        ("organization", c1),
+        ("sentence craft", c3),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    strengths = []
+    cautions = []
+    if ar1 >= 80:
+        strengths.append("clear arguable claim")
+    elif ar1 and ar1 < 68:
+        cautions.append("claim control is weak")
+    if ar2 >= 80:
+        strengths.append("well-supported reasoning")
+    elif ar2 and ar2 < 68:
+        cautions.append("evidence is thin or generic")
+    if ar3 >= 78:
+        strengths.append("engages opposition")
+    elif ar3 and ar3 < 62:
+        cautions.append("counterargument handling is limited")
+    if c1 >= 78:
+        strengths.append("logical progression")
+    elif c1 and c1 < 64:
+        cautions.append("organization is loose")
+    note_text = str(item.get("notes", "") or fallback_summary)
+    lowered_note = note_text.lower()
+    if "convincing" in lowered_note or "persuasive" in lowered_note:
+        strengths.append("convincing overall case")
+    if "one-sided" in lowered_note or "unsupported" in lowered_note:
+        cautions.append("argument remains one-sided or unsupported")
+    if "formulaic" in lowered_note or "repetitive" in lowered_note:
+        cautions.append("repetition weakens force")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(dict.fromkeys(cautions)) + ".")
+    note = _truncate_compact(note_text, 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
+
+
+def use_argumentative_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    if portfolio_scope or str(genre or "").strip().lower() != "argumentative":
+        return False
+    cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
+    source_family = str((metadata or {}).get("source_family") or "").strip().lower()
+    return "same_rubric_family_cross_topic" in cohort_shape and "thoughtful" in source_family
+
+
+def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool, metadata: dict | None = None) -> str:
     if portfolio_scope:
         return (
             "RANKING CONTRACT:\n"
@@ -396,6 +560,13 @@ def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool) -> st
             "- Rank these as summaries, not generic informational responses.\n"
             "- Accurate main-idea capture, concision, and paraphrase should outweigh raw length or copied source detail.\n"
             "- A concise accurate paraphrase should outrank a longer extraction-heavy response."
+        )
+    if use_argumentative_seed_order(metadata or {}, genre, portfolio_scope):
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as argumentative responses across different topics, not by topic excitement or surface polish alone.\n"
+            "- Stronger claim control, evidence quality, reasoning, and counterargument handling should outweigh sheer length or rhetorical flourish.\n"
+            "- A clearer better-supported argument should outrank a longer or more dramatic but thinner response."
         )
     return ""
 
@@ -414,9 +585,11 @@ def build_pass2_student_summaries(
     genre: str | None,
     portfolio_scope: bool,
     max_chars: int,
+    metadata: dict | None = None,
 ) -> list[dict]:
     entries = []
     normalized_genre = str(genre or "").strip().lower()
+    argumentative_seed_mode = use_argumentative_seed_order(metadata or {}, genre, portfolio_scope)
     for sid in known_ids:
         raw_summary = raw_summaries.get(sid, "")
         item = _resolve_consensus_pass2_item(sid, assessor_items, genre)
@@ -424,6 +597,8 @@ def build_pass2_student_summaries(
             summary = summarize_portfolio_for_ranking(item, max_chars=max_chars)
         elif normalized_genre == "summary_report":
             summary = build_summary_report_ranking_summary(item, raw_summary, max_chars=max_chars)
+        elif normalized_genre == "argumentative" and argumentative_seed_mode:
+            summary = build_argumentative_report_ranking_summary(item, raw_summary, max_chars=max_chars)
         else:
             summary = raw_summary
         entries.append({"student_id": sid, "summary": summary or _truncate_compact(raw_summary, max_chars)})
@@ -874,16 +1049,19 @@ def main() -> int:
     known_ids = list(texts.keys())
     portfolio_seed_order = unanimous_portfolio_seed_order(pass1_scores_by_assessor, known_ids) if portfolio_scope else None
     summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
+    argumentative_seed_order = build_argumentative_seed_order(known_ids, pass1_items_by_assessor) if use_argumentative_seed_order(metadata, genre, portfolio_scope) else None
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
-        ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope)
+        ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope, metadata)
+        summary_item_source = pass1_items_by_assessor if (summary_seed_order or argumentative_seed_order) else pass1_items_by_assessor.get(assessor, {})
         student_summaries = build_pass2_student_summaries(
             known_ids,
             raw_summary_map,
-            pass1_items_by_assessor if genre == "summary_report" else pass1_items_by_assessor.get(assessor, {}),
+            summary_item_source,
             genre,
             portfolio_scope,
             args.max_summary_chars,
+            metadata,
         )
         prompt = build_pass2_prompt(
             assessor,
@@ -971,6 +1149,8 @@ def main() -> int:
             lines = list(portfolio_seed_order)
         elif summary_seed_order:
             lines = list(summary_seed_order)
+        elif argumentative_seed_order:
+            lines = list(argumentative_seed_order)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
         write_text_atomic(out_path, "\n".join(lines))
     if mode == "openai":

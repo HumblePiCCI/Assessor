@@ -195,6 +195,25 @@ def _sort_key(row: dict) -> tuple:
 
 def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
     strategy = str(strategy or "").strip().lower()
+    if strategy == "rubric_borda_blend_heavy":
+        blend = (0.8 * _num(row.get("rubric_mean_percent"), 0.0)) + (20.0 * _num(row.get("borda_percent"), 0.0))
+        return (
+            -blend,
+            -_num(row.get("rubric_mean_percent"), 0.0),
+            -_num(row.get("borda_percent"), 0.0),
+            _num(row.get("conventions_mistake_rate_percent"), 100.0),
+            _num(row.get("rank_sd"), 99.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    if strategy == "rubric_borda_blend":
+        blend = (0.65 * _num(row.get("rubric_mean_percent"), 0.0)) + (35.0 * _num(row.get("borda_percent"), 0.0))
+        return (
+            -blend,
+            -_num(row.get("rubric_mean_percent"), 0.0),
+            -_num(row.get("borda_percent"), 0.0),
+            _num(row.get("rank_sd"), 99.0),
+            str(row.get("student_id", "")).lower(),
+        )
     if strategy == "borda_percent":
         return (
             -_num(row.get("borda_percent"), 0.0),

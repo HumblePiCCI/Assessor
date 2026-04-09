@@ -241,6 +241,41 @@ def test_build_summary_seed_order_prefers_concise_and_non_opinion_summary_signal
     assert order == ["s1", "s2", "s3", "s4"]
 
 
+def test_build_argumentative_seed_order_prefers_claim_and_evidence_quality():
+    order = rla.build_argumentative_seed_order(
+        ["s1", "s2", "s3", "s4"],
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "criteria_points": {"AR1": 90, "AR2": 88, "AR3": 78, "C1": 82, "C3": 76},
+                    "rubric_total_points": 86.0,
+                    "notes": "Clear claim, well-supported reasons, and addresses counterargument.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "criteria_points": {"AR1": 82, "AR2": 74, "AR3": 60, "C1": 76, "C3": 74},
+                    "rubric_total_points": 81.0,
+                    "notes": "Persuasive overall, but evidence is thin and counterargument handling is limited.",
+                },
+                "s3": {
+                    "student_id": "s3",
+                    "criteria_points": {"AR1": 76, "AR2": 68, "AR3": 52, "C1": 72, "C3": 72},
+                    "rubric_total_points": 78.0,
+                    "notes": "Formulaic and somewhat one-sided; reasons are loosely connected.",
+                },
+                "s4": {
+                    "student_id": "s4",
+                    "criteria_points": {"AR1": 60, "AR2": 54, "AR3": 40, "C1": 62, "C3": 68},
+                    "rubric_total_points": 68.0,
+                    "notes": "Lacks a clear claim and remains unsupported.",
+                },
+            }
+        },
+    )
+    assert order == ["s1", "s2", "s3", "s4"]
+
+
 def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
@@ -268,6 +303,41 @@ def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     assert "Yesterday we went to bishops Wood to" in summary
 
 
+def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "A dramatic topic paragraph."},
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 83.0,
+                    "criteria_points": {"AR1": 86, "AR2": 82, "AR3": 74, "C1": 80, "C3": 76},
+                    "notes": "Clear claim, well-supported reasoning, and addresses counterargument.",
+                }
+            },
+            "B": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 81.0,
+                    "criteria_points": {"AR1": 84, "AR2": 78, "AR3": 72, "C1": 78, "C3": 74},
+                    "notes": "Convincing overall case with logical progression.",
+                }
+            },
+        },
+        "argumentative",
+        False,
+        260,
+        {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_rubric_family_cross_topic"},
+    )
+    summary = entries[0]["summary"]
+    assert "Argument score 82.00." in summary
+    assert "claim 85" in summary
+    assert "evidence 80" in summary
+    assert "counterargument 73" in summary
+    assert "clear arguable claim" in summary
+
+
 def test_unanimous_portfolio_seed_order_requires_full_agreement():
     scores = {
         "A": {"s1": 80, "s2": 70, "s3": 60},
@@ -277,6 +347,14 @@ def test_unanimous_portfolio_seed_order_requires_full_agreement():
     assert rla.unanimous_portfolio_seed_order(scores, ["s1", "s2", "s3"]) == ["s1", "s2", "s3"]
     scores["C"] = {"s1": 82, "s2": 60, "s3": 72}
     assert rla.unanimous_portfolio_seed_order(scores, ["s1", "s2", "s3"]) is None
+
+
+def test_use_argumentative_seed_order_only_for_thoughtful_cross_topic_argumentative():
+    metadata = {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_rubric_family_cross_topic"}
+    assert rla.use_argumentative_seed_order(metadata, "argumentative", False) is True
+    assert rla.use_argumentative_seed_order(metadata, "summary_report", False) is False
+    assert rla.use_argumentative_seed_order({"source_family": "NAEP / NCES", "cohort_shape": "same_rubric_family_cross_topic"}, "argumentative", False) is False
+    assert rla.use_argumentative_seed_order(metadata, "argumentative", True) is False
 
 
 def test_run_llm_assessors_file_helpers(tmp_path):
