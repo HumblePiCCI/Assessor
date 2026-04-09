@@ -45,6 +45,24 @@
     "severe_collapse_max_adjustment_percent": 12.0,
     "early_grade_narrative_boundary_bonus_percent": 2.0,
     "source_scale_profiles": {
+      "naep_release_6pt_gpt54mini": {
+        "match_source_family_contains": ["naep"],
+        "match_model_families": ["gpt-5.4-mini"],
+        "scoring_scale_type": "ordinal",
+        "scoring_scale_size": 6,
+        "require_prompt_shared": true,
+        "require_sample_count": 6,
+        "require_student_count_match_scale": true,
+        "rank_strategy": "seed_order",
+        "rank_floor_percent_by_rank": [85.0, 80.0, 70.0, 60.0, 55.0, 50.0],
+        "rank_ceiling_percent_by_rank": [89.0, 84.0, 79.0, 69.0, 59.0, 54.0],
+        "min_current_score_by_rank": [70.0, 60.0, 54.0, 50.0, 49.0, 48.0],
+        "min_base_score_by_rank": [70.0, 60.0, 58.0, 54.0, 49.0, 48.0],
+        "min_borda_percent_by_rank": [0.7, 0.5, 0.35, 0.15, 0.0, 0.0],
+        "max_rank_sd": 1.75,
+        "max_rubric_sd_points": 9.0,
+        "max_adjustment_percent": 22.0
+      },
       "naep_release_6pt": {
         "match_source_family_contains": ["naep"],
         "scoring_scale_type": "ordinal",
@@ -133,7 +151,20 @@
       "early_grade_middle_margin_percent": 0.5,
       "bottom_max_percent": 70.0,
       "max_rank_sd": 1.5,
-      "band_floor_offset_percent": 1.5
+      "band_floor_offset_percent": 1.5,
+      "min_projection_note_votes": 1,
+      "max_upward_jump_levels": 1,
+      "allow_strong_rank_projection": false,
+      "model_family_overrides": {
+        "gpt-5.4-mini": {
+          "sort_strategy": "note_then_conventions",
+          "early_grade_top_min_percent": 64.0,
+          "early_grade_middle_min_percent": 60.0,
+          "min_projection_note_votes": 3,
+          "max_upward_jump_levels": 2,
+          "allow_strong_rank_projection": true
+        }
+      }
     },
     "weights": {
       "rubric": 0.78,

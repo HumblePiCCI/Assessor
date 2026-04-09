@@ -202,6 +202,39 @@ def _portfolio_sort_key(row: dict) -> tuple:
     )
 
 
+def _portfolio_sort_key_with_strategy(row: dict, strategy: str) -> tuple:
+    strategy = str(strategy or "").strip().lower()
+    if strategy == "note_then_conventions":
+        return (
+            -_num(row.get("_level_order"), -1.0),
+            -_num(row.get("portfolio_note_estimate"), -1.0),
+            _num(row.get("conventions_mistake_rate_percent"), 100.0),
+            -_num(row.get("_composite_bucket"), 0.0),
+            -_num(row.get("_borda_bucket"), 0.0),
+            -_num(row.get("rubric_after_penalty_percent"), 0.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    return _portfolio_sort_key(row)
+
+
+def _merge_scale_config(scale_cfg: dict, scope: dict | None) -> dict:
+    merged = dict(scale_cfg or {})
+    scope = scope or {}
+    overrides = merged.get("model_family_overrides", {})
+    if not isinstance(overrides, dict):
+        merged.pop("model_family_overrides", None)
+        return merged
+    model_family = str(scope.get("pass1_model_family", "") or "").strip().lower()
+    for key, override in overrides.items():
+        if str(key or "").strip().lower() != model_family:
+            continue
+        if isinstance(override, dict):
+            merged.update(override)
+        break
+    merged.pop("model_family_overrides", None)
+    return merged
+
+
 def apply_portfolio_scale_calibration(
     rows: list[dict],
     config: dict,
@@ -211,6 +244,7 @@ def apply_portfolio_scale_calibration(
     scope = scope or {}
     portfolio_cfg = (config or {}).get("portfolio_mode", {}) if isinstance(config, dict) else {}
     scale_cfg = portfolio_cfg.get("ordinal_scale_calibration", {}) if isinstance(portfolio_cfg, dict) else {}
+    scale_cfg = _merge_scale_config(scale_cfg, scope)
     if not scale_cfg.get("enabled", True):
         return rows, {"enabled": False, "applied": 0, "reason": "disabled"}
     if not scope.get("is_small_ordinal_portfolio"):
@@ -218,7 +252,8 @@ def apply_portfolio_scale_calibration(
     if len(rows) < 3:
         return rows, {"enabled": False, "applied": 0, "reason": "insufficient_cohort"}
 
-    sorted_rows = [dict(row) for row in sorted(rows, key=_portfolio_sort_key)]
+    sort_strategy = str(scale_cfg.get("sort_strategy", "") or "").strip().lower()
+    sorted_rows = [dict(row) for row in sorted(rows, key=lambda row: _portfolio_sort_key_with_strategy(row, sort_strategy))]
     top_count, middle_count, bottom_count = _three_band_counts(
         len(sorted_rows),
         _num(scale_cfg.get("top_fraction"), 0.25),
@@ -243,6 +278,9 @@ def apply_portfolio_scale_calibration(
     bottom_max_percent = _num(scale_cfg.get("bottom_max_percent"), 70.0)
     max_rank_sd = _num(scale_cfg.get("max_rank_sd"), 1.5)
     floor_offset = _num(scale_cfg.get("band_floor_offset_percent"), 1.5)
+    min_projection_note_votes = int(_num(scale_cfg.get("min_projection_note_votes"), 1))
+    max_upward_jump_levels = int(_num(scale_cfg.get("max_upward_jump_levels"), 1))
+    allow_strong_rank_projection = bool(scale_cfg.get("allow_strong_rank_projection", False))
 
     updated = []
     movements = []
@@ -275,15 +313,24 @@ def apply_portfolio_scale_calibration(
         ):
             target_level = "3"
         target_value = _level_value(target_level)
-        eligible = bool(target_level and note_votes > 0 and rank_sd <= max_rank_sd)
+        eligible = bool(target_level and note_votes >= min_projection_note_votes and rank_sd <= max_rank_sd)
         if target_level == "4":
             eligible = eligible and rubric_mean >= top_min_percent
         elif target_level == "3" and current_value < target_value:
-            eligible = eligible and max(current_score, rubric_mean) >= middle_projection_floor
+            eligible = eligible and (
+                max(current_score, rubric_mean) >= middle_projection_floor
+                or (
+                    allow_strong_rank_projection
+                    and target_value - current_value > 1
+                    and student_id not in bottom_ids
+                )
+            )
         elif target_level == "2" and current_value > target_value:
             eligible = eligible and rubric_mean <= bottom_max_percent
 
-        if eligible and target_level and current_level != target_level and abs(target_value - current_value) <= 1:
+        upward_gap = max(0, target_value - current_value)
+        allowed_gap = max_upward_jump_levels if upward_gap > 0 else 1
+        if eligible and target_level and current_level != target_level and abs(target_value - current_value) <= allowed_gap:
             band = _band_for_level(level_bands, target_level)
             projected_score = _project_score_to_band(current_score, band, floor_offset)
             updated_row["rubric_after_penalty_percent"] = projected_score
@@ -297,7 +344,11 @@ def apply_portfolio_scale_calibration(
                 updated_row["level_with_modifier"] = f"{target_level}{modifier}"
             updated_row["portfolio_scale_target_level"] = target_level
             updated_row["portfolio_scale_adjusted"] = "true"
-            updated_row["portfolio_scale_reason"] = "ordinal_portfolio_rank_projection"
+            updated_row["portfolio_scale_reason"] = (
+                "ordinal_portfolio_rank_projection_strong"
+                if upward_gap > 1
+                else "ordinal_portfolio_rank_projection"
+            )
             flags = [item for item in str(updated_row.get("flags", "") or "").split(";") if item]
             if "portfolio_scale_calibration" not in flags:
                 flags.append("portfolio_scale_calibration")
@@ -326,6 +377,7 @@ def apply_portfolio_scale_calibration(
             "grade_level": scope.get("grade_level"),
             "genre": scope.get("genre"),
             "is_small_ordinal_portfolio": bool(scope.get("is_small_ordinal_portfolio")),
+            "pass1_model_family": scope.get("pass1_model_family", ""),
         },
     }
 

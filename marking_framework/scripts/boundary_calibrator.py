@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import math
+import re
 from pathlib import Path
 
 try:
@@ -32,9 +33,36 @@ def _level_floor(level_bands: list[dict], level: str) -> float | None:
     return None
 
 
-def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
+def _normalize_model_family(model_version: str | None) -> str:
+    normalized = str(model_version or "").strip()
+    if not normalized:
+        return ""
+    normalized = normalized.split("@", 1)[0]
+    match = re.match(r"^(.*)-\d{4}-\d{2}-\d{2}$", normalized)
+    if match:
+        normalized = match.group(1)
+    return normalized
+
+
+def _load_pass1_model_info(routing_path: Path | None) -> tuple[str, str]:
+    if routing_path is None or not routing_path.exists():
+        return "", ""
+    try:
+        payload = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return "", ""
+    tasks = payload.get("tasks", {}) if isinstance(payload, dict) else {}
+    pass1 = tasks.get("pass1_assessor", {}) if isinstance(tasks, dict) else {}
+    if not isinstance(pass1, dict):
+        return "", ""
+    model_version = str(pass1.get("model", "") or "").strip()
+    return model_version, _normalize_model_family(model_version)
+
+
+def load_scope_context(metadata_path: Path, profiles_path: Path, routing_path: Path | None = None) -> dict:
     metadata = load_class_metadata(metadata_path)
     profiles = load_grade_profiles(profiles_path)
+    pass1_model_version, pass1_model_family = _load_pass1_model_info(routing_path)
     grade_level = select_grade_level(None, metadata)
     raw_genre = (
         metadata.get("genre")
@@ -79,6 +107,8 @@ def load_scope_context(metadata_path: Path, profiles_path: Path) -> dict:
         "is_small_ordinal_portfolio": small_ordinal_portfolio,
         "grade_profile": profile if isinstance(profile, dict) else {},
         "cohort_shape": cohort_shape,
+        "pass1_model_version": pass1_model_version,
+        "pass1_model_family": pass1_model_family,
     }
 
 
@@ -107,6 +137,8 @@ def resolve_source_scale_profile(scope: dict, calibration_cfg: dict, student_cou
     genre = str(scope.get("genre", "") or "").strip().lower()
     cohort_shape = str(scope.get("cohort_shape", "") or "").strip()
     prompt_shared = bool(scope.get("prompt_shared", False))
+    model_family = str(scope.get("pass1_model_family", "") or "").strip()
+    model_version = str(scope.get("pass1_model_version", "") or "").strip()
     for name, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
@@ -137,6 +169,11 @@ def resolve_source_scale_profile(scope: dict, calibration_cfg: dict, student_cou
         required_student_count = int(_num(profile.get("require_student_count"), 0))
         if required_student_count and required_student_count != student_count:
             continue
+        model_tokens = [str(token or "").strip().lower() for token in profile.get("match_model_families", []) if str(token or "").strip()]
+        if model_tokens:
+            haystacks = [model_family.lower(), model_version.lower()]
+            if not any(token in hay for token in model_tokens for hay in haystacks if hay):
+                continue
         if bool(profile.get("require_prompt_shared", False)) and not prompt_shared:
             continue
         if bool(profile.get("require_student_count_match_scale", False)) and scoring_scale_size and student_count != scoring_scale_size:
@@ -166,6 +203,8 @@ def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
             _num(row.get("rank_sd"), 99.0),
             str(row.get("student_id", "")).lower(),
         )
+    if strategy in {"seed_order", "composite_score", "provisional"}:
+        return _sort_key(row)
     return _sort_key(row)
 
 

@@ -660,6 +660,8 @@ def run_pipeline(run_dir: Path, routing_path: Path, env: dict[str, str], require
             "outputs/consensus_scores.csv",
             "--rubric-criteria",
             "config/rubric_criteria.json",
+            "--routing",
+            str(routing_path.name),
         ]
     )
     commands = [
