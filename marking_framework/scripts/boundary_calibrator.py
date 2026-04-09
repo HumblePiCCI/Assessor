@@ -203,6 +203,22 @@ def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
             _num(row.get("rank_sd"), 99.0),
             str(row.get("student_id", "")).lower(),
         )
+    if strategy == "rubric_mean_percent":
+        return (
+            -_num(row.get("rubric_mean_percent"), 0.0),
+            -_num(row.get("rubric_after_penalty_percent"), 0.0),
+            -_num(row.get("borda_percent"), 0.0),
+            _num(row.get("rank_sd"), 99.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    if strategy == "rubric_after_penalty_percent":
+        return (
+            -_num(row.get("rubric_after_penalty_percent"), 0.0),
+            -_num(row.get("rubric_mean_percent"), 0.0),
+            -_num(row.get("borda_percent"), 0.0),
+            _num(row.get("rank_sd"), 99.0),
+            str(row.get("student_id", "")).lower(),
+        )
     if strategy in {"seed_order", "composite_score", "provisional"}:
         return _sort_key(row)
     return _sort_key(row)
@@ -301,6 +317,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     source_max_rubric_sd = _num(source_scale_profile.get("max_rubric_sd_points"), max_rubric_sd_points)
     source_max_adjustment = _num(source_scale_profile.get("max_adjustment_percent"), default_max_adjustment)
     source_rank_strategy = str(source_scale_profile.get("rank_strategy", "") or "").strip().lower()
+    source_disable_severe_collapse = bool(source_scale_profile.get("disable_severe_collapse_floor", False))
     source_rank_map = _source_rank_map(rows, source_rank_strategy) if source_scale_profile_name else {}
 
     provisional = sorted(rows, key=_sort_key)
@@ -330,7 +347,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
         reasons = []
         capped = False
 
-        if adjusted_level in {"1", "2"}:
+        if adjusted_level in {"1", "2"} and not source_disable_severe_collapse:
             severe_signal = (
                 (strong_support and base_score >= severe_min_rubric)
                 or level_gap >= severe_gap_levels
