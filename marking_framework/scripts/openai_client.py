@@ -215,6 +215,11 @@ def _normalized_text_format(text_format: dict | None) -> dict | None:
     return normalized
 
 
+def _prefers_low_verbosity(model: str) -> bool:
+    token = str(model or "").strip().lower()
+    return token.startswith("gpt-5.4-mini") or token.startswith("gpt-5.4-nano")
+
+
 def _build_codex_prompt(messages: list, text_format: dict | None, previous_output: str = "") -> str:
     normalized_format = _normalized_text_format(text_format)
     prompt = _messages_to_prompt(messages)
@@ -340,6 +345,8 @@ def _openai_response(
         payload["max_output_tokens"] = max_output_tokens
     if normalized_format:
         payload["text"] = {"format": normalized_format}
+        if _prefers_low_verbosity(model):
+            payload["text"]["verbosity"] = "low"
     cache_key = None
     if _cache_enabled():
         cache_key = _cache_key({"mode": "openai", "url": url, "payload": payload})

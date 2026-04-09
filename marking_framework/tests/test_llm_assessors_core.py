@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.llm_assessors_core import looks_like_prompt_echo, parse_pass1_item
+from scripts.llm_assessors_core import looks_like_prompt_echo, parse_pass1_item, pass1_text_format
 
 
 def test_parse_pass1_item_rationale_min_words_notes_branch():
@@ -165,3 +165,11 @@ def test_looks_like_prompt_echo_detection():
     assert looks_like_prompt_echo(bad, "s1") is True
     good = "{\"student_id\":\"s1\",\"rubric_total_points\":80,\"criteria_points\":{},\"notes\":\"ok\"}"
     assert looks_like_prompt_echo(good, "s1") is False
+
+
+def test_pass1_text_format_uses_compact_criteria_object():
+    fmt = pass1_text_format()
+    criteria = fmt["schema"]["properties"]["criteria_points"]
+    assert criteria["type"] == "array"
+    assert criteria["items"]["properties"]["criterion_id"]["type"] == "string"
+    assert criteria["items"]["properties"]["score"]["type"] == "number"

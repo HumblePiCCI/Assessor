@@ -99,7 +99,7 @@ def preflight_costs(
 
 def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: str, text: str,
                        grade_context: str = "", exemplars: str = "", criteria_block: str = "",
-                       evidence_reqs: dict | None = None) -> str:
+                       evidence_reqs: dict | None = None, notes_word_limit: int | None = None) -> str:
     context = ""
     if grade_context:
         context += grade_context.strip() + "\n\n"
@@ -109,6 +109,9 @@ def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: st
         context += criteria_block.strip() + "\n\n"
     evidence_note = ""
     evidence_field = ""
+    notes_note = ""
+    if isinstance(notes_word_limit, int) and notes_word_limit > 0:
+        notes_note = f'Keep "notes" under {notes_word_limit} words.\n'
     if evidence_reqs:
         min_words = evidence_reqs.get("rationale_min_words", 0)
         evidence_field = '  "criteria_evidence": [],\n'
@@ -136,9 +139,13 @@ Return ONLY valid JSON in this exact format:
 {{
   "student_id": "{student_id}",
   "rubric_total_points": <number 0-100 percent>,
-  "criteria_points": {{}},
+  "criteria_points": [
+    {{"criterion_id": "K1", "score": 75}},
+    {{"criterion_id": "K2", "score": 60}}
+  ],
 {evidence_field}  "notes": "short justification"
 }}
+{notes_note}Keep criteria_points compact and only include criterion rows you actually scored.
 {evidence_note}
 """
 
@@ -342,11 +349,24 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
     return item
 
 
-def build_pass1_repair_prompt(student_id: str, raw: str, require_evidence: bool, context_prompt: str | None = None) -> str:
+def build_pass1_repair_prompt(
+    student_id: str,
+    raw: str,
+    require_evidence: bool,
+    context_prompt: str | None = None,
+    *,
+    error_hint: str = "",
+    notes_word_limit: int | None = None,
+) -> str:
     base = ("You returned invalid JSON. Return ONLY valid JSON with keys "
             "student_id, rubric_total_points, criteria_points, notes")
     if require_evidence:
         base += ", criteria_evidence"
+    base += '. "criteria_points" must be an array of {"criterion_id","score"} objects using 0-100 scores.'
+    if isinstance(notes_word_limit, int) and notes_word_limit > 0:
+        base += f' Keep "notes" under {notes_word_limit} words.'
+    if error_hint:
+        base += f" {error_hint.strip()}"
     if context_prompt:
         return (
             base

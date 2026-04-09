@@ -29,11 +29,25 @@ def test_run_llm_assessors_helpers():
     )
     assert "CRIT" in prompt_with_criteria
     assert "min 3 words" in prompt_with_criteria
+    compact_prompt = rla.build_pass1_prompt("A", "rubric", "outline", "s1", "essay", notes_word_limit=12)
+    assert '"criteria_points": [' in compact_prompt
+    assert '"criterion_id": "K1"' in compact_prompt
+    assert 'Keep "notes" under 12 words' in compact_prompt
     repair = rla.build_pass1_repair_prompt("s1", "raw", True)
     assert "criteria_evidence" in repair
-    contextual_repair = rla.build_pass1_repair_prompt("s1", "raw", False, context_prompt="Rubric:\nX\nEssay:\nY")
+    contextual_repair = rla.build_pass1_repair_prompt(
+        "s1",
+        "raw",
+        False,
+        context_prompt="Rubric:\nX\nEssay:\nY",
+        error_hint="Previous response hit max_output_tokens before finishing.",
+        notes_word_limit=10,
+    )
     assert "Re-score the same submission from scratch" in contextual_repair
     assert "Essay:\nY" in contextual_repair
+    assert "max_output_tokens" in contextual_repair
+    assert 'Keep "notes" under 10 words' in contextual_repair
+    assert '"criterion_id","score"' in contextual_repair
     pass2_repair = rla.build_pass2_repair_prompt(["s1", "s2"], "raw", [])
     assert "Missing IDs:" not in pass2_repair
     assert rla.ranking_from_scores({"s1": 70, "s2": 90}, ["s1", "s2"]) == ["s2", "s1"]

@@ -1,0 +1,112 @@
+{
+  "report_date": "2026-04-08",
+  "run_output_dir": "/tmp/model_split_small_20260408_retry",
+  "candidate_mode": "gpt54_split",
+  "baseline_mode": "gpt52_legacy",
+  "candidate_routing": {
+    "pass1_assessor": "gpt-5.4-mini",
+    "pass2_ranker": "gpt-5.4-mini",
+    "pairwise_reviewer": "gpt-5.4-mini",
+    "feedback_drafter": "gpt-5.4-nano"
+  },
+  "baseline_routing": {
+    "pass1_assessor": "gpt-5.2",
+    "pass2_ranker": "gpt-5.2",
+    "pairwise_reviewer": "gpt-5.2",
+    "feedback_drafter": "gpt-5.2"
+  },
+  "datasets": [
+    {
+      "name": "naep_1998_g8_informative_tv_show",
+      "candidate": {
+        "exact_level_hit_rate": 0.833333,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 3.611667,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.070407,
+        "latency_seconds": 63.390995
+      },
+      "baseline": {
+        "exact_level_hit_rate": 0.833333,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 1.666667,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.217402,
+        "latency_seconds": 156.063233
+      }
+    },
+    {
+      "name": "uk_sta_2018_ks1_writing_portfolios",
+      "candidate": {
+        "exact_level_hit_rate": 0.0,
+        "within_one_level_hit_rate": 0.666667,
+        "score_band_mae": 10.413333,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.211086,
+        "latency_seconds": 206.641898
+      },
+      "baseline": {
+        "exact_level_hit_rate": 0.333333,
+        "within_one_level_hit_rate": 0.666667,
+        "score_band_mae": 6.566667,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.65569,
+        "latency_seconds": 405.600063
+      }
+    }
+  ],
+  "weighted_summary": {
+    "candidate": {
+      "cost_usd_mean": 0.1173,
+      "exact_level_hit_rate_mean": 0.555555,
+      "kendall_tau_mean": 1.0,
+      "latency_seconds_mean": 111.141296,
+      "mean_rank_displacement_mean": 0.0,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 1.0,
+      "score_band_mae_mean": 5.878889,
+      "within_one_level_hit_rate_mean": 0.888889
+    },
+    "baseline": {
+      "cost_usd_mean": 0.363498,
+      "exact_level_hit_rate_mean": 0.666666,
+      "kendall_tau_mean": 1.0,
+      "latency_seconds_mean": 239.242176,
+      "mean_rank_displacement_mean": 0.0,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 1.0,
+      "score_band_mae_mean": 3.3,
+      "within_one_level_hit_rate_mean": 0.888889
+    },
+    "delta_candidate_minus_baseline": {
+      "cost_usd_mean": -0.246198,
+      "exact_level_hit_rate_mean": -0.111111,
+      "kendall_tau_mean": 0.0,
+      "latency_seconds_mean": -128.10088,
+      "mean_rank_displacement_mean": 0.0,
+      "model_usage_ratio_mean": 0.0,
+      "pairwise_order_agreement_mean": 0.0,
+      "score_band_mae_mean": 2.578889,
+      "within_one_level_hit_rate_mean": 0.0
+    }
+  },
+  "failed_datasets": [],
+  "conclusion": {
+    "reliability": "fixed_for_this_slice",
+    "quality_vs_gpt52": "worse_on_banding",
+    "speed_vs_gpt52": "better",
+    "cost_vs_gpt52": "better",
+    "next_targets": [
+      "small ordinal portfolio banding under gpt-5.4-mini",
+      "source-native top-band calibration under gpt-5.4-mini"
+    ]
+  }
+}

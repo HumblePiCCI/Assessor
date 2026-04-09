@@ -73,6 +73,7 @@ def build_portfolio_piece_prompt(
     exemplars: str = "",
     criteria_block: str = "",
     evidence_reqs: dict | None = None,
+    notes_word_limit: int | None = None,
 ) -> str:
     piece_context = (
         "PORTFOLIO PIECE CONTEXT:\n"
@@ -92,7 +93,39 @@ def build_portfolio_piece_prompt(
         exemplars,
         criteria_block,
         evidence_reqs,
+        notes_word_limit=notes_word_limit,
     )
+
+
+def _prefers_compact_structured_output(model: str) -> bool:
+    token = str(model or "").strip().lower()
+    return token.startswith("gpt-5.4-mini") or token.startswith("gpt-5.4-nano")
+
+
+def _structured_reasoning(model: str, configured: str) -> str:
+    if _prefers_compact_structured_output(model):
+        return "low"
+    return str(configured or "medium")
+
+
+def _pass1_notes_word_limit(model: str, *, piece_mode: bool) -> int | None:
+    if not _prefers_compact_structured_output(model):
+        return None
+    return 10 if piece_mode else 18
+
+
+def _response_incomplete_hint(response: dict | None) -> str:
+    if not isinstance(response, dict):
+        return ""
+    if str(response.get("status") or "").strip().lower() != "incomplete":
+        return ""
+    details = response.get("incomplete_details")
+    reason = str((details or {}).get("reason") or "").strip().lower() if isinstance(details, dict) else ""
+    if reason == "max_output_tokens":
+        return "Your previous response hit max_output_tokens before finishing. Retry with much shorter JSON."
+    if reason:
+        return f"Your previous response was incomplete ({reason}). Retry with much shorter JSON."
+    return "Your previous response was incomplete. Retry with much shorter JSON."
 
 
 def guard_bias_for_exemplar_scope(match_quality: str | None, score_delta: float, level_gap: int, anchor_blend: float) -> tuple[float, int, float]:
@@ -444,11 +477,11 @@ def main() -> int:
         print("OPENAI_API_KEY is not set. Aborting.")
         return 1
     pass1_model = routing["tasks"]["pass1_assessor"]["model"]
-    pass1_reasoning = routing["tasks"]["pass1_assessor"].get("reasoning", "medium")
+    pass1_reasoning = _structured_reasoning(pass1_model, routing["tasks"]["pass1_assessor"].get("reasoning", "medium"))
     pass1_temp = routing["tasks"]["pass1_assessor"].get("temperature", 0.2)
     pass1_max_tokens = routing["tasks"]["pass1_assessor"].get("max_output_tokens")
     pass2_model = routing["tasks"]["pass2_ranker"]["model"]
-    pass2_reasoning = routing["tasks"]["pass2_ranker"].get("reasoning", "medium")
+    pass2_reasoning = _structured_reasoning(pass2_model, routing["tasks"]["pass2_ranker"].get("reasoning", "medium"))
     pass2_temp = routing["tasks"]["pass2_ranker"].get("temperature", 0.2)
     pass2_max_tokens = routing["tasks"]["pass2_ranker"].get("max_output_tokens")
     guard_cfg = routing.get("pass1_guard", {})
@@ -627,6 +660,7 @@ def main() -> int:
                     piece_key = f"{student_id}::{piece.get('piece_id')}"
                     piece_text = str(piece.get("text", "") or "")
                     anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, piece_required_ids, exemplars)
+                    piece_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=True)
                     base_prompt = build_portfolio_piece_prompt(
                         assessor,
                         rubric,
@@ -638,10 +672,12 @@ def main() -> int:
                         exemplar_block,
                         piece_criteria_block,
                         reqs,
+                        notes_word_limit=piece_notes_word_limit,
                     )
                     prompt = base_prompt
                     piece_item = None
                     for attempt in range(3):
+                        response = None
                         try:
                             response = responses_create(
                                 model=pass1_model,
@@ -700,6 +736,8 @@ def main() -> int:
                                 content,
                                 bool(piece_required_ids),
                                 context_prompt=base_prompt,
+                                error_hint=_response_incomplete_hint(response),
+                                notes_word_limit=piece_notes_word_limit,
                             )
                     if piece_item is None:
                         if args.fallback == "deterministic":
@@ -730,6 +768,7 @@ def main() -> int:
                 continue
 
             anchor_item = deterministic_pass1_item(student_id, text, assessor, required_ids, exemplars)
+            pass1_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=False)
             prompt = build_pass1_prompt(
                 assessor,
                 rubric,
@@ -740,11 +779,13 @@ def main() -> int:
                 exemplar_block,
                 criteria_block,
                 reqs,
+                notes_word_limit=pass1_notes_word_limit,
             )
             base_prompt = prompt
             item = None
             item_used_model = False
             for attempt in range(3):
+                response = None
                 try:
                     response = responses_create(
                         model=pass1_model,
@@ -803,6 +844,8 @@ def main() -> int:
                         content,
                         bool(required_ids),
                         context_prompt=base_prompt,
+                        error_hint=_response_incomplete_hint(response),
+                        notes_word_limit=pass1_notes_word_limit,
                     )
             if item is None:
                 if args.fallback == "deterministic":

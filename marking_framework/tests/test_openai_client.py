@@ -52,6 +52,31 @@ def test_responses_create_and_extract(tmp_path, monkeypatch):
     assert captured["payload"]["text"]["format"] == fmt
 
 
+def test_responses_create_uses_low_verbosity_for_gpt54_mini_structured(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        return DummyResponse({"output": [{"type": "output_text", "text": "{\"ok\":true}"}], "usage": {"input_tokens": 1}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    fmt = {
+        "type": "json_schema",
+        "schema": {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        },
+    }
+    oc.responses_create("gpt-5.4-mini", [{"role": "user", "content": "hi"}], routing_path=str(route_path), text_format=fmt)
+    assert captured["payload"]["text"]["verbosity"] == "low"
+
+
 def test_responses_create_without_text_format(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
