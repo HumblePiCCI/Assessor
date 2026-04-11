@@ -195,6 +195,23 @@ def _sort_key(row: dict) -> tuple:
 
 def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
     strategy = str(strategy or "").strip().lower()
+    student_id = str(row.get("student_id", "")).strip().lower()
+    student_id_parts = tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", student_id) if part != "")
+    if strategy in {"student_id_asc", "source_native_order"}:
+        return (
+            student_id_parts,
+            -_num(row.get("borda_percent"), 0.0),
+            -_num(row.get("rubric_mean_percent"), 0.0),
+        )
+    if strategy == "student_id_desc":
+        return (
+            tuple(
+                (-part if isinstance(part, int) else "".join(chr(255 - ord(ch)) for ch in part))
+                for part in student_id_parts
+            ),
+            -_num(row.get("borda_percent"), 0.0),
+            -_num(row.get("rubric_mean_percent"), 0.0),
+        )
     if strategy == "rubric_borda_blend_heavy":
         blend = (0.8 * _num(row.get("rubric_mean_percent"), 0.0)) + (20.0 * _num(row.get("borda_percent"), 0.0))
         return (
@@ -220,7 +237,7 @@ def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
             -_num(row.get("rubric_after_penalty_percent"), 0.0),
             -_num(row.get("rubric_mean_percent"), 0.0),
             _num(row.get("rank_sd"), 99.0),
-            str(row.get("student_id", "")).lower(),
+            student_id,
         )
     if strategy == "rubric_mean_percent":
         return (
@@ -228,7 +245,7 @@ def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
             -_num(row.get("rubric_after_penalty_percent"), 0.0),
             -_num(row.get("borda_percent"), 0.0),
             _num(row.get("rank_sd"), 99.0),
-            str(row.get("student_id", "")).lower(),
+            student_id,
         )
     if strategy == "rubric_after_penalty_percent":
         return (
@@ -236,7 +253,7 @@ def _source_rank_sort_key(row: dict, strategy: str) -> tuple:
             -_num(row.get("rubric_mean_percent"), 0.0),
             -_num(row.get("borda_percent"), 0.0),
             _num(row.get("rank_sd"), 99.0),
-            str(row.get("student_id", "")).lower(),
+            student_id,
         )
     if strategy in {"seed_order", "composite_score", "provisional"}:
         return _sort_key(row)

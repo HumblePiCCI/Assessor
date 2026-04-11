@@ -1,4 +1,18 @@
 {
   "grade_level": 7,
-  "assignment_genre": "argumentative"
+  "assignment_genre": "argumentative",
+  "prompt_shared": true,
+  "sample_count": 4,
+  "source_family": "curated_internet_anchors",
+  "rubric_family": "canonical_level_anchor_pack",
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": ["Level 1", "Level 2", "Level 3", "Level 4"],
+    "numeric_mapping": {
+      "Level 1": 1,
+      "Level 2": 2,
+      "Level 3": 3,
+      "Level 4": 4
+    }
+  }
 }

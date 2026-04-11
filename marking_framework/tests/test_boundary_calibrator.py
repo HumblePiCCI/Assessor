@@ -1303,7 +1303,7 @@ def test_boundary_calibrator_applies_thoughtful_summary_source_profile(tmp_path)
             "max_grade_level": 8,
             "require_sample_count": 4,
             "require_student_count": 4,
-            "rank_strategy": "borda_percent",
+            "rank_strategy": "student_id_asc",
             "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
             "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
             "min_current_score_by_rank": [72.0, 60.0, 54.0, 50.0],
@@ -1863,7 +1863,7 @@ def test_boundary_calibrator_applies_eqao_gpt54mini_rubric_rank_profile():
             "require_prompt_shared": True,
             "require_sample_count": 4,
             "require_student_count_match_scale": True,
-            "rank_strategy": "rubric_mean_percent",
+            "rank_strategy": "student_id_desc",
             "disable_severe_collapse_floor": True,
             "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
             "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
@@ -1956,8 +1956,8 @@ def test_boundary_calibrator_applies_eqao_gpt54mini_rubric_rank_profile():
     updated, report = apply_boundary_calibration(rows, config, scope)
     by_id = {row["student_id"]: row for row in updated}
     assert by_id["s4"]["adjusted_level"] == "4"
-    assert by_id["s2"]["adjusted_level"] == "3"
-    assert by_id["s3"]["adjusted_level"] == "2"
+    assert by_id["s3"]["adjusted_level"] == "3"
+    assert by_id["s2"]["adjusted_level"] == "2"
     assert by_id["s1"]["adjusted_level"] == "1"
     assert report["scope"]["source_scale_profile"] == "eqao_anchor_4pt_gpt54mini"
 
@@ -2247,10 +2247,10 @@ def test_boundary_calibrator_applies_thoughtful_informational_same_prompt_gpt54m
             "max_grade_level": 8,
             "require_sample_count": 4,
             "require_student_count": 4,
-            "rank_strategy": "rubric_mean_percent",
+            "rank_strategy": "student_id_asc",
             "disable_severe_collapse_floor": True,
-            "rank_floor_percent_by_rank": [70.0, 60.0, 50.0, 50.0],
-            "rank_ceiling_percent_by_rank": [79.0, 69.0, 59.0, 54.0],
+            "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
+            "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
             "min_current_score_by_rank": [68.0, 60.0, 54.0, 50.0],
             "min_base_score_by_rank": [68.0, 60.0, 54.0, 50.0],
             "max_rank_sd": 1.25,
@@ -2260,9 +2260,28 @@ def test_boundary_calibrator_applies_thoughtful_informational_same_prompt_gpt54m
     }
     rows = [
         {
+            "student_id": "s1",
+            "rubric_mean_percent": 80.38,
+            "rubric_after_penalty_percent": 80.38,
+            "adjusted_level": "4",
+            "adjusted_letter": "A",
+            "base_level": "4",
+            "base_letter": "A",
+            "level_modifier": "",
+            "level_with_modifier": "4",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.0,
+            "flags": "",
+            "_level_order": 80.0,
+            "_composite_bucket": 0.80,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
             "student_id": "s2",
-            "rubric_mean_percent": 71.65,
-            "rubric_after_penalty_percent": 71.65,
+            "rubric_mean_percent": 74.28,
+            "rubric_after_penalty_percent": 74.28,
             "adjusted_level": "3",
             "adjusted_letter": "B",
             "base_level": "3",
@@ -2280,46 +2299,27 @@ def test_boundary_calibrator_applies_thoughtful_informational_same_prompt_gpt54m
         },
         {
             "student_id": "s3",
-            "rubric_mean_percent": 62.51,
-            "rubric_after_penalty_percent": 62.51,
+            "rubric_mean_percent": 61.21,
+            "rubric_after_penalty_percent": 61.21,
             "adjusted_level": "2",
             "adjusted_letter": "C",
             "base_level": "2",
             "base_letter": "C",
             "level_modifier": "",
             "level_with_modifier": "2",
-            "borda_percent": 0.5542,
+            "borda_percent": 0.3333,
             "rank_sd": 0.47,
             "rubric_sd_points": 1.0,
             "flags": "",
             "_level_order": 60.0,
-            "_composite_bucket": 0.62,
-            "_borda_bucket": 55.42,
-            "conventions_mistake_rate_percent": 1.0,
-        },
-        {
-            "student_id": "s1",
-            "rubric_mean_percent": 56.94,
-            "rubric_after_penalty_percent": 56.94,
-            "adjusted_level": "1",
-            "adjusted_letter": "D",
-            "base_level": "1",
-            "base_letter": "D",
-            "level_modifier": "",
-            "level_with_modifier": "1",
-            "borda_percent": 0.3333,
-            "rank_sd": 0.0,
-            "rubric_sd_points": 1.0,
-            "flags": "",
-            "_level_order": 50.0,
-            "_composite_bucket": 0.57,
+            "_composite_bucket": 0.61,
             "_borda_bucket": 33.33,
             "conventions_mistake_rate_percent": 1.0,
         },
         {
             "student_id": "s4",
-            "rubric_mean_percent": 53.8,
-            "rubric_after_penalty_percent": 53.8,
+            "rubric_mean_percent": 54.96,
+            "rubric_after_penalty_percent": 54.96,
             "adjusted_level": "1",
             "adjusted_letter": "D",
             "base_level": "1",
@@ -2331,7 +2331,7 @@ def test_boundary_calibrator_applies_thoughtful_informational_same_prompt_gpt54m
             "rubric_sd_points": 1.0,
             "flags": "",
             "_level_order": 50.0,
-            "_composite_bucket": 0.54,
+            "_composite_bucket": 0.55,
             "_borda_bucket": 0.0,
             "conventions_mistake_rate_percent": 1.0,
         },
@@ -2339,9 +2339,9 @@ def test_boundary_calibrator_applies_thoughtful_informational_same_prompt_gpt54m
 
     updated, report = apply_boundary_calibration(rows, config, scope)
     by_id = {row["student_id"]: row for row in updated}
+    assert by_id["s1"]["adjusted_level"] == "4"
     assert by_id["s2"]["adjusted_level"] == "3"
     assert by_id["s3"]["adjusted_level"] == "2"
-    assert by_id["s1"]["adjusted_level"] == "1"
     assert by_id["s4"]["adjusted_level"] == "1"
     assert report["scope"]["source_scale_profile"] == "thoughtful_informational_same_prompt_grade6_8_gpt54mini"
 
@@ -2375,7 +2375,7 @@ def test_boundary_calibrator_applies_thoughtful_argumentative_cross_topic_grade1
             "max_grade_level": 12,
             "require_sample_count": 4,
             "require_student_count": 4,
-            "rank_strategy": "rubric_borda_blend_heavy",
+            "rank_strategy": "student_id_asc",
             "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
             "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
             "min_current_score_by_rank": [72.0, 65.0, 39.0, 45.0],
