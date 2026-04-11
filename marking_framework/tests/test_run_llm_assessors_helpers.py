@@ -276,6 +276,41 @@ def test_build_argumentative_seed_order_prefers_claim_and_evidence_quality():
     assert order == ["s1", "s2", "s3", "s4"]
 
 
+def test_build_instructions_seed_order_prefers_complete_safe_usable_procedure():
+    order = rla.build_instructions_seed_order(
+        ["s1", "s2", "s3", "s4"],
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "criteria_points": {"IN1": 92, "IN2": 88, "IN3": 86, "C2": 80, "C3": 82},
+                    "rubric_total_points": 85.0,
+                    "notes": "Complete procedure with clear sequence, precise measurements, and safety details.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "criteria_points": {"IN1": 78, "IN2": 76, "IN3": 72, "C2": 74, "C3": 78},
+                    "rubric_total_points": 76.0,
+                    "notes": "Usable overall, but some safety details are thin.",
+                },
+                "s3": {
+                    "student_id": "s3",
+                    "criteria_points": {"IN1": 68, "IN2": 70, "IN3": 60, "C2": 70, "C3": 72},
+                    "rubric_total_points": 69.0,
+                    "notes": "Missing materials and some precision; order of steps is still mostly clear.",
+                },
+                "s4": {
+                    "student_id": "s4",
+                    "criteria_points": {"IN1": 54, "IN2": 50, "IN3": 45, "C2": 62, "C3": 60},
+                    "rubric_total_points": 58.0,
+                    "notes": "Incomplete procedure with unclear sequence and missing safety guidance.",
+                },
+            }
+        },
+    )
+    assert order == ["s1", "s2", "s3", "s4"]
+
+
 def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
@@ -338,6 +373,41 @@ def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
     assert "clear arguable claim" in summary
 
 
+def test_build_pass2_student_summaries_uses_instructions_aggregate_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "Wear gloves and then add acid carefully."},
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 82.0,
+                    "criteria_points": {"IN1": 86, "IN2": 84, "IN3": 80, "C2": 78, "C3": 76},
+                    "notes": "Complete procedure with clear sequence and safety details.",
+                }
+            },
+            "B": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 80.0,
+                    "criteria_points": {"IN1": 84, "IN2": 82, "IN3": 78, "C2": 76, "C3": 74},
+                    "notes": "Easy to follow and precise overall.",
+                }
+            },
+        },
+        "instructions",
+        False,
+        260,
+        {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_prompt", "assignment_name": "Instructions benchmark"},
+    )
+    summary = entries[0]["summary"]
+    assert "Instructions score 81.00." in summary
+    assert "completeness 85" in summary
+    assert "sequence 83" in summary
+    assert "precision/safety 79" in summary
+    assert "procedure can be followed accurately" in summary
+
+
 def test_unanimous_portfolio_seed_order_requires_full_agreement():
     scores = {
         "A": {"s1": 80, "s2": 70, "s3": 60},
@@ -349,12 +419,26 @@ def test_unanimous_portfolio_seed_order_requires_full_agreement():
     assert rla.unanimous_portfolio_seed_order(scores, ["s1", "s2", "s3"]) is None
 
 
-def test_use_argumentative_seed_order_only_for_thoughtful_cross_topic_argumentative():
+def test_use_argumentative_seed_order_supports_thoughtful_cross_topic_and_naep_single_prompt():
     metadata = {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_rubric_family_cross_topic"}
     assert rla.use_argumentative_seed_order(metadata, "argumentative", False) is True
     assert rla.use_argumentative_seed_order(metadata, "summary_report", False) is False
-    assert rla.use_argumentative_seed_order({"source_family": "NAEP / NCES", "cohort_shape": "same_rubric_family_cross_topic"}, "argumentative", False) is False
+    assert rla.use_argumentative_seed_order({"source_family": "NAEP / NCES", "prompt_shared": True}, "argumentative", False) is True
+    assert rla.argumentative_seed_mode({"source_family": "NAEP / NCES", "prompt_shared": True}, "argumentative", False) == "single_prompt"
     assert rla.use_argumentative_seed_order(metadata, "argumentative", True) is False
+
+
+def test_use_instructions_seed_order_for_same_prompt_thoughtful_procedural_sets():
+    metadata = {
+        "source_family": "thoughtful_learning_assessment_models",
+        "cohort_shape": "same_prompt",
+        "assignment_name": "Business Writing Instructions Benchmark",
+        "assignment_genre": "informational_report",
+    }
+    assert rla.use_instructions_seed_order(metadata, "instructions", False) is True
+    assert rla.use_instructions_seed_order(metadata, "informational_report", False) is True
+    assert rla.use_instructions_seed_order(metadata, "summary_report", False) is False
+    assert rla.use_instructions_seed_order(metadata, "instructions", True) is False
 
 
 def test_run_llm_assessors_file_helpers(tmp_path):

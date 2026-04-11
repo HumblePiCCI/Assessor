@@ -58,6 +58,7 @@ def test_normalize_genre():
     assert normalize_genre("book review") == "book_review"
     assert normalize_genre("informative letter") == "informative_letter"
     assert normalize_genre("speech") == "speech"
+    assert normalize_genre("persuasive response") == "argumentative"
     assert normalize_genre("custom genre") == "custom_genre"
     assert normalize_genre(None) is None
 

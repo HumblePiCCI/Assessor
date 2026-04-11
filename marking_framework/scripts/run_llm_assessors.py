@@ -218,7 +218,7 @@ def _resolve_consensus_pass2_item(student_id: str, assessor_items: dict, genre: 
     if not collected:
         return {}
     normalized_genre = str(genre or "").strip().lower()
-    if normalized_genre not in {"summary_report", "argumentative"}:
+    if normalized_genre not in {"summary_report", "argumentative", "instructions"}:
         preferred = [item for item in collected if not _is_fallback_deterministic_note(item.get("notes"))]
         return dict(preferred[0] if preferred else collected[0])
 
@@ -382,6 +382,151 @@ def build_summary_report_ranking_summary(item: dict, fallback_summary: str, max_
     return _truncate_compact(" ".join(parts), max_chars)
 
 
+def _instructions_signal_bonus_penalty(note_text: str) -> float:
+    lowered = str(note_text or "").lower()
+    bonus = 0.0
+    penalty = 0.0
+    if (
+        "complete procedure" in lowered
+        or "complete set of steps" in lowered
+        or "usable procedure" in lowered
+        or "thorough procedure" in lowered
+        or "can be followed accurately" in lowered
+    ):
+        bonus += 6.0
+    if (
+        "clear sequence" in lowered
+        or "logical sequence" in lowered
+        or "easy to follow" in lowered
+        or "steps are clearly ordered" in lowered
+    ):
+        bonus += 5.0
+    if (
+        "precise measurements" in lowered
+        or "accurate measurements" in lowered
+        or "safety details" in lowered
+        or "appropriate cautions" in lowered
+        or "safety-conscious" in lowered
+    ):
+        bonus += 5.0
+
+    if (
+        "missing materials" in lowered
+        or "missing equipment" in lowered
+        or "missing setup" in lowered
+        or "missing steps" in lowered
+        or "omits key steps" in lowered
+        or "incomplete procedure" in lowered
+    ):
+        penalty += 8.0
+    if (
+        "unclear sequence" in lowered
+        or "sequence is confusing" in lowered
+        or "hard to follow" in lowered
+        or "order of steps is unclear" in lowered
+        or "steps are out of order" in lowered
+    ):
+        penalty += 7.0
+    if (
+        "missing safety" in lowered
+        or "omits safety" in lowered
+        or "unsafe" in lowered
+        or "imprecise measurements" in lowered
+        or "vague directions" in lowered
+        or "lacks precision" in lowered
+    ):
+        penalty += 7.0
+    if "generic explanation" in lowered or "sounds more like a report" in lowered:
+        penalty += 3.0
+    return bonus - penalty
+
+
+def build_instructions_seed_order(known_ids: list[str], assessor_items: dict[str, dict]) -> list[str] | None:
+    if not known_ids:
+        return None
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "instructions")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        weighted_components = []
+        total_weight = 0.0
+        for cid, weight in (
+            ("IN1", 0.34),
+            ("IN2", 0.28),
+            ("IN3", 0.23),
+            ("C2", 0.08),
+            ("C3", 0.07),
+        ):
+            value = criteria_points.get(cid)
+            if isinstance(value, (int, float)):
+                weighted_components.append(weight * float(value))
+                total_weight += weight
+        rubric_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+        base_signal = (sum(weighted_components) / total_weight) if total_weight > 0 else rubric_score
+        note_signal = _instructions_signal_bonus_penalty(str(item.get("notes", "") or ""))
+        scores[sid] = round((0.76 * base_signal) + (0.24 * rubric_score) + note_signal, 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
+def build_instructions_report_ranking_summary(item: dict, fallback_summary: str, max_chars: int = 280) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    in1 = float(criteria_points.get("IN1", 0.0) or 0.0)
+    in2 = float(criteria_points.get("IN2", 0.0) or 0.0)
+    in3 = float(criteria_points.get("IN3", 0.0) or 0.0)
+    c2 = float(criteria_points.get("C2", 0.0) or 0.0)
+    c3 = float(criteria_points.get("C3", 0.0) or 0.0)
+    parts = [f"Instructions score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("completeness", in1),
+        ("sequence", in2),
+        ("precision/safety", in3),
+        ("conventions", c2),
+        ("clarity", c3),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    strengths = []
+    cautions = []
+    if in1 >= 80:
+        strengths.append("complete usable procedure")
+    elif in1 and in1 < 68:
+        cautions.append("missing needed steps or materials")
+    if in2 >= 80:
+        strengths.append("clear executable sequence")
+    elif in2 and in2 < 68:
+        cautions.append("sequence is hard to follow")
+    if in3 >= 80:
+        strengths.append("precise directions and safety control")
+    elif in3 and in3 < 68:
+        cautions.append("precision or safety details are weak")
+    note_text = str(item.get("notes", "") or fallback_summary)
+    lowered_note = note_text.lower()
+    if "complete procedure" in lowered_note or "easy to follow" in lowered_note:
+        strengths.append("procedure can be followed accurately")
+    if "missing safety" in lowered_note or "omits safety" in lowered_note or "unsafe" in lowered_note:
+        cautions.append("important safety details are missing")
+    if "missing materials" in lowered_note or "missing setup" in lowered_note or "missing steps" in lowered_note:
+        cautions.append("key procedural setup is omitted")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(dict.fromkeys(cautions)) + ".")
+    note = _truncate_compact(note_text, 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
+
+
 def _argumentative_signal_bonus_penalty(note_text: str) -> float:
     lowered = str(note_text or "").lower()
     bonus = 0.0
@@ -538,12 +683,38 @@ def build_argumentative_report_ranking_summary(item: dict, fallback_summary: str
     return _truncate_compact(" ".join(parts), max_chars)
 
 
-def use_argumentative_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+def argumentative_seed_mode(metadata: dict, genre: str | None, portfolio_scope: bool) -> str:
     if portfolio_scope or str(genre or "").strip().lower() != "argumentative":
-        return False
+        return ""
     cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
     source_family = str((metadata or {}).get("source_family") or "").strip().lower()
-    return "same_rubric_family_cross_topic" in cohort_shape and "thoughtful" in source_family
+    if "same_rubric_family_cross_topic" in cohort_shape and "thoughtful" in source_family:
+        return "cross_topic"
+    if ("same_prompt" in cohort_shape or bool((metadata or {}).get("prompt_shared", False))) and (
+        "naep" in source_family or "thoughtful" in source_family
+    ):
+        return "single_prompt"
+    return ""
+
+
+def use_argumentative_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    return bool(argumentative_seed_mode(metadata, genre, portfolio_scope))
+
+
+def use_instructions_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    if portfolio_scope:
+        return False
+    normalized_genre = str(genre or "").strip().lower()
+    cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
+    source_family = str((metadata or {}).get("source_family") or "").strip().lower()
+    assignment_context = " ".join(
+        str((metadata or {}).get(key) or "")
+        for key in ("assignment_name", "assignment_genre", "genre_form", "assessment_unit")
+    ).lower()
+    is_instructional = normalized_genre == "instructions" or (
+        normalized_genre == "informational_report" and ("instruction" in assignment_context or "procedur" in assignment_context)
+    )
+    return is_instructional and "same_prompt" in cohort_shape and "thoughtful" in source_family
 
 
 def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool, metadata: dict | None = None) -> str:
@@ -561,12 +732,27 @@ def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool, metad
             "- Accurate main-idea capture, concision, and paraphrase should outweigh raw length or copied source detail.\n"
             "- A concise accurate paraphrase should outrank a longer extraction-heavy response."
         )
-    if use_argumentative_seed_order(metadata or {}, genre, portfolio_scope):
+    if use_instructions_seed_order(metadata or {}, genre, portfolio_scope):
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as executable instructions, not generic informational prose.\n"
+            "- Complete usable setup, clear sequencing, and precise safety-aware directions should outweigh surface fluency alone.\n"
+            "- A procedure that can actually be followed accurately should outrank a polished but incomplete response."
+        )
+    arg_seed_mode = argumentative_seed_mode(metadata or {}, genre, portfolio_scope)
+    if arg_seed_mode == "cross_topic":
         return (
             "RANKING CONTRACT:\n"
             "- Rank these as argumentative responses across different topics, not by topic excitement or surface polish alone.\n"
             "- Stronger claim control, evidence quality, reasoning, and counterargument handling should outweigh sheer length or rhetorical flourish.\n"
             "- A clearer better-supported argument should outrank a longer or more dramatic but thinner response."
+        )
+    if arg_seed_mode == "single_prompt":
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as responses to the same persuasive/argument prompt.\n"
+            "- Stronger claim control, evidence quality, reasoning, and counterargument handling should outweigh surface polish or length alone.\n"
+            "- A more convincing, better-supported response should outrank a longer but thinner or less controlled response."
         )
     return ""
 
@@ -589,7 +775,8 @@ def build_pass2_student_summaries(
 ) -> list[dict]:
     entries = []
     normalized_genre = str(genre or "").strip().lower()
-    argumentative_seed_mode = use_argumentative_seed_order(metadata or {}, genre, portfolio_scope)
+    argumentative_seed_mode_active = use_argumentative_seed_order(metadata or {}, genre, portfolio_scope)
+    instructions_seed_mode = use_instructions_seed_order(metadata or {}, genre, portfolio_scope)
     for sid in known_ids:
         raw_summary = raw_summaries.get(sid, "")
         item = _resolve_consensus_pass2_item(sid, assessor_items, genre)
@@ -597,7 +784,9 @@ def build_pass2_student_summaries(
             summary = summarize_portfolio_for_ranking(item, max_chars=max_chars)
         elif normalized_genre == "summary_report":
             summary = build_summary_report_ranking_summary(item, raw_summary, max_chars=max_chars)
-        elif normalized_genre == "argumentative" and argumentative_seed_mode:
+        elif instructions_seed_mode:
+            summary = build_instructions_report_ranking_summary(item, raw_summary, max_chars=max_chars)
+        elif normalized_genre == "argumentative" and argumentative_seed_mode_active:
             summary = build_argumentative_report_ranking_summary(item, raw_summary, max_chars=max_chars)
         else:
             summary = raw_summary
@@ -1049,11 +1238,12 @@ def main() -> int:
     known_ids = list(texts.keys())
     portfolio_seed_order = unanimous_portfolio_seed_order(pass1_scores_by_assessor, known_ids) if portfolio_scope else None
     summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
+    instructions_seed_order = build_instructions_seed_order(known_ids, pass1_items_by_assessor) if use_instructions_seed_order(metadata, genre, portfolio_scope) else None
     argumentative_seed_order = build_argumentative_seed_order(known_ids, pass1_items_by_assessor) if use_argumentative_seed_order(metadata, genre, portfolio_scope) else None
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
         ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope, metadata)
-        summary_item_source = pass1_items_by_assessor if (summary_seed_order or argumentative_seed_order) else pass1_items_by_assessor.get(assessor, {})
+        summary_item_source = pass1_items_by_assessor if (summary_seed_order or instructions_seed_order or argumentative_seed_order) else pass1_items_by_assessor.get(assessor, {})
         student_summaries = build_pass2_student_summaries(
             known_ids,
             raw_summary_map,
@@ -1149,6 +1339,8 @@ def main() -> int:
             lines = list(portfolio_seed_order)
         elif summary_seed_order:
             lines = list(summary_seed_order)
+        elif instructions_seed_order:
+            lines = list(instructions_seed_order)
         elif argumentative_seed_order:
             lines = list(argumentative_seed_order)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"

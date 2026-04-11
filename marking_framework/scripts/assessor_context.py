@@ -42,12 +42,14 @@ GENRE_ALIASES = {
     "opinion_letter": {"opinion_letter", "opinion letter", "letter to the editor"},
     "advertisement": {"advertisement", "ad", "persuasive ad"},
     "letter": {"letter", "reader response", "response letter"},
+    "persuasive_response": {"persuasive_response", "persuasive response", "persuasive essay"},
 }
 
 CANONICAL_GENRE_MAP = {
     "opinion_letter": "argumentative",
     "advertisement": "argumentative",
     "letter": "argumentative",
+    "persuasive_response": "argumentative",
     "descriptive": "narrative",
     "research_report": "informational_report",
 }
