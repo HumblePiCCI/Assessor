@@ -257,6 +257,87 @@ def test_build_records_fallback_on_model_error(tmp_path, monkeypatch):
     assert rows[0]["observed"] == 42.0
 
 
+def test_build_records_uses_genre_specific_criteria(tmp_path, monkeypatch):
+    exemplars = tmp_path / "exemplars" / "grade_6_7" / "argumentative"
+    exemplars.mkdir(parents=True)
+    (exemplars / "level_1.md").write_text("Essay text", encoding="utf-8")
+    args = type("Args", (), {"exemplars": str(tmp_path / "exemplars"), "routing": str(tmp_path / "routing.json"), "repeats": 1})
+    calibration = {
+        "gold_samples": {"grade_6_7": {"argumentative": [{"file": "level_1.md", "target_level": "1", "target_pct": 54}]}}
+    }
+    routing = {"tasks": {"pass1_assessor": {"model": "x"}}}
+    calls = {"genres": []}
+
+    monkeypatch.setattr(calib, "responses_create", lambda **kwargs: {"output": [{"type": "output_text", "text": json.dumps({"student_id": "level_1", "rubric_total_points": 8, "criteria_points": {}, "notes": "ok"})}]})
+    monkeypatch.setattr(calib, "parse_pass1_item", lambda *a, **k: {"student_id": "level_1", "rubric_total_points": 8, "criteria_points": {}, "notes": "ok"})
+    monkeypatch.setattr(calib, "criteria_prompt", lambda cfg, genre: calls["genres"].append(("prompt", genre)) or "")
+    monkeypatch.setattr(calib, "criteria_ids", lambda cfg, genre: calls["genres"].append(("ids", genre)) or [])
+    monkeypatch.setattr(calib, "evidence_requirements", lambda cfg, genre: calls["genres"].append(("reqs", genre)) or {})
+
+    rows = calib.build_records(args, calibration, routing, "rubric", "outline", {}, {"categories": {}}, 10, ["A"])
+    assert rows[0]["observed"] == 80.0
+    assert ("prompt", "argumentative") in calls["genres"]
+    assert ("ids", "argumentative") in calls["genres"]
+    assert ("reqs", "argumentative") in calls["genres"]
+
+
+def test_calibrate_assessors_manifest_scope_coverage_is_rubric_agnostic(tmp_path, monkeypatch):
+    exemplars = tmp_path / "exemplars" / "grade_6_7" / "argumentative"
+    exemplars.mkdir(parents=True)
+    (exemplars / "level_1.md").write_text("Essay text", encoding="utf-8")
+    calibration = {
+        "gold_samples": {
+            "grade_6_7": {
+                "argumentative": [
+                    {"file": "level_1.md", "target_level": "1", "target_pct": 54}
+                ]
+            }
+        },
+        "bias_correction": {"repeats": 2},
+    }
+    calib_path = tmp_path / "calibration.json"
+    calib_path.write_text(json.dumps(calibration), encoding="utf-8")
+    rubric_path = tmp_path / "rubric.md"
+    outline_path = tmp_path / "outline.md"
+    routing_path = tmp_path / "routing.json"
+    rubric_path.write_text("rubric", encoding="utf-8")
+    outline_path.write_text("outline", encoding="utf-8")
+    routing_path.write_text(json.dumps({"tasks": {"pass1_assessor": {"model": "gpt-5.4-mini"}}}), encoding="utf-8")
+    monkeypatch.setattr(calib, "responses_create", lambda **kwargs: {"output": [{"type": "output_text", "text": json.dumps({"student_id": "level_1", "rubric_total_points": 54, "criteria_points": {}, "notes": "ok"})}]})
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "calib",
+            "--calibration",
+            str(calib_path),
+            "--exemplars",
+            str(tmp_path / "exemplars"),
+            "--rubric",
+            str(rubric_path),
+            "--outline",
+            str(outline_path),
+            "--routing",
+            str(routing_path),
+            "--assessors",
+            "A",
+            "--rubric-criteria",
+            str(tmp_path / "none.json"),
+            "--output",
+            str(tmp_path / "bias.json"),
+        ],
+    )
+    assert calib.main() == 0
+    manifest = json.loads((tmp_path / "calibration_manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["scope_coverage"][0]
+    assert entry["key"] == "grade_6_7|argumentative"
+    assert entry["rubric_family"] == ""
+    assert entry["model_family"] == "gpt-5.4-mini"
+    assert entry["samples"] == 2
+    assert entry["observations"] == 2
+    assert manifest["rubric_hash"] is None
+
+
 def test_compute_profile_repeats_collapsed():
     profile = calib.compute_profile(
         [

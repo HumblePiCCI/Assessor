@@ -272,6 +272,9 @@ def setup_run(base_inputs: Path, base_submissions: Path, repo_root: Path, run_di
     calibration_src = repo_root / "outputs" / "calibration_bias.json"
     if calibration_src.exists():
         shutil.copy2(calibration_src, run_dir / "outputs" / "calibration_bias.json")
+    calibration_manifest_src = repo_root / "outputs" / "calibration_manifest.json"
+    if calibration_manifest_src.exists():
+        shutil.copy2(calibration_manifest_src, run_dir / "outputs" / "calibration_manifest.json")
     metadata = ensure_class_metadata(run_dir / "inputs")
     ensure_bootstrap_calibration(run_dir, metadata)
 

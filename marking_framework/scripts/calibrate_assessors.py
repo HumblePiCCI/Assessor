@@ -102,8 +102,15 @@ def fit_affine_correction(pairs: list[tuple[float, float]]) -> dict:
     errors = [a - y for a, y in zip(adjusted, tgt)]
     raw_errors = [x - y for x, y in pairs]
     mae = sum(abs(e) for e in errors) / len(errors)
-    mean_error = sum(raw_errors) / len(raw_errors)
-    return {"slope": round(slope, 4), "intercept": round(intercept, 4), "mean_error": round(mean_error, 4), "mae": round(mae, 4)}
+    mean_error = sum(errors) / len(errors)
+    mean_error_raw = sum(raw_errors) / len(raw_errors)
+    return {
+        "slope": round(slope, 4),
+        "intercept": round(intercept, 4),
+        "mean_error": round(mean_error, 4),
+        "mean_error_raw": round(mean_error_raw, 4),
+        "mae": round(mae, 4),
+    }
 
 
 def _interpolate(points: list[dict], value: float) -> float:
@@ -297,13 +304,16 @@ def compute_profile(entries: list[dict]) -> dict:
     penalty = min(0.45, corr_mae / 25.0) + min(0.20, stability_sd / 10.0)
     weight = max(0.45, min(1.25, 0.75 + reliability - penalty))
     affine = fit_affine_correction(pairs)
+    raw_bias = sum(o - t for o, t in pairs) / len(pairs)
+    corrected_bias = sum(c - t for c, t in zip(corrected, target)) / len(collapsed)
     return {
         "samples": len(collapsed),
         "observations": len(entries),
         "map_points": points,
         "slope": 1.0 if points else affine["slope"],
         "intercept": 0.0 if points else affine["intercept"],
-        "bias": round(sum(o - t for o, t in pairs) / len(pairs), 4),
+        "bias": round(corrected_bias if points else affine["mean_error"], 4),
+        "bias_raw": round(raw_bias, 4),
         "mae_raw": round(raw_mae, 4),
         "mae": round(corr_mae if points else affine["mae"], 4),
         "boundary_mae": round((sum(boundary_errors) / len(boundary_errors)) if boundary_errors else 0.0, 4),
@@ -320,20 +330,40 @@ def compute_profile(entries: list[dict]) -> dict:
     }
 
 
+def _coverage_scope_for_manifest(scope_name: str, model_version: str) -> dict:
+    parts = scope_name.split("|", 1)
+    grade_band = parts[0].strip() if parts else ""
+    genre = normalize_genre(parts[1]) if len(parts) > 1 else ""
+    model_family = model_version.split("@", 1)[0] if model_version else ""
+    scope_id_parts = [grade_band, genre, model_family]
+    return {
+        "key": scope_name,
+        "grade_band": grade_band,
+        "genre": genre,
+        # The built-in exemplar bank is grade/genre scoped and intentionally rubric-agnostic.
+        # Leave rubric_family empty so run-time scope checks can accept rubric-specific runs
+        # that are still covered by the shared calibration bank for this model family.
+        "rubric_family": "",
+        "model_family": model_family,
+        "model_version": model_version,
+        "scope_id": "|".join(part for part in scope_id_parts if part),
+    }
+
+
 def build_records(args, calibration, routing, rubric, outline, profiles, criteria_cfg, points_possible, assessors):
     pass1_model = routing["tasks"]["pass1_assessor"]["model"]
     pass1_reasoning = routing["tasks"]["pass1_assessor"].get("reasoning", "medium")
-    criteria_block = criteria_prompt(criteria_cfg, None) if criteria_cfg else ""
-    reqs = evidence_requirements(criteria_cfg) if criteria_cfg else {}
-    if reqs:
-        reqs = dict(reqs)
-        reqs["quote_validation"] = False
-        reqs["rationale_min_words"] = 0
-    required_ids = criteria_ids(criteria_cfg, None) if criteria_cfg else []
     records = []
     repeats = max(1, int(args.repeats))
     for band, genre, sample in iter_gold_samples(calibration):
         genre_norm = normalize_genre(genre)
+        criteria_block = criteria_prompt(criteria_cfg, genre_norm) if criteria_cfg else ""
+        reqs = evidence_requirements(criteria_cfg, genre_norm) if criteria_cfg else {}
+        if reqs:
+            reqs = dict(reqs)
+            reqs["quote_validation"] = False
+            reqs["rationale_min_words"] = 0
+        required_ids = criteria_ids(criteria_cfg, genre_norm) if criteria_cfg else []
         grade_level = BAND_GRADE_LEVEL.get(band)
         grade_context = build_grade_context(grade_level, profiles)
         exemplars_dir = Path(args.exemplars) / band / genre_norm
@@ -457,15 +487,10 @@ def main() -> int:
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     manifest_path = Path(args.manifest_output) if args.manifest_output else calibration_manifest_path(out_path)
     scope_coverage = []
+    model_version = routing["tasks"]["pass1_assessor"]["model"]
     for scope_name, sample_count in sorted(summary["scope_coverage"].items()):
-        scope_parts = scope_name.split("|", 1)
         coverage_scope = build_scope_coverage_entry(
-            {
-                **run_scope_template,
-                "key": scope_name,
-                "grade_band": scope_parts[0] if scope_parts else "",
-                "genre": scope_parts[1] if len(scope_parts) > 1 else "",
-            },
+            _coverage_scope_for_manifest(scope_name, model_version),
             samples=int(sample_count or 0),
             observations=int(sample_count or 0),
             synthetic=False,
@@ -478,8 +503,8 @@ def main() -> int:
         routing=routing,
         routing_profile_hash=routing_profile_hash_from_payload(routing),
         model_version=routing["tasks"]["pass1_assessor"]["model"],
-        rubric_path=rubric_path,
-        rubric_hash=file_sha256(rubric_path),
+        rubric_path=None,
+        rubric_hash=None,
         source_exemplar_set_hash_value=source_exemplar_set_hash(Path(args.calibration), Path(args.exemplars)),
         freshness_window_hours=args.freshness_window_hours or float((routing.get("calibration_gate", {}) or {}).get("max_age_hours", 168) or 168),
         generated_at=str(payload["generated_at"]),

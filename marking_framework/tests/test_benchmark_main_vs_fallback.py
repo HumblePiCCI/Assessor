@@ -108,6 +108,31 @@ def test_build_mode_env_is_portable():
     assert fallback_env["LLM_MODE"] == "codex_local"
 
 
+def test_setup_run_copies_calibration_manifest(tmp_path):
+    repo_root = tmp_path / "repo"
+    base_inputs = tmp_path / "dataset" / "inputs"
+    base_submissions = tmp_path / "dataset" / "submissions"
+    run_dir = tmp_path / "run"
+    for dirname in ("scripts", "config", "prompts", "templates", "docs", "ui"):
+        (repo_root / dirname).mkdir(parents=True, exist_ok=True)
+    (repo_root / "outputs").mkdir(parents=True, exist_ok=True)
+    (repo_root / "outputs" / "calibration_bias.json").write_text(json.dumps({"synthetic": False}), encoding="utf-8")
+    (repo_root / "outputs" / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4-mini"}), encoding="utf-8")
+    (base_inputs).mkdir(parents=True)
+    (base_submissions).mkdir(parents=True)
+    (base_inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    (base_inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (base_inputs / "class_metadata.json").write_text(json.dumps({"grade_level": 6, "assignment_genre": "argumentative"}), encoding="utf-8")
+    (base_submissions / "s001.txt").write_text("essay", encoding="utf-8")
+
+    bmf.setup_run(base_inputs, base_submissions, repo_root, run_dir)
+
+    assert (run_dir / "outputs" / "calibration_bias.json").exists()
+    assert (run_dir / "outputs" / "calibration_manifest.json").exists()
+    manifest = json.loads((run_dir / "outputs" / "calibration_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["model_version"] == "gpt-5.4-mini"
+
+
 def test_pass1_model_usage_ratio(tmp_path):
     pass1 = tmp_path / "pass1"
     pass1.mkdir()
