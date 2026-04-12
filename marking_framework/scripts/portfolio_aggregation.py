@@ -109,6 +109,36 @@ def signal_from_portfolio_fields(score: dict | None) -> dict | None:
     }
 
 
+def piece_distribution_signal(score: dict | None) -> dict | None:
+    if not isinstance(score, dict):
+        return None
+    piece_rows = score.get("portfolio_piece_scores") or []
+    aggregation = score.get("portfolio_aggregation") or {}
+    stats = aggregation.get("piece_score_stats") if isinstance(aggregation, dict) else {}
+    if not isinstance(piece_rows, list):
+        piece_rows = []
+    if not isinstance(stats, dict):
+        stats = {}
+    piece_scores = [
+        _num(piece.get("rubric_total_points"), 0.0)
+        for piece in piece_rows
+        if isinstance(piece, dict)
+    ]
+    if not piece_scores and not stats:
+        return None
+    overall_score = _num(score.get("rubric_total_points"), aggregation.get("raw_score", 0.0))
+    return {
+        "piece_count": int(_num(score.get("portfolio_piece_count"), len(piece_scores))),
+        "overall_score": round(overall_score, 2),
+        "median": round(_num(stats.get("median"), overall_score), 2),
+        "lower_half_mean": round(_num(stats.get("lower_half_mean"), overall_score), 2),
+        "upper_half_mean": round(_num(stats.get("upper_half_mean"), overall_score), 2),
+        "top70_count": round(sum(1 for value in piece_scores if value >= 70.0), 2),
+        "top80_count": round(sum(1 for value in piece_scores if value >= 80.0), 2),
+        "below60_count": round(sum(1 for value in piece_scores if value < 60.0), 2),
+    }
+
+
 def _score_range_for_estimate(estimate: float) -> dict:
     value = float(estimate)
     if value >= 3.45:
@@ -124,18 +154,41 @@ def _score_range_for_estimate(estimate: float) -> dict:
     return {"canonical_level": "2", "min_score": 60.0, "max_score": 69.0, "anchor_score": 64.0}
 
 
-def _student_summary(votes: list[dict]) -> dict:
+def _mean_field(rows: list[dict], key: str) -> float:
+    values = [_num(row.get(key), None) for row in rows if isinstance(row, dict) and row.get(key) is not None]
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
+
+
+def _student_summary(votes: list[dict], piece_summaries: list[dict] | None = None) -> dict:
     if not votes:
-        return {}
-    estimates = [float(vote["estimate"]) for vote in votes]
-    mean_estimate = sum(estimates) / len(estimates)
-    score_range = _score_range_for_estimate(mean_estimate)
-    return {
-        "note_votes": len(votes),
-        "note_estimate_mean": round(mean_estimate, 2),
-        "note_canonical_level": score_range["canonical_level"],
-        "note_anchor_score": score_range["anchor_score"],
-    }
+        summary = {}
+    else:
+        estimates = [float(vote["estimate"]) for vote in votes]
+        mean_estimate = sum(estimates) / len(estimates)
+        score_range = _score_range_for_estimate(mean_estimate)
+        summary = {
+            "note_votes": len(votes),
+            "note_estimate_mean": round(mean_estimate, 2),
+            "note_canonical_level": score_range["canonical_level"],
+            "note_anchor_score": score_range["anchor_score"],
+        }
+    piece_summaries = piece_summaries or []
+    if piece_summaries:
+        summary.update(
+            {
+                "piece_count_mean": _mean_field(piece_summaries, "piece_count"),
+                "piece_overall_mean": _mean_field(piece_summaries, "overall_score"),
+                "piece_median_mean": _mean_field(piece_summaries, "median"),
+                "piece_lower_half_mean": _mean_field(piece_summaries, "lower_half_mean"),
+                "piece_upper_half_mean": _mean_field(piece_summaries, "upper_half_mean"),
+                "piece_top70_mean": _mean_field(piece_summaries, "top70_count"),
+                "piece_top80_mean": _mean_field(piece_summaries, "top80_count"),
+                "piece_lt60_mean": _mean_field(piece_summaries, "below60_count"),
+            }
+        )
+    return summary
 
 
 def _level_value(level: str) -> int:
@@ -204,6 +257,20 @@ def _portfolio_sort_key(row: dict) -> tuple:
 
 def _portfolio_sort_key_with_strategy(row: dict, strategy: str) -> tuple:
     strategy = str(strategy or "").strip().lower()
+    if strategy == "piece_distribution_then_conventions":
+        return (
+            -_num(row.get("portfolio_piece_top80_mean"), -1.0),
+            -_num(row.get("portfolio_piece_top70_mean"), -1.0),
+            -_num(row.get("portfolio_note_estimate"), -1.0),
+            _num(row.get("conventions_mistake_rate_percent"), 100.0),
+            -_num(row.get("portfolio_piece_upper_half_mean"), -1.0),
+            -_num(row.get("portfolio_piece_median_mean"), -1.0),
+            -_num(row.get("portfolio_piece_overall_mean"), -1.0),
+            _num(row.get("portfolio_piece_lt60_mean"), 999.0),
+            -_num(row.get("_composite_bucket"), 0.0),
+            -_num(row.get("_borda_bucket"), 0.0),
+            str(row.get("student_id", "")).lower(),
+        )
     if strategy == "note_then_conventions":
         return (
             -_num(row.get("_level_order"), -1.0),
@@ -281,6 +348,16 @@ def apply_portfolio_scale_calibration(
     min_projection_note_votes = int(_num(scale_cfg.get("min_projection_note_votes"), 1))
     max_upward_jump_levels = int(_num(scale_cfg.get("max_upward_jump_levels"), 1))
     allow_strong_rank_projection = bool(scale_cfg.get("allow_strong_rank_projection", False))
+    strong_top_piece_min_count = _num(scale_cfg.get("strong_top_piece_min_count"), 2.0)
+    strong_top_upper_half_min_percent = _num(
+        scale_cfg.get("strong_top_upper_half_min_percent"),
+        max(68.0, top_min_percent - 2.0),
+    )
+    strong_top_overall_min_percent = _num(
+        scale_cfg.get("strong_top_overall_min_percent"),
+        max(62.0, middle_min_percent),
+    )
+    strong_top_max_lt60_mean = _num(scale_cfg.get("strong_top_max_lt60_mean"), 2.0)
 
     updated = []
     movements = []
@@ -302,8 +379,18 @@ def apply_portfolio_scale_calibration(
         rubric_mean = _num(row.get("rubric_mean_percent"), current_score)
         rank_sd = _num(row.get("rank_sd"), 0.0)
         note_votes = int(_num(row.get("portfolio_note_votes"), 0))
+        piece_top70 = _num(row.get("portfolio_piece_top70_mean"), 0.0)
+        piece_upper_half = _num(row.get("portfolio_piece_upper_half_mean"), 0.0)
+        piece_overall = _num(row.get("portfolio_piece_overall_mean"), 0.0)
+        piece_lt60 = _num(row.get("portfolio_piece_lt60_mean"), 0.0)
         current_value = _level_value(current_level)
         target_level = target_levels.get(student_id, "")
+        strong_top_piece_support = (
+            piece_top70 >= strong_top_piece_min_count
+            and piece_upper_half >= strong_top_upper_half_min_percent
+            and max(current_score, rubric_mean, piece_overall) >= strong_top_overall_min_percent
+            and piece_lt60 <= strong_top_max_lt60_mean
+        )
         middle_projection_floor = max(0.0, middle_min_percent - max(0.0, middle_margin))
         if (
             student_id not in top_ids
@@ -315,7 +402,7 @@ def apply_portfolio_scale_calibration(
         target_value = _level_value(target_level)
         eligible = bool(target_level and note_votes >= min_projection_note_votes and rank_sd <= max_rank_sd)
         if target_level == "4":
-            eligible = eligible and rubric_mean >= top_min_percent
+            eligible = eligible and (rubric_mean >= top_min_percent or strong_top_piece_support)
         elif target_level == "3" and current_value < target_value:
             eligible = eligible and (
                 max(current_score, rubric_mean) >= middle_projection_floor
@@ -345,9 +432,13 @@ def apply_portfolio_scale_calibration(
             updated_row["portfolio_scale_target_level"] = target_level
             updated_row["portfolio_scale_adjusted"] = "true"
             updated_row["portfolio_scale_reason"] = (
-                "ordinal_portfolio_rank_projection_strong"
-                if upward_gap > 1
-                else "ordinal_portfolio_rank_projection"
+                "ordinal_portfolio_rank_projection_piece_support"
+                if target_level == "4" and strong_top_piece_support and rubric_mean < top_min_percent
+                else (
+                    "ordinal_portfolio_rank_projection_strong"
+                    if upward_gap > 1
+                    else "ordinal_portfolio_rank_projection"
+                )
             )
             flags = [item for item in str(updated_row.get("flags", "") or "").split(";") if item]
             if "portfolio_scale_calibration" not in flags:
@@ -392,6 +483,7 @@ def apply_portfolio_mode(pass1: list[dict], config: dict, scope: dict | None = N
     clamp_threshold = _num(portfolio_cfg.get("note_clamp_threshold"), 4.0)
     adjustments = []
     notes_by_student: dict[str, list[dict]] = {}
+    piece_summaries_by_student: dict[str, list[dict]] = {}
 
     for assessor in updated:
         assessor_id = str(assessor.get("assessor_id", "")).strip()
@@ -402,6 +494,9 @@ def apply_portfolio_mode(pass1: list[dict], config: dict, scope: dict | None = N
                 continue
             score_range = _score_range_for_estimate(signal["estimate"])
             notes_by_student.setdefault(student_id, []).append(signal)
+            piece_signal = piece_distribution_signal(score)
+            if piece_signal is not None:
+                piece_summaries_by_student.setdefault(student_id, []).append(piece_signal)
             original_total = score.get("rubric_total_points")
             if original_total is None:
                 criteria = score.get("criteria_points", {})
@@ -429,7 +524,11 @@ def apply_portfolio_mode(pass1: list[dict], config: dict, scope: dict | None = N
                 score["portfolio_note_level"] = score_range["canonical_level"]
                 score["portfolio_note_adjusted"] = False
 
-    student_summaries = {student_id: _student_summary(votes) for student_id, votes in notes_by_student.items()}
+    student_ids = sorted(set(notes_by_student) | set(piece_summaries_by_student))
+    student_summaries = {
+        student_id: _student_summary(notes_by_student.get(student_id, []), piece_summaries_by_student.get(student_id, []))
+        for student_id in student_ids
+    }
     report = {
         "enabled": True,
         "applied": len(adjustments),

@@ -346,6 +346,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     source_scale_profile_name, source_scale_profile = resolve_source_scale_profile(scope, calibration_cfg, n_students)
     source_rank_floors = _list_float(source_scale_profile.get("rank_floor_percent_by_rank", []))
     source_rank_ceilings = _list_float(source_scale_profile.get("rank_ceiling_percent_by_rank", []))
+    source_rank_anchors = _list_float(source_scale_profile.get("rank_anchor_percent_by_rank", []))
     source_min_current = _list_float(source_scale_profile.get("min_current_score_by_rank", []))
     source_min_base = _list_float(source_scale_profile.get("min_base_score_by_rank", []))
     source_min_borda = _list_float(source_scale_profile.get("min_borda_percent_by_rank", []))
@@ -405,6 +406,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             rank_idx = source_rank - 1
             source_floor = source_rank_floors[rank_idx]
             source_ceiling = source_rank_ceilings[rank_idx] if rank_idx < len(source_rank_ceilings) else 0.0
+            source_anchor = source_rank_anchors[rank_idx] if rank_idx < len(source_rank_anchors) else 0.0
             current_gate = source_min_current[rank_idx] if rank_idx < len(source_min_current) else 0.0
             base_gate = source_min_base[rank_idx] if rank_idx < len(source_min_base) else current_gate
             borda_gate = source_min_borda[rank_idx] if rank_idx < len(source_min_borda) else 0.0
@@ -421,6 +423,9 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             if source_supported and source_ceiling > 0.0 and current_score > source_ceiling:
                 target_score = min(target_score, source_ceiling)
                 reasons.append(f"source_scale_ceiling:{source_scale_profile_name}")
+            if source_supported and source_anchor > 0.0:
+                target_score = source_anchor
+                reasons.append(f"source_scale_anchor:{source_scale_profile_name}")
 
         top_boundary_supported = strong_support
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
