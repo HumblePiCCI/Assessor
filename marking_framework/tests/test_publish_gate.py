@@ -169,6 +169,53 @@ def _write_benchmark_report(path, exact=0.9, within_one=1.0, score_band_mae=1.5,
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_corpus_benchmark_summary(path, *, failed_datasets=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "dataset_count": 3,
+        "datasets": ["d1", "d2", "d3"],
+        "runs_per_dataset_mode": 1,
+        "failed_datasets": list(failed_datasets or []),
+        "comparison": {
+            "candidate_mode": "main",
+            "baseline_mode": "fallback",
+            "candidate_weighted_summary": {
+                "exact_level_hit_rate_mean": 0.84,
+                "within_one_level_hit_rate_mean": 0.93,
+                "score_band_mae_mean": 2.7,
+                "mean_rank_displacement_mean": 0.4,
+                "kendall_tau_mean": 0.82,
+                "pairwise_order_agreement_mean": 0.91,
+                "model_usage_ratio_mean": 1.0,
+                "cost_usd_mean": 0.5,
+                "latency_seconds_mean": 20.0,
+            },
+            "baseline_weighted_summary": {
+                "exact_level_hit_rate_mean": 0.8,
+                "within_one_level_hit_rate_mean": 0.9,
+                "score_band_mae_mean": 3.0,
+                "mean_rank_displacement_mean": 0.6,
+                "kendall_tau_mean": 0.8,
+                "pairwise_order_agreement_mean": 0.88,
+                "model_usage_ratio_mean": 1.0,
+                "cost_usd_mean": 0.7,
+                "latency_seconds_mean": 25.0,
+            },
+            "delta": {
+                "exact_level_hit_rate_mean": 0.04,
+                "within_one_level_hit_rate_mean": 0.03,
+                "score_band_mae_mean": -0.3,
+                "mean_rank_displacement_mean": -0.2,
+                "kendall_tau_mean": 0.02,
+                "pairwise_order_agreement_mean": 0.03,
+                "cost_usd_mean": -0.2,
+                "latency_seconds_mean": -5.0,
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _write_calibration_manifest(tmp_path, *, synthetic=False, samples=12, observations=12, generated_at="2026-03-28T00:00:00+00:00"):
     (tmp_path / "outputs/calibration_manifest.json").write_text(
         json.dumps(
@@ -338,6 +385,12 @@ def test_publish_gate_helper_branches(tmp_path):
     bench = pg.benchmark_metrics(tmp_path / "benchmark.json", "main")
     assert bench["present"] is True
     assert bench["exact_level_hit_rate"] == 0.9
+    _write_corpus_benchmark_summary(tmp_path / "corpus_benchmark.json", failed_datasets=["broken_dataset"])
+    corpus_bench = pg.benchmark_metrics(tmp_path / "corpus_benchmark.json", "main")
+    assert corpus_bench["present"] is True
+    assert corpus_bench["failed_dataset_count"] == 1
+    assert corpus_bench["dataset_count"] == 3
+    assert corpus_bench["exact_level_hit_rate"] == 0.84
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():
@@ -357,6 +410,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "cal_abs_bias": 20.0,
         "benchmark_report_present": True,
         "benchmark_runs_successful": 0,
+        "benchmark_failed_dataset_count": 1,
         "benchmark_exact_level_hit_rate": 0.1,
         "benchmark_within_one_level_hit_rate": 0.2,
         "benchmark_score_band_mae": 20.0,
@@ -387,6 +441,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "calibration_max_abs_bias": 6.0,
         "require_benchmark_report": True,
         "benchmark_min_runs_successful": 1,
+        "benchmark_max_failed_datasets": 0,
         "benchmark_min_exact_level_hit_rate": 0.8,
         "benchmark_min_within_one_level_hit_rate": 0.95,
         "benchmark_max_score_band_mae": 2.0,
@@ -417,6 +472,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "calibration_repeat_consistency_below_threshold" in failures
     assert "calibration_abs_bias_above_threshold" in failures
     assert "benchmark_runs_successful_below_threshold" in failures
+    assert "benchmark_failed_datasets_above_threshold" in failures
     assert "benchmark_exact_level_hit_rate_below_threshold" in failures
     assert "benchmark_within_one_level_hit_rate_below_threshold" in failures
     assert "benchmark_score_band_mae_above_threshold" in failures
@@ -443,7 +499,7 @@ def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):
     code = pg.main()
     assert code in (0, 2)
     result = json.loads((tmp_path / "outputs/publish_gate.json").read_text(encoding="utf-8"))
-    assert result["metrics"]["scope"] == ""
+    assert result["metrics"]["scope"] == "grade_4_5|literary_analysis"
 
 
 def test_publish_gate_release_mode_rejects_synthetic_calibration(tmp_path, monkeypatch):
@@ -510,7 +566,13 @@ def test_publish_gate_release_profile_contract_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_inputs(tmp_path)
     _write_benchmark_report(tmp_path / "outputs/benchmark_report.json")
-    _write_calibration_manifest(tmp_path, synthetic=False, samples=12, observations=12)
+    _write_calibration_manifest(
+        tmp_path,
+        synthetic=False,
+        samples=12,
+        observations=12,
+        generated_at="2026-04-11T00:00:00+00:00",
+    )
     _write_reproducibility_report(tmp_path / "outputs/reproducibility_report.json", exact=True, within_tolerance=True, max_delta=0.0)
     (tmp_path / "config/accuracy_gate.json").write_text(
         json.dumps(

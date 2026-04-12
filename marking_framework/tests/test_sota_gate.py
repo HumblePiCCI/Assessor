@@ -59,6 +59,53 @@ def _write_benchmark_report(path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_corpus_benchmark_summary(path, *, failed_datasets=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "dataset_count": 2,
+        "datasets": ["d1", "d2"],
+        "runs_per_dataset_mode": 1,
+        "failed_datasets": list(failed_datasets or []),
+        "comparison": {
+            "candidate_mode": "gpt54_split",
+            "baseline_mode": "gpt52_legacy",
+            "candidate_weighted_summary": {
+                "exact_level_hit_rate_mean": 0.84,
+                "within_one_level_hit_rate_mean": 0.93,
+                "score_band_mae_mean": 2.7,
+                "mean_rank_displacement_mean": 0.4,
+                "kendall_tau_mean": 0.82,
+                "pairwise_order_agreement_mean": 0.91,
+                "model_usage_ratio_mean": 1.0,
+                "cost_usd_mean": 0.5,
+                "latency_seconds_mean": 20.0,
+            },
+            "baseline_weighted_summary": {
+                "exact_level_hit_rate_mean": 0.8,
+                "within_one_level_hit_rate_mean": 0.9,
+                "score_band_mae_mean": 3.0,
+                "mean_rank_displacement_mean": 0.6,
+                "kendall_tau_mean": 0.8,
+                "pairwise_order_agreement_mean": 0.88,
+                "model_usage_ratio_mean": 1.0,
+                "cost_usd_mean": 0.7,
+                "latency_seconds_mean": 25.0,
+            },
+            "delta": {
+                "exact_level_hit_rate_mean": 0.04,
+                "within_one_level_hit_rate_mean": 0.03,
+                "score_band_mae_mean": -0.3,
+                "mean_rank_displacement_mean": -0.2,
+                "kendall_tau_mean": 0.02,
+                "pairwise_order_agreement_mean": 0.03,
+                "cost_usd_mean": -0.2,
+                "latency_seconds_mean": -5.0,
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_load_helpers_and_core_metrics(tmp_path):
     assert sg.load_json(tmp_path / "missing.json") == {}
     bad = tmp_path / "bad.json"
@@ -148,6 +195,13 @@ def test_assessor_spread_and_consistency_metrics(tmp_path):
     assert benchmark["present"] is True
     assert benchmark["candidate"]["mean_student_level_sd"] > 0
     assert benchmark["delta"]["exact_level_hit_rate"] == 0.2
+    _write_corpus_benchmark_summary(tmp_path / "corpus_benchmark.json", failed_datasets=["broken_dataset"])
+    corpus_benchmark = sg.benchmark_comparison_metrics(tmp_path / "corpus_benchmark.json")
+    assert corpus_benchmark["present"] is True
+    assert corpus_benchmark["failed_dataset_count"] == 1
+    assert corpus_benchmark["dataset_count"] == 2
+    assert corpus_benchmark["candidate"]["runs_successful"] == 1
+    assert corpus_benchmark["delta"]["score_band_mae"] == -0.3
 
 
 def test_evaluate_covers_failure_codes():
@@ -167,6 +221,7 @@ def test_evaluate_covers_failure_codes():
         "consistency_low_confidence_rate": 0.9,
         "benchmark_comparison_present": True,
         "benchmark_runs_successful": 0,
+        "benchmark_failed_dataset_count": 1,
         "benchmark_exact_level_hit_rate": 0.1,
         "benchmark_within_one_level_hit_rate": 0.2,
         "benchmark_score_band_mae": 6.0,
@@ -212,6 +267,7 @@ def test_evaluate_covers_failure_codes():
         "max_consistency_low_confidence_rate": 0.5,
         "require_benchmark_report": True,
         "benchmark_min_runs_successful": 1,
+        "benchmark_max_failed_datasets": 0,
         "benchmark_min_exact_level_hit_rate": 0.8,
         "benchmark_min_within_one_level_hit_rate": 0.95,
         "benchmark_max_score_band_mae": 2.0,
@@ -257,6 +313,7 @@ def test_evaluate_covers_failure_codes():
     assert "consistency_swap_rate_above_threshold" in failures
     assert "consistency_low_confidence_rate_above_threshold" in failures
     assert "benchmark_runs_successful_below_threshold" in failures
+    assert "benchmark_failed_datasets_above_threshold" in failures
     assert "benchmark_exact_level_hit_rate_below_threshold" in failures
     assert "benchmark_within_one_level_hit_rate_below_threshold" in failures
     assert "benchmark_score_band_mae_above_threshold" in failures
