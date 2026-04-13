@@ -577,12 +577,24 @@ def compare_modes(candidate_label: str, baseline_label: str, modes: dict[str, di
     }
 
 
-def build_mode_env(base_env: dict[str, str], forced_llm_mode: str | None = None) -> dict[str, str]:
+def build_mode_env(
+    base_env: dict[str, str],
+    forced_llm_mode: str | None = None,
+    *,
+    shared_cache_dir: Path | None = None,
+) -> dict[str, str]:
     env = dict(base_env)
     if forced_llm_mode:
         env["LLM_MODE"] = forced_llm_mode
     else:
         env.pop("LLM_MODE", None)
+    env.setdefault("PYTHONHASHSEED", "0")
+    env.setdefault("LLM_CACHE", "1")
+    env.setdefault("OPENAI_MAX_RETRIES", "3")
+    env.setdefault("OPENAI_RETRY_BACKOFF_SECONDS", "0.2")
+    if shared_cache_dir is not None:
+        shared_cache_dir.mkdir(parents=True, exist_ok=True)
+        env["LLM_CACHE_DIR"] = str(shared_cache_dir.resolve())
     return env
 
 
@@ -795,7 +807,12 @@ def main() -> int:
             run_dir = out_dir / label / f"run_{run_idx}"
             setup_run(inputs_dir, submissions_dir, repo_root, run_dir)
             shutil.copy2(spec["routing_path"], run_dir / spec["routing_path"].name)
-            env = build_mode_env(base_env, spec.get("forced_llm_mode"))
+            shared_cache_dir = out_dir / "_shared_cache" / spec["label"]
+            env = build_mode_env(
+                base_env,
+                spec.get("forced_llm_mode"),
+                shared_cache_dir=shared_cache_dir,
+            )
             ok, error, latency_seconds = run_pipeline(run_dir, run_dir / spec["routing_path"].name, env, bool(spec["require_model_usage"]))
             payload = {"run": run_idx, "ok": ok}
             if ok:

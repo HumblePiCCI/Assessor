@@ -102,10 +102,21 @@ def test_build_mode_env_is_portable():
     assert candidate_env["PATH"] == "/usr/bin:/bin"
     assert "Library/Frameworks" not in candidate_env["PATH"]
     assert "LLM_MODE" not in candidate_env
+    assert candidate_env["PYTHONHASHSEED"] == "0"
+    assert candidate_env["OPENAI_MAX_RETRIES"] == "3"
+    assert candidate_env["OPENAI_RETRY_BACKOFF_SECONDS"] == "0.2"
 
     fallback_env = bmf.build_mode_env(env, "codex_local")
     assert fallback_env["PATH"] == "/usr/bin:/bin"
     assert fallback_env["LLM_MODE"] == "codex_local"
+
+
+def test_build_mode_env_sets_shared_cache_dir(tmp_path):
+    env = {"PATH": "/usr/bin:/bin"}
+    cache_dir = tmp_path / "shared-cache"
+    candidate_env = bmf.build_mode_env(env, shared_cache_dir=cache_dir)
+    assert candidate_env["LLM_CACHE_DIR"] == str(cache_dir.resolve())
+    assert cache_dir.exists()
 
 
 def test_setup_run_copies_calibration_manifest(tmp_path):

@@ -317,7 +317,12 @@ def run_candidate_only_benchmark(dataset: Path, output_dir: Path, runs: int, can
         setup_run(inputs_dir, submissions_dir, repo_root, run_dir)
         routing_out = run_dir / spec["routing_path"].name
         routing_out.write_text(spec["routing_path"].read_text(encoding="utf-8"), encoding="utf-8")
-        env = build_mode_env(base_env, spec.get("forced_llm_mode"))
+        shared_cache_dir = output_dir / "_shared_cache" / spec["label"]
+        env = build_mode_env(
+            base_env,
+            spec.get("forced_llm_mode"),
+            shared_cache_dir=shared_cache_dir,
+        )
         ok, error, latency_seconds = run_pipeline(run_dir, routing_out, env, bool(spec["require_model_usage"]))
         payload = {"run": run_idx, "ok": ok}
         if ok:

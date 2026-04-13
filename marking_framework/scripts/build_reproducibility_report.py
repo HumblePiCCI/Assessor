@@ -49,12 +49,29 @@ def file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def artifact_fingerprint(path: Path) -> str:
+VOLATILE_JSON_KEYS = {"generated_at", "timestamp"}
+
+
+def strip_volatile_json(payload):
+    if isinstance(payload, dict):
+        return {
+            key: strip_volatile_json(value)
+            for key, value in payload.items()
+            if key not in VOLATILE_JSON_KEYS
+        }
+    if isinstance(payload, list):
+        return [strip_volatile_json(item) for item in payload]
+    return payload
+
+
+def artifact_fingerprint(path: Path, *, strip_volatile_json_fields: bool = False) -> str:
     if path.suffix == ".json":
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return file_hash(path)
+        if strip_volatile_json_fields:
+            payload = strip_volatile_json(payload)
         return canonical_json_hash(payload)
     return file_hash(path)
 
@@ -66,7 +83,12 @@ def discover_runs(mode_dir: Path) -> list[Path]:
     return runs
 
 
-def compare_file_set(runs: list[Path], artifacts: tuple[str, ...]) -> tuple[bool, list[str]]:
+def compare_file_set(
+    runs: list[Path],
+    artifacts: tuple[str, ...],
+    *,
+    strip_volatile_json_fields: bool = False,
+) -> tuple[bool, list[str]]:
     mismatched = []
     for rel in artifacts:
         paths = [run / rel for run in runs]
@@ -76,7 +98,10 @@ def compare_file_set(runs: list[Path], artifacts: tuple[str, ...]) -> tuple[bool
         if len(set(exists)) != 1:
             mismatched.append(rel)
             continue
-        hashes = [artifact_fingerprint(path) for path in paths]
+        hashes = [
+            artifact_fingerprint(path, strip_volatile_json_fields=strip_volatile_json_fields)
+            for path in paths
+        ]
         if len(set(hashes)) != 1:
             mismatched.append(rel)
     return (not mismatched), mismatched
@@ -152,7 +177,11 @@ def build_summary(mode_dir: Path, tolerance: float) -> dict:
     runs = discover_runs(mode_dir)
     manifest_identical, mismatched_manifest = compare_file_set(runs, DEFAULT_MANIFEST_ARTIFACTS)
     final_exact, mismatched_final = consensus_exact_match(runs)
-    aux_exact, aux_mismatched = compare_file_set(runs, DEFAULT_FINAL_ARTIFACTS)
+    aux_exact, aux_mismatched = compare_file_set(
+        runs,
+        DEFAULT_FINAL_ARTIFACTS,
+        strip_volatile_json_fields=True,
+    )
     final_exact = final_exact and aux_exact
     mismatched_final = sorted(set(mismatched_final + aux_mismatched))
     max_delta, mismatched_intermediate = max_intermediate_delta(runs, DEFAULT_INTERMEDIATE_ARTIFACTS)

@@ -69,3 +69,18 @@ def test_build_summary_detects_delta(tmp_path):
     assert summary["max_intermediate_metric_delta"] >= 1.0
     assert "outputs/consensus_scores.csv" in summary["mismatched_final_artifacts"]
 
+
+def test_build_summary_ignores_generated_at_only_json_differences(tmp_path):
+    mode_dir = tmp_path / "gpt54_split"
+    _write_run(mode_dir / "run_1")
+    _write_run(mode_dir / "run_2")
+    for idx, stamp in enumerate(("2026-04-12T00:00:00+00:00", "2026-04-12T00:00:01+00:00"), start=1):
+        (mode_dir / f"run_{idx}" / "outputs" / "consistency_report.json").write_text(
+            json.dumps({"generated_at": stamp, "summary": {"student_count": 1}}),
+            encoding="utf-8",
+        )
+
+    summary = br.build_summary(mode_dir, tolerance=0.01)
+
+    assert summary["final_outputs_exact_match"] is True
+    assert "outputs/consistency_report.json" not in summary["mismatched_final_artifacts"]
