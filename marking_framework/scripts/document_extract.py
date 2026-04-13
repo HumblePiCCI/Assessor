@@ -25,6 +25,37 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def _looks_like_raw_pdf_payload(text: str) -> bool:
+    snippet = str(text or "").lstrip()
+    if not snippet:
+        return False
+    head = snippet[:4000]
+    if head.startswith("%PDF-"):
+        return True
+    markers = (
+        " obj",
+        "\nobj",
+        "endobj",
+        "stream",
+        "endstream",
+        "/Length",
+        "/Filter",
+        "xref",
+        "%%EOF",
+    )
+    marker_hits = sum(1 for marker in markers if marker in head)
+    return marker_hits >= 4
+
+
+def _usable_extracted_text(text: str) -> str:
+    cleaned = clean_text(text)
+    if not cleaned:
+        return ""
+    if _looks_like_raw_pdf_payload(cleaned):
+        return ""
+    return cleaned
+
+
 def _run_command(cmd: list[str], *, input_path: Path | None = None) -> str:
     try:
         result = subprocess.run(
@@ -69,24 +100,41 @@ def _pdf_to_text(path: Path) -> tuple[str, list[str]]:
         try:
             reader_cls = getattr(module, "PdfReader")
             reader = reader_cls(str(path))
-            text = clean_text("\n\n".join(page.extract_text() or "" for page in reader.pages))
+            text = _usable_extracted_text("\n\n".join(page.extract_text() or "" for page in reader.pages))
         except Exception:
             text = ""
         if text:
             return text, methods
     if shutil.which("pdftotext"):
         methods.append("pdftotext")
-        text = _run_command(["pdftotext", "-layout", str(path), "-"])
+        text = _usable_extracted_text(_run_command(["pdftotext", "-layout", str(path), "-"]))
+        if text:
+            return text, methods
+    if shutil.which("gs"):
+        methods.append("ghostscript_txtwrite")
+        text = _usable_extracted_text(
+            _run_command(
+                [
+                    "gs",
+                    "-q",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-sDEVICE=txtwrite",
+                    "-sOutputFile=-",
+                    str(path),
+                ]
+            )
+        )
         if text:
             return text, methods
     if shutil.which("textutil"):
         methods.append("textutil")
-        text = _run_command(["textutil", "-convert", "txt", "-stdout", str(path)])
+        text = _usable_extracted_text(_run_command(["textutil", "-convert", "txt", "-stdout", str(path)]))
         if text:
             return text, methods
     if shutil.which("mdls"):
         methods.append("mdls")
-        text = _run_command(["mdls", "-raw", "-name", "kMDItemTextContent", str(path)])
+        text = _usable_extracted_text(_run_command(["mdls", "-raw", "-name", "kMDItemTextContent", str(path)]))
         if text and text != "(null)":
             return text, methods
     return "", methods
