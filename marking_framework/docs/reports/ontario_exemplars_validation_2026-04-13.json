@@ -1,0 +1,456 @@
+{
+  "report_date": "2026-04-13",
+  "source_family": "Ontario Ministry of Education / Queen's Printer for Ontario",
+  "source_url": "https://microsite-sws-prod.s3.amazonaws.com/media/courseware/relatedresource/file/Ontario_writing_exemplars_GM8YI9R.pdf?ResponseContentDisposition=attachment%3Bfilename%3D%22Ontario_writing_exemplars_GM8YI9R.pdf%22",
+  "datasets_added": 16,
+  "samples_added": 64,
+  "protocol": {
+    "tuning_slice": "example1 packs (8 datasets / 32 samples)",
+    "holdout_slice": "example2 packs (8 datasets / 32 samples)",
+    "candidate_mode": "gpt54_split",
+    "baseline_mode": "gpt52_legacy",
+    "candidate_routing": "config/llm_routing_benchmark.json",
+    "baseline_routing": "config/llm_routing_benchmark_gpt52.json",
+    "runs_per_dataset_mode": 1
+  },
+  "example1_candidate": {
+    "exact_level_hit_rate_mean": 1.0,
+    "within_one_level_hit_rate_mean": 1.0,
+    "score_band_mae_mean": 0.0,
+    "kendall_tau_mean": 1.0,
+    "pairwise_order_agreement_mean": 1.0,
+    "cost_usd_mean": 0.080727,
+    "latency_seconds_mean": 69.818098
+  },
+  "example1_baseline": {
+    "exact_level_hit_rate_mean": 0.59375,
+    "within_one_level_hit_rate_mean": 0.9375,
+    "score_band_mae_mean": 2.68375,
+    "kendall_tau_mean": 0.75,
+    "pairwise_order_agreement_mean": 0.875,
+    "cost_usd_mean": 0.215489,
+    "latency_seconds_mean": 129.085661
+  },
+  "example2_candidate": {
+    "exact_level_hit_rate_mean": 1.0,
+    "within_one_level_hit_rate_mean": 1.0,
+    "score_band_mae_mean": 0.0,
+    "kendall_tau_mean": 1.0,
+    "pairwise_order_agreement_mean": 1.0,
+    "cost_usd_mean": 0.084081,
+    "latency_seconds_mean": 64.837396
+  },
+  "example2_baseline": {
+    "exact_level_hit_rate_mean": 0.53125,
+    "within_one_level_hit_rate_mean": 0.96875,
+    "score_band_mae_mean": 3.349063,
+    "kendall_tau_mean": 0.833333,
+    "pairwise_order_agreement_mean": 0.916667,
+    "cost_usd_mean": 0.212525,
+    "latency_seconds_mean": 115.982584
+  },
+  "combined_candidate": {
+    "exact_level_hit_rate_mean": 1.0,
+    "within_one_level_hit_rate_mean": 1.0,
+    "score_band_mae_mean": 0.0,
+    "kendall_tau_mean": 1.0,
+    "pairwise_order_agreement_mean": 1.0,
+    "cost_usd_mean": 0.082404,
+    "latency_seconds_mean": 67.327747
+  },
+  "combined_baseline": {
+    "exact_level_hit_rate_mean": 0.5625,
+    "within_one_level_hit_rate_mean": 0.953125,
+    "score_band_mae_mean": 3.016406,
+    "kendall_tau_mean": 0.791667,
+    "pairwise_order_agreement_mean": 0.895833,
+    "cost_usd_mean": 0.214007,
+    "latency_seconds_mean": 122.534123
+  },
+  "dataset_results": [
+    {
+      "dataset": "ontario_1999_grade1_descriptive_my_favourite_toy_example1",
+      "grade_level": 1,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.069404,
+        "latency_seconds_mean": 58.959568
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 2.5,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.166597,
+        "latency_seconds_mean": 105.187247
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade2_narrative_my_adventure_example1",
+      "grade_level": 2,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.069115,
+        "latency_seconds_mean": 50.133157
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 2.5,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.174682,
+        "latency_seconds_mean": 89.042923
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade3_letter_favourite_author_example1",
+      "grade_level": 3,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.084183,
+        "latency_seconds_mean": 69.215966
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 3.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.226595,
+        "latency_seconds_mean": 127.353732
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade4_humorous_story_gravity_failed_example1",
+      "grade_level": 4,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.070286,
+        "latency_seconds_mean": 55.889873
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 0.75,
+        "score_band_mae_mean": 2.75,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.190141,
+        "latency_seconds_mean": 113.24119
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade5_report_person_i_admire_example1",
+      "grade_level": 5,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.092965,
+        "latency_seconds_mean": 86.792572
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 3.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.228468,
+        "latency_seconds_mean": 128.70557
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade6_summary_canadas_newest_territory_example1",
+      "grade_level": 6,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.077526,
+        "latency_seconds_mean": 74.809123
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 2.2075,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.255906,
+        "latency_seconds_mean": 177.183271
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade7_advertisement_new_food_product_example1",
+      "grade_level": 7,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.094138,
+        "latency_seconds_mean": 79.765552
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.715,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.231275,
+        "latency_seconds_mean": 136.232566
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade8_opinion_letter_editor_example1",
+      "grade_level": 8,
+      "example_number": 1,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.0882,
+        "latency_seconds_mean": 82.978975
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.25,
+        "within_one_level_hit_rate_mean": 0.75,
+        "score_band_mae_mean": 4.7975,
+        "kendall_tau_mean": -0.333333,
+        "pairwise_order_agreement_mean": 0.333333,
+        "cost_usd_mean": 0.250248,
+        "latency_seconds_mean": 155.738789
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade1_descriptive_my_favourite_toy_example2",
+      "grade_level": 1,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.069523,
+        "latency_seconds_mean": 0.253523
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 4.6425,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.173633,
+        "latency_seconds_mean": 0.260717
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade2_narrative_my_adventure_example2",
+      "grade_level": 2,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.070576,
+        "latency_seconds_mean": 54.273005
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 2.55,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.176976,
+        "latency_seconds_mean": 102.464596
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade3_letter_favourite_author_example2",
+      "grade_level": 3,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.113098,
+        "latency_seconds_mean": 96.352341
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.25,
+        "within_one_level_hit_rate_mean": 0.75,
+        "score_band_mae_mean": 5.665,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.222337,
+        "latency_seconds_mean": 123.512626
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade4_humorous_story_gravity_failed_example2",
+      "grade_level": 4,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.073501,
+        "latency_seconds_mean": 62.202116
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 3.89,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.187847,
+        "latency_seconds_mean": 99.200085
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade5_report_person_i_admire_example2",
+      "grade_level": 5,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.078203,
+        "latency_seconds_mean": 67.079451
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 3.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.21977,
+        "latency_seconds_mean": 127.953394
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade6_summary_canadas_newest_territory_example2",
+      "grade_level": 6,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.072743,
+        "latency_seconds_mean": 62.77041
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.8175,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.251074,
+        "latency_seconds_mean": 187.717634
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade7_advertisement_new_food_product_example2",
+      "grade_level": 7,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.086298,
+        "latency_seconds_mean": 77.169352
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.75,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 2.5,
+        "kendall_tau_mean": 0.666667,
+        "pairwise_order_agreement_mean": 0.833333,
+        "cost_usd_mean": 0.22222,
+        "latency_seconds_mean": 133.190378
+      }
+    },
+    {
+      "dataset": "ontario_1999_grade8_opinion_letter_editor_example2",
+      "grade_level": 8,
+      "example_number": 2,
+      "student_count": 4,
+      "candidate_summary": {
+        "exact_level_hit_rate_mean": 1.0,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 0.0,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.108707,
+        "latency_seconds_mean": 98.598972
+      },
+      "baseline_summary": {
+        "exact_level_hit_rate_mean": 0.5,
+        "within_one_level_hit_rate_mean": 1.0,
+        "score_band_mae_mean": 3.7275,
+        "kendall_tau_mean": 1.0,
+        "pairwise_order_agreement_mean": 1.0,
+        "cost_usd_mean": 0.246344,
+        "latency_seconds_mean": 153.561243
+      }
+    }
+  ]
+}

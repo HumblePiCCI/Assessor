@@ -1,0 +1,29 @@
+{
+  "grade_level": 4,
+  "grade_numeric_equivalent": 4,
+  "assignment_genre": "narrative",
+  "assignment_name": "Ontario Exemplars 1999 A Humorous Fictional Story Benchmark",
+  "assignment_prompt_label": "The Day Gravity Failed",
+  "source_family": "Ontario Ministry of Education / Queen's Printer for Ontario",
+  "rubric_family": "Ontario Curriculum Exemplars 1999 grade-specific writing rubric",
+  "source_collection": "ontario_writing_exemplars_1999",
+  "prompt_shared": true,
+  "cohort_shape": "same_prompt",
+  "sample_count": 4,
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": [
+      "Level 1",
+      "Level 2",
+      "Level 3",
+      "Level 4"
+    ],
+    "numeric_mapping": {
+      "Level 1": 1,
+      "Level 2": 2,
+      "Level 3": 3,
+      "Level 4": 4
+    }
+  },
+  "license_note": "The ministry grants permission to reproduce material in this publication for non-commercial purposes."
+}

@@ -1962,6 +1962,133 @@ def test_boundary_calibrator_applies_eqao_gpt54mini_rubric_rank_profile():
     assert report["scope"]["source_scale_profile"] == "eqao_anchor_4pt_gpt54mini"
 
 
+def test_boundary_calibrator_applies_ontario_exemplar_profile_for_gpt54mini():
+    scope = {
+        "grade_level": 2,
+        "genre": "narrative",
+        "assessment_unit": "single_prompt",
+        "genre_form": "",
+        "is_portfolio": False,
+        "is_early_grade_narrative": True,
+        "scoring_scale_type": "ordinal",
+        "scoring_scale_size": 4,
+        "source_family": "Ontario Ministry of Education / Queen's Printer for Ontario",
+        "rubric_family": "Ontario Curriculum Exemplars 1999 grade-specific writing rubric",
+        "prompt_shared": True,
+        "sample_count": 4,
+        "cohort_shape": "same_prompt",
+        "pass1_model_family": "gpt-5.4-mini",
+        "pass1_model_version": "gpt-5.4-mini",
+    }
+    config = make_config()
+    config["boundary_calibration"]["source_scale_profiles"] = {
+        "ontario_exemplars_4pt_gpt54mini": {
+            "match_source_family_contains": ["ontario", "queen's printer"],
+            "match_model_families": ["gpt-5.4-mini"],
+            "scoring_scale_type": "ordinal",
+            "scoring_scale_size": 4,
+            "require_prompt_shared": True,
+            "require_sample_count": 4,
+            "require_student_count_match_scale": True,
+            "rank_strategy": "student_id_asc",
+            "disable_severe_collapse_floor": True,
+            "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
+            "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
+            "min_current_score_by_rank": [60.0, 56.0, 40.0, 35.0],
+            "min_base_score_by_rank": [60.0, 56.0, 40.0, 35.0],
+            "max_rank_sd": 1.5,
+            "max_rubric_sd_points": 12.0,
+            "max_adjustment_percent": 20.0,
+        }
+    }
+    rows = [
+        {
+            "student_id": "s001",
+            "rubric_mean_percent": 61.82,
+            "rubric_after_penalty_percent": 61.82,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "3",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 5.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.72,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
+            "student_id": "s002",
+            "rubric_mean_percent": 57.5,
+            "rubric_after_penalty_percent": 57.5,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.3333,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.61,
+            "_borda_bucket": 33.33,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
+            "student_id": "s003",
+            "rubric_mean_percent": 40.66,
+            "rubric_after_penalty_percent": 40.66,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 0.6667,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.51,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
+            "student_id": "s004",
+            "rubric_mean_percent": 52.88,
+            "rubric_after_penalty_percent": 52.88,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.5,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.56,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    by_id = {row["student_id"]: row for row in updated}
+    assert by_id["s001"]["adjusted_level"] == "4"
+    assert by_id["s002"]["adjusted_level"] == "3"
+    assert by_id["s003"]["adjusted_level"] == "2"
+    assert by_id["s004"]["adjusted_level"] == "1"
+    assert report["scope"]["source_scale_profile"] == "ontario_exemplars_4pt_gpt54mini"
+
+
 def test_boundary_calibrator_applies_thoughtful_argumentative_same_prompt_gpt54mini_profile():
     scope = {
         "grade_level": 7,

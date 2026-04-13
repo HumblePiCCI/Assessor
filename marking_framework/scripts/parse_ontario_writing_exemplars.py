@@ -24,20 +24,61 @@ DEFAULT_SOURCE_URL = (
     '?ResponseContentDisposition=attachment%3Bfilename%3D%22Ontario_writing_exemplars_GM8YI9R.pdf%22'
 )
 GRADE_TASKS = {
-    1: {"task_name": "A Short Piece of Descriptive Writing", "prompt_label": "My Favourite Toy", "assignment_genre": "descriptive_writing"},
-    2: {"task_name": "A Short Narrative", "prompt_label": "My Adventure", "assignment_genre": "narrative"},
-    3: {"task_name": "A Letter", "prompt_label": "to a Favourite Author", "assignment_genre": "letter"},
-    4: {"task_name": "A Humorous Fictional Story", "prompt_label": "The Day Gravity Failed", "assignment_genre": "narrative"},
-    5: {"task_name": "A Non-fiction Report", "prompt_label": "A Person I Admire", "assignment_genre": "informational_report"},
-    6: {"task_name": "A Summary Report", "prompt_label": "Canada's Newest Territory", "assignment_genre": "summary_report"},
-    7: {"task_name": "An Advertisement", "prompt_label": "for a New Food Product", "assignment_genre": "advertisement"},
-    8: {"task_name": "An Opinion Piece", "prompt_label": "a Letter to the Editor", "assignment_genre": "opinion_letter"},
+    1: {
+        "task_name": "A Short Piece of Descriptive Writing",
+        "prompt_label": "My Favourite Toy",
+        "assignment_genre": "informational_report",
+        "dataset_slug": "descriptive_my_favourite_toy",
+    },
+    2: {
+        "task_name": "A Short Narrative",
+        "prompt_label": "My Adventure",
+        "assignment_genre": "narrative",
+        "dataset_slug": "narrative_my_adventure",
+    },
+    3: {
+        "task_name": "A Letter",
+        "prompt_label": "to a Favourite Author",
+        "assignment_genre": "letter",
+        "dataset_slug": "letter_favourite_author",
+    },
+    4: {
+        "task_name": "A Humorous Fictional Story",
+        "prompt_label": "The Day Gravity Failed",
+        "assignment_genre": "narrative",
+        "dataset_slug": "humorous_story_gravity_failed",
+    },
+    5: {
+        "task_name": "A Non-fiction Report",
+        "prompt_label": "A Person I Admire",
+        "assignment_genre": "informational_report",
+        "dataset_slug": "report_person_i_admire",
+    },
+    6: {
+        "task_name": "A Summary Report",
+        "prompt_label": "Canada's Newest Territory",
+        "assignment_genre": "summary_report",
+        "dataset_slug": "summary_canadas_newest_territory",
+    },
+    7: {
+        "task_name": "An Advertisement",
+        "prompt_label": "for a New Food Product",
+        "assignment_genre": "advertisement",
+        "dataset_slug": "advertisement_new_food_product",
+    },
+    8: {
+        "task_name": "An Opinion Piece",
+        "prompt_label": "a Letter to the Editor",
+        "assignment_genre": "opinion_letter",
+        "dataset_slug": "opinion_letter_editor",
+    },
 }
 SAMPLE_HEADER_RE = re.compile(r"^\s*Grade\s+(?P<grade>\d+)\s+Level\s+(?P<level>\d):\s+Example\s+(?P<example>\d+)\s*$", re.M)
 NOTES_SPLIT_RE = re.compile(r"Teachers[’']\s*Notes\s*Reasoning\b", re.I)
 PAGE_NOISE_RE = re.compile(
     r"^(?:"
     r"\d+\s+The Ontario Curriculum .*Writing, 1999"
+    r"|The Ontario Curriculum .*Writing, 1999"
     r"|Grade\s+\d+:\s+.+\s+\d+"
     r"|The Ontario Curriculum Exemplars: Student Writing Samples, Grades 1–8, 1999 \d+"
     r"|\d+"
@@ -47,6 +88,7 @@ NEXT_SECTION_RE = re.compile(r"^Grade\s+\d+\b(?!\s+Level)(?::|\s*$)")
 DOCUMENT_SECTION_STOP_RE = re.compile(
     r"^(?:Glossary|Introduction|Background|Using the Writing Samples|How the Samples Were Selected)\b"
 )
+GRADE_SECTION_HEADER_TEMPLATE = r"^\s*Grade\s+{grade}\s*$"
 
 
 def file_sha256(path: Path) -> str:
@@ -74,6 +116,62 @@ def _strip_sample_noise(lines: list[str]) -> list[str]:
             continue
         cleaned.append(line)
     return cleaned
+
+
+def _clean_section_lines(lines: list[str]) -> list[str]:
+    cleaned = []
+    last_blank = True
+    for raw in lines:
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            if not last_blank:
+                cleaned.append("")
+            last_blank = True
+            continue
+        if PAGE_NOISE_RE.match(stripped):
+            continue
+        cleaned.append(stripped)
+        last_blank = False
+    while cleaned and not cleaned[-1]:
+        cleaned.pop()
+    return cleaned
+
+
+def _repair_linebreak_hyphenation(text: str) -> str:
+    return re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", str(text or ""))
+
+
+def extract_grade_packet_sections(text: str, grade: int) -> dict[str, str]:
+    task = GRADE_TASKS.get(int(grade), {})
+    rubric_marker = f"Grade {grade}: Rubric for"
+    rubric_start = text.find(rubric_marker)
+    if rubric_start < 0:
+        raise ValueError(f"Missing rubric section for grade {grade}")
+    grade_section_matches = list(re.finditer(GRADE_SECTION_HEADER_TEMPLATE.format(grade=grade), text, re.M))
+    grade_section_matches = [match for match in grade_section_matches if match.start() < rubric_start]
+    if not grade_section_matches:
+        raise ValueError(f"Missing task section for grade {grade}")
+    task_start = grade_section_matches[-1].start()
+    sample_matches = [match for match in SAMPLE_HEADER_RE.finditer(text, rubric_start) if int(match.group("grade")) == int(grade)]
+    if not sample_matches:
+        raise ValueError(f"Missing sample blocks for grade {grade}")
+    rubric_end = sample_matches[0].start()
+    task_block = text[task_start:rubric_start]
+    task_body_idx = task_block.find("The Task")
+    if task_body_idx >= 0:
+        task_block = task_block[task_body_idx:]
+    outline_lines = [
+        f"Grade {grade}: {task.get('task_name', '')}".strip(),
+        f'Prompt / focus: "{task.get("prompt_label", "")}"'.strip(),
+        "",
+        *_clean_section_lines(task_block.splitlines()),
+    ]
+    rubric_lines = _clean_section_lines(text[rubric_start:rubric_end].splitlines())
+    return {
+        "assignment_outline": _repair_linebreak_hyphenation("\n".join(line for line in outline_lines if line is not None).strip()),
+        "rubric": _repair_linebreak_hyphenation("\n".join(rubric_lines).strip()),
+    }
 
 
 def _collapse_note_lines(lines: list[str]) -> list[str]:
@@ -131,8 +229,8 @@ def parse_teacher_notes(notes_text: str) -> dict:
             continue
         buffers[current].append(line)
     for key in ("reasoning", "communication", "organization", "conventions"):
-        categories[key] = _collapse_note_lines(buffers[key])
-    categories["comments"] = " ".join(_collapse_note_lines(buffers["comments"])).strip()
+        categories[key] = [_repair_linebreak_hyphenation(item) for item in _collapse_note_lines(buffers[key])]
+    categories["comments"] = _repair_linebreak_hyphenation(" ".join(_collapse_note_lines(buffers["comments"])).strip())
     return categories
 
 
@@ -153,7 +251,7 @@ def parse_ontario_writing_exemplars(text: str) -> list[dict]:
         if not student_lines:
             raise ValueError(f"Missing student text for Grade {grade} Level {level} Example {example}")
         sample_title = student_lines[0].strip("“”\" ")
-        student_text = "\n".join(student_lines[1:]).strip()
+        student_text = _repair_linebreak_hyphenation("\n".join(student_lines[1:]).strip())
         notes_text = chunk[note_match.start():]
         teacher_notes = parse_teacher_notes(notes_text)
         task = GRADE_TASKS.get(grade, {})

@@ -32,15 +32,18 @@ def test_parse_teacher_notes_stops_at_glossary_section():
 Communication
 – communicates clearly
 Organization
-– ideas flow naturally
+– ideas flow natu-
+rally
 Conventions
 – almost no errors
 Comments
-This is a level 4 sample.
+This is a level 4 sam-
+ple.
 Glossary
 achievement. Example glossary text.
 """
     parsed = parse_teacher_notes(notes)
+    assert parsed["organization"] == ["ideas flow naturally"]
     assert parsed["comments"] == "This is a level 4 sample."
 
 
