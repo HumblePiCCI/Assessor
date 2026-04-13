@@ -3,101 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hero Path</title>
-  <link rel="stylesheet" href="style.css?v=2" />
+  <title>Assessor</title>
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body data-theme="light" data-view="single">
   <header class="topbar">
     <div class="brand">
-      <h1>Hero Path</h1>
-      <p class="tagline">Foundational organization tool for teacher‑led assessment.</p>
+      <div class="eyebrow">Release Workspace</div>
+      <h1>Assessor</h1>
+      <p class="tagline">Upload the class set, run the assessment once, then correct only the exceptions.</p>
     </div>
-    <button id="themeToggle" class="ghost" aria-label="Toggle theme">☾</button>
+    <div class="topbar-meta">
+      <div id="projectBadge" class="status-pill" data-state="idle">Project · unsaved</div>
+      <div id="connectionBadge" class="status-pill" data-state="idle">Connection · offline</div>
+      <div id="runBadge" class="status-pill" data-state="idle">Pipeline · idle</div>
+    </div>
+    <div class="topbar-actions">
+      <button id="themeToggle" class="ghost icon-only" aria-label="Toggle theme">☾</button>
+      <button id="viewToggle" class="ghost" aria-label="Toggle split view">Compare</button>
+      <button id="runPipelinePrimary" class="primary">Run assessment</button>
+    </div>
   </header>
 
-  <section id="rail">
-    <div id="railScroll" class="rail-scroll" tabindex="0" aria-label="Essay list"></div>
-  </section>
-
-  <main class="layout">
-    <aside id="summary" class="panel">
-      <div class="panel-title">Assessment Summary</div>
-      <div id="summaryList" class="summary-list"></div>
-    </aside>
-
-    <section id="workspace" class="panel">
-      <div class="workspace-header">
-        <button id="prevBtn" class="ghost">‹</button>
-        <div id="detailTitle">Select a student</div>
-        <div class="workspace-actions">
-          <button id="viewToggle" class="ghost" aria-label="Toggle split view">Split</button>
-          <button id="nextBtn" class="ghost">›</button>
-        </div>
-      </div>
-      <div id="essayGrid" class="essay-grid">
-        <div class="essay-panel">
-          <div id="essayLabelPrimary" class="essay-label"></div>
-          <div id="essay" class="essay"></div>
-        </div>
-        <div id="comparePanel" class="essay-panel">
-          <div id="essayLabelCompare" class="essay-label"></div>
-          <div id="essayCompare" class="essay"></div>
-        </div>
-      </div>
-    </section>
-
-    <aside id="actions" class="panel">
-      <div class="panel-title">Feedback &amp; Controls</div>
-
-      <div class="feedback">
-        <div class="feedback-block">
-          <div class="label">Star 1</div>
-          <div id="star1" class="editable" contenteditable="true" data-placeholder="Paste a strength + quote."></div>
-        </div>
-        <div class="feedback-block">
-          <div class="label">Star 2</div>
-          <div id="star2" class="editable" contenteditable="true" data-placeholder="Paste a second strength + quote."></div>
-        </div>
-        <div class="feedback-block">
-          <div class="label">Wish</div>
-          <div id="wish" class="editable" contenteditable="true" data-placeholder="Highest‑leverage fix + quote."></div>
-        </div>
-        <button id="generateFeedback" class="ghost">Generate feedback</button>
-        <button id="copyFeedback" class="ghost">Copy to clipboard</button>
-      </div>
-
-      <div class="controls">
-        <div class="control">
-          <label for="overallGradeSlider">Overall slider</label>
-          <input id="overallGradeSlider" type="range" min="0" max="100" step="1" value="75" />
-        </div>
-        <div class="control">
-          <label for="topGrade">Top mark</label>
-          <input id="topGrade" type="number" value="92" />
-        </div>
-        <div class="control">
-          <label for="bottomGrade">Bottom mark</label>
-          <input id="bottomGrade" type="number" value="58" />
-        </div>
-        <div class="control">
-          <label for="gradeOverride">Final grade</label>
-          <input id="gradeOverride" type="number" placeholder="auto" />
+  <section class="intake-shell">
+    <div class="panel intake-panel">
+      <div class="panel-row">
+        <div>
+          <div class="panel-title">Setup</div>
+          <div id="intakeHint" class="intake-hint">Add essays, rubric, and outline. Then run the assessment.</div>
         </div>
       </div>
 
-      <div class="auth">
-        <div class="label">Connection</div>
-        <div class="auth-row">
-          <input id="apiKeyInput" type="password" placeholder="OpenAI API key" />
-          <button id="connectKey" class="ghost">Connect</button>
-        </div>
-        <div class="auth-row">
-          <button id="codexLogin" class="ghost">Sign in with Codex</button>
-        </div>
-        <div id="authStatus" class="auth-status">Not connected</div>
-      </div>
-
-      <div class="uploads">
+      <div class="uploads intake-grid">
         <div class="upload" data-target="essays">
           <input id="uploadEssays" type="file" multiple />
           <span>Drop essays</span>
@@ -111,25 +48,133 @@
           <span>Drop outline</span>
         </div>
       </div>
-      <div class="pipeline">
-        <button id="runPipeline" class="ghost">Run pipeline</button>
+
+      <div class="pipeline pipeline-inline">
         <div id="pipelineStatus" class="auth-status">Idle</div>
       </div>
 
-      <div class="projects auth">
-        <div class="label">Projects</div>
-        <div class="auth-row">
-          <select id="projectSelect"></select>
-          <button id="loadProject" class="ghost">Load</button>
+      <details class="secondary-details">
+        <summary>Session details</summary>
+        <div class="details-grid">
+          <div class="auth compact">
+            <div class="label">Connection</div>
+            <div class="auth-row">
+              <input id="apiKeyInput" type="password" placeholder="OpenAI API key" />
+              <button id="connectKey" class="ghost">Connect</button>
+            </div>
+            <div class="auth-row auth-row-single">
+              <button id="codexLogin" class="ghost">Sign in with Codex</button>
+            </div>
+            <div id="authStatus" class="auth-status">Not connected</div>
+          </div>
+
+          <div class="projects auth compact">
+            <div class="label">Projects</div>
+            <div class="auth-row">
+              <select id="projectSelect"></select>
+              <button id="loadProject" class="ghost">Load</button>
+            </div>
+            <div class="project-actions">
+              <button id="saveProject" class="ghost">Save</button>
+              <button id="newProject" class="ghost">New</button>
+              <button id="clearProject" class="ghost">Clear</button>
+              <button id="deleteProject" class="ghost">Delete</button>
+            </div>
+            <div id="projectStatus" class="auth-status">No project loaded</div>
+          </div>
         </div>
-        <div class="project-actions">
-          <button id="saveProject" class="ghost">Save</button>
-          <button id="newProject" class="ghost">New</button>
-          <button id="clearProject" class="ghost">Clear</button>
-          <button id="deleteProject" class="ghost">Delete</button>
+      </details>
+    </div>
+  </section>
+
+  <section id="rail">
+    <div class="rail-head">
+      <div class="panel-title">Ordered Cohort</div>
+      <div id="railMeta" class="rail-meta">No essays loaded</div>
+    </div>
+    <div id="railScroll" class="rail-scroll" tabindex="0" aria-label="Essay list"></div>
+  </section>
+
+  <main class="layout">
+    <section id="workspace" class="panel workspace-panel">
+      <div class="workspace-header">
+        <button id="prevBtn" class="ghost">‹</button>
+        <div class="workspace-heading">
+          <div class="panel-title">Current Essay</div>
+          <div id="detailTitle">Upload essays to begin</div>
         </div>
-        <div id="projectStatus" class="auth-status">No project loaded</div>
+        <button id="nextBtn" class="ghost">›</button>
       </div>
+
+      <section id="summary" class="snapshot-panel">
+        <div class="panel-title">Decision Snapshot</div>
+        <div id="summaryList" class="summary-list summary-grid"></div>
+      </section>
+
+      <div id="workspaceEmpty" class="empty-state">
+        <h2>Run one clean pass, then review the outliers.</h2>
+        <p>Assessor is designed for a fast teacher check, not a control room. Upload the class set, review the order, and only intervene where the machine is uncertain.</p>
+      </div>
+
+      <div id="essayGrid" class="essay-grid">
+        <div class="essay-panel">
+          <div id="essayLabelPrimary" class="essay-label"></div>
+          <div id="essay" class="essay"></div>
+        </div>
+        <div id="comparePanel" class="essay-panel">
+          <div id="essayLabelCompare" class="essay-label"></div>
+          <div id="essayCompare" class="essay"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside id="actions" class="panel actions-panel">
+      <div class="panel-title">Teacher Review</div>
+      <div id="actionsEmpty" class="auth-status actions-empty">Run the assessment first. Review controls only appear when there is a real cohort result to inspect.</div>
+
+      <div id="teacherSpotlight" class="control spotlight-control">
+        <label for="overallGradeSlider">Assigned mark</label>
+        <input id="overallGradeSlider" type="range" min="0" max="100" step="1" value="75" />
+        <div class="spotlight-row">
+          <input id="gradeOverride" type="number" placeholder="Final mark" />
+          <button id="copyFeedback" class="ghost">Copy feedback</button>
+        </div>
+      </div>
+
+      <details id="feedbackSection" class="secondary-details" open>
+        <summary>Feedback</summary>
+        <div class="feedback">
+          <div class="feedback-block">
+            <div class="label">Star 1</div>
+            <div id="star1" class="editable" contenteditable="true" data-placeholder="One clear strength with evidence."></div>
+          </div>
+          <div class="feedback-block">
+            <div class="label">Star 2</div>
+            <div id="star2" class="editable" contenteditable="true" data-placeholder="A second strength worth preserving."></div>
+          </div>
+          <div class="feedback-block">
+            <div class="label">Wish</div>
+            <div id="wish" class="editable" contenteditable="true" data-placeholder="The single highest-leverage improvement."></div>
+          </div>
+          <div class="feedback-tools">
+            <button id="generateFeedback" class="ghost">Generate feedback</button>
+          </div>
+        </div>
+      </details>
+
+      <details id="advancedSection" class="secondary-details">
+        <summary>Advanced controls</summary>
+        <div class="controls compact-controls">
+          <div class="control">
+            <label for="topGrade">Top mark</label>
+            <input id="topGrade" type="number" value="92" />
+          </div>
+          <div class="control">
+            <label for="bottomGrade">Bottom mark</label>
+            <input id="bottomGrade" type="number" value="58" />
+          </div>
+        </div>
+      </details>
     </aside>
   </main>
   <div id="pipelineOverlay" class="pipeline-overlay">
@@ -140,7 +185,7 @@
   </div>
   <script src="grade_adjust.js?v=2"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=9"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>
