@@ -227,7 +227,8 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert calls["env"]["OPENAI_API_KEY"] == "k"
     assert calls["env"]["PIPELINE_MANIFEST_HASH"] == result["manifest_hash"]
     assert "PYTHONPATH" in calls["env"]
-    assert not (root / "outputs" / "dashboard_data.json").exists()
+    assert (root / "outputs" / "dashboard_data.json").exists()
+    assert json.loads((root / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))["students"][0]["student_id"] == "s1"
     assert (workspace_dir / "pipeline_manifest.json").exists()
     assert (workspace_dir / "outputs" / "normalized_rubric.json").exists()
     assert (workspace_dir / "outputs" / "rubric_manifest.json").exists()

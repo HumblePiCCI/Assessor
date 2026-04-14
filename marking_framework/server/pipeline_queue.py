@@ -15,7 +15,7 @@ from scripts.calibration_contract import build_run_scope, calibration_manifest_p
 from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
 from scripts.assessor_utils import resolve_input_path
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
-from server.runtime_context import identity_can_access, identity_token, launch_contract
+from server.runtime_context import identity_can_access, identity_token, launch_contract, strict_auth_enabled
 from server.step_runner import (
     artifact_watch_roots,
     pipeline_step_graph_hash,
@@ -910,6 +910,11 @@ class PipelineQueue:
         if not requires_confirmation:
             cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
             if cached:
+                cached_job = self.get_job(cached["job_id"])
+                if cached_job:
+                    cached_workspace = Path(str(cached_job.get("workspace_dir", "") or ""))
+                    if cached_workspace.exists():
+                        self._sync_completed_project_state(cached_job, cached_workspace)
                 self._update_ops_state(lambda payload: payload.__setitem__("cache_hits", int(payload.get("cache_hits", 0) or 0) + 1))
                 return {
                     "job_id": cached["job_id"],
@@ -1106,6 +1111,64 @@ class PipelineQueue:
             if item.is_file():
                 items.append(str(item.relative_to(path)))
         return items
+
+    def _job_identity(self, tenant_id: str, teacher_id: str) -> dict:
+        teacher = str(teacher_id or "local-dev-teacher")
+        tenant = str(tenant_id or "local-dev-tenant")
+        return {
+            "tenant_id": tenant,
+            "teacher_id": teacher,
+            "role": "admin" if teacher == "local-dev-teacher" else "teacher",
+            "strict_auth": strict_auth_enabled(self.root),
+            "tenant_token": identity_token(tenant),
+            "teacher_token": identity_token(teacher),
+        }
+
+    def _copy_runtime_state(self, source_root: Path, target_root: Path):
+        self.reset_workspace(target_root)
+        for folder in ["inputs", "processing", "assessments", "outputs"]:
+            src = source_root / folder
+            if not src.exists():
+                continue
+            shutil.copytree(src, target_root / folder, dirs_exist_ok=True)
+        manifest = source_root / "pipeline_manifest.json"
+        if manifest.exists():
+            shutil.copy2(manifest, target_root / "pipeline_manifest.json")
+
+    def _sync_completed_project_state(self, job: dict, workspace_dir: Path):
+        tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
+        teacher_id = str(job.get("teacher_id", "") or "local-dev-teacher")
+        identity = self._job_identity(tenant_id, teacher_id)
+        active_root = self.root if not identity.get("strict_auth", False) else None
+        if active_root is None:
+            from server import projects as projectsmod
+
+            active_root = projectsmod.workspace_root(identity)
+        self._copy_runtime_state(workspace_dir, active_root)
+        project_id = str(job.get("project_id", "") or "").strip()
+        if not project_id:
+            return
+        from server import projects as projectsmod
+
+        current = projectsmod.get_current_project(identity)
+        if current and str(current.get("id", "") or "") != project_id:
+            current = None
+        if current is None:
+            meta_path = projectsmod.project_dir(project_id, identity) / "project.json"
+            if meta_path.exists():
+                current = projectsmod.normalize_project_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+        name = str((current or {}).get("name", "") or project_id)
+        aggregate_learning = (current or {}).get("aggregate_learning")
+        owner = (current or {}).get("owner")
+        meta = projectsmod.save_project_snapshot(
+            active_root,
+            project_id,
+            name,
+            aggregate_learning=aggregate_learning,
+            owner=owner,
+            identity=identity,
+        )
+        projectsmod.set_current_project(meta, identity)
 
     def _gate_summary(self, workspace_dir: Path) -> dict:
         publish_path = workspace_dir / "outputs" / "publish_gate.json"
@@ -1396,6 +1459,7 @@ class PipelineQueue:
             artifact_path = artifact_outputs_dir / "dashboard_data.json"
             gate_summary = self._gate_summary(workspace_dir)
             published = self._artifact_listing(artifact_dir)
+            self._sync_completed_project_state(job, workspace_dir)
             self._append_event(job_dir, "completed", "Published artifacts", event="artifact", artifacts=published)
             self._update_job(
                 job_id,

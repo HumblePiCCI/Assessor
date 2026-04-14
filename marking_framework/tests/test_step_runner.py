@@ -22,6 +22,10 @@ def test_pipeline_steps_structure():
     assert "processing/conventions_report.csv" in conventions["cmd"]
     rerank = next(item for item in steps if item["id"] == "rerank")
     assert "global_rerank.py" in " ".join(str(part) for part in rerank["cmd"])
+    quality_gate = next(item for item in steps if item["id"] == "quality_gate")
+    assert quality_gate["required"] is False
+    sota_gate = next(item for item in steps if item["id"] == "sota_gate")
+    assert sota_gate["required"] is False
     grade = next(item for item in steps if item["id"] == "grade")
     assert "--non-interactive" in grade["cmd"]
 

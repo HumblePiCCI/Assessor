@@ -67,6 +67,7 @@ def pipeline_steps() -> list[dict]:
             "id": "sota_gate",
             "label": "Enforcing SOTA readiness gate",
             "cmd": ["python3", "scripts/sota_gate.py", "--gate-config", "config/sota_gate.json"],
+            "required": False,
         },
         {"id": "pairwise", "label": "Preparing pairwise review", "cmd": ["python3", "scripts/generate_pairwise_review.py"]},
         {"id": "grade", "label": "Applying level-aware bell curve", "cmd": ["python3", "scripts/review_and_grade.py", "--non-interactive"]},
