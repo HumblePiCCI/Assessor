@@ -70,6 +70,56 @@ That implies five non-negotiable properties:
 5. The system should surface uncertainty operationally.
    - the right output is not always "final answer"; sometimes it is "teacher anchor required"
 
+## Existing Systems To Extend, Not Replace
+
+This roadmap is not proposing a second architecture beside the current one.
+It should extend the repo's existing subsystems.
+
+### Existing Rerank Damping Base
+
+`scripts/global_rerank.py` already has:
+- incident-weight-based support accounting
+- displacement caps from `compute_displacement_caps()`
+- support tiers (`low_support`, `medium_support`, `high_support`)
+- a crossing margin guard (`min_crossing_margin`)
+
+Workstream 3 is therefore not a fresh damping subsystem.
+It is an extension of the existing reranker:
+- feed per-student stability signals into incident-weight and cap calculation
+- reduce the effectively unbounded `high_support` movement behavior for live cohorts
+- scale crossing margin with disagreement instead of using one fixed number
+
+### Existing Learning And Governance Base
+
+The post-release learning stack already exists:
+- `server/review_store.py`
+  - anonymization helpers
+  - text redaction
+  - retention and tombstone deletion
+- `scripts/local_teacher_prior.py`
+  - local preference learning
+  - bounded adjustments
+- `scripts/aggregate_review_learning.py`
+  - governed learning summaries
+- `scripts/export_aggregate_feedback.py`
+- `scripts/ingest_aggregate_feedback.py`
+- `scripts/promote_aggregate_learning.py`
+
+Workstream 6 is therefore not a greenfield learning system.
+The genuinely new layer is:
+- an engagement gate that decides whether a cohort is meaningful enough to keep
+- cohort-level packaging rules that decide whether data remains local, becomes aggregate-eligible, or is discarded
+
+### Existing Gate Pattern To Reuse
+
+`scripts/publish_gate.py` and `scripts/sota_gate.py` already implement:
+- profile thresholds
+- multi-profile pass/fail evaluation
+- structured reports
+
+Workstream 1 should reuse that pattern for live cohort confidence.
+It should not invent a wholly separate gate style.
+
 ## Roadmap Overview
 
 The roadmap is split into six workstreams:
@@ -82,6 +132,46 @@ The roadmap is split into six workstreams:
 6. Governed post-release calibration learning
 
 Each workstream is designed to integrate with the current repo, not replace it.
+
+## Workstream Interaction Model
+
+The workstreams are not independent.
+They change one another's inputs and thresholds.
+
+Primary interactions:
+- Workstream 3 lowers rerank movement and should reduce swap rate.
+  - that directly changes Workstream 1 cohort-confidence decisions
+- Workstream 4 lowers variance and should reduce assessor SD.
+  - that also changes Workstream 1 thresholds in practice
+- Workstream 5 changes scope resolution and calibration-family matching.
+  - that changes Workstream 1 familiarity signals and Workstream 2 anchor need
+- Workstream 2 can move a cohort from `anchor_calibration_required` to `provisional` or `auto_publish_ready`
+- Workstream 6 creates the future calibration substrate that improves Workstreams 1, 2, and 5 over time
+
+Because of that, threshold calibration must be staged:
+- initial thresholds are set from the current smoke baseline
+- after Workstream 3 and Workstream 4 ship in shadow mode, thresholds are recalibrated from observed post-change distributions
+- only then should the confidence gate become a blocking runtime control
+
+## Hold-Harmless Rules
+
+Every intervention in this roadmap must be reversible.
+
+1. Anchor calibration must not silently replace the pre-anchor run.
+   - store a pre-anchor snapshot
+   - accept the anchor patch only if stability improves or remains neutral
+   - otherwise revert to the pre-anchor state
+2. Committee consensus must not always override single-pass.
+   - if committee variance or ordering quality is worse, fall back to single-pass outputs
+3. Retrieval grounding must be allowed to abstain.
+   - if match confidence is below threshold, do not inject the retrieved family into prompting or calibration
+4. Rerank damping must not degrade benchmark corpora.
+   - benchmark non-regression remains mandatory before promotion
+
+Every new artifact should therefore include:
+- `accepted: true|false`
+- `fallback_used: true|false`
+- `fallback_reason`
 
 ## Workstream 1: Runtime Provisional / Cohort-Confidence Gate
 
@@ -127,7 +217,10 @@ Suggested schema:
     "rubric_parse_confidence": 0.93,
     "model_coverage": 1.0
   },
-  "recommended_action": "collect_teacher_anchors"
+  "recommended_action": "collect_teacher_anchors",
+  "accepted": true,
+  "fallback_used": false,
+  "fallback_reason": ""
 }
 ```
 
@@ -153,6 +246,22 @@ Start with:
 - model coverage
 - scope familiarity by grade band + genre + rubric family + model family
 
+### Initial Thresholds
+
+These are the initial operating thresholds for shadow mode.
+They are intentionally anchored to the current Grade 7 smoke baseline and existing gate conventions.
+
+| Runtime state | Mean assessor SD | P95 assessor SD | Swap rate | Scope support | Calibration type | Rubric parse confidence |
+|---|---:|---:|---:|---|---|---:|
+| `auto_publish_ready` | `<= 3.0` | `<= 6.0` | `<= 0.15` | real scoped support present | non-synthetic | `>= 0.85` |
+| `provisional_review_recommended` | `<= 5.0` | `<= 10.0` | `<= 0.35` | partial or sparse support | synthetic allowed | `>= 0.70` |
+| `anchor_calibration_required` | `> 5.0` or | `> 10.0` or | `> 0.35` or | no real scoped support | synthetic only | `< 0.70` |
+
+Additional hard triggers for `anchor_calibration_required`:
+- `rubric_family == rubric_unknown` plus synthetic-only calibration
+- no scoped observations and no nearest-family retrieval above confidence threshold
+- model coverage below `0.9`
+
 ### Operational Rule
 
 - `auto_publish_ready`
@@ -165,11 +274,27 @@ Start with:
 - `anchor_calibration_required`
   - unfamiliar scope plus weak stability plus no real scope calibration support
 
+### Shadow-Mode Rollout
+
+This gate should not block teacher workflow immediately.
+
+Initial rollout:
+- emit `outputs/cohort_confidence.json`
+- expose status in dashboard and UI
+- do not block or reroute the workflow yet
+
+Promotion criteria from shadow mode to blocking mode:
+- at least `50` live cohorts observed
+- false-positive rate for `anchor_calibration_required` below `10%`
+- missed-unstable-cohort rate below `5%`
+- thresholds recalibrated after Workstream 3 and Workstream 4 land
+
 ### Acceptance Criteria
 
 - runtime state is available in dashboard data and UI
 - unfamiliar cohorts no longer appear equally trustworthy as benchmark-supported scopes
 - teachers see one clear next action, not a wall of metrics
+- gate starts in shadow mode and only becomes blocking after validation
 
 ## Workstream 2: Cold-Start Anchor Calibration
 
@@ -202,6 +327,8 @@ Add:
 - `outputs/anchor_candidates.json`
 - `outputs/teacher_anchor_packet.json`
 - `outputs/cohort_anchor_calibration.json`
+- `outputs/pre_anchor_snapshot.json`
+- `outputs/post_anchor_snapshot.json`
 
 ### Suggested Schema
 
@@ -229,6 +356,43 @@ Add:
 - `scripts/global_rerank.py`
 - `ui/app.js`
 
+### Runtime Architecture Requirement
+
+This workstream requires a conditional project state machine.
+The current fixed linear step graph is not enough.
+
+Add explicit job/project modes:
+- `full_run`
+- `awaiting_anchor_scores`
+- `anchor_resume`
+- `anchor_reverted`
+
+The anchor flow should:
+1. execute the normal run once
+2. stop after dashboard build if cohort confidence requires anchors
+3. persist a pre-anchor snapshot
+4. wait for teacher anchor scores
+5. resume from post-assessment steps only
+
+The resume path should re-execute:
+- `aggregate`
+- `boundary`
+- `consistency`
+- `rerank`
+- `grade`
+- `dashboard`
+
+The resume path should not re-execute:
+- `rubric`
+- `extract`
+- `conventions`
+- `assess`
+
+That means this is a runtime state-machine change spanning:
+- `server/step_runner.py`
+- `server/pipeline_queue.py`
+- `server/projects.py`
+
 ### Calibration Mechanics
 
 Do not retrain globally at this stage.
@@ -246,11 +410,25 @@ Keep this simple:
 - level plus optional mark
 - no survey, no justification required
 
+### Hold-Harmless Rule
+
+Anchor calibration is accepted only if:
+- mean assessor SD decreases by at least `20%` or `1.0` absolute point
+- swap rate does not increase
+- top-5 rerun overlap does not decrease
+
+Otherwise:
+- mark anchor patch `accepted: false`
+- revert to pre-anchor outputs
+- surface `fallback_reason: anchor_patch_not_helpful`
+
 ### Acceptance Criteria
 
 - anchor workflow runs from provisional live cohorts only
-- `4-6` teacher judgments materially reduce SD and swap rate on rerun
+- `4-6` teacher judgments reduce mean assessor SD from `6.87` baseline toward `< 3.0`
+- `4-6` teacher judgments reduce swap rate from `0.51` baseline toward `< 0.15`
 - workflow is optional when confidence is already high
+- anchor rerun completes without re-running assessor passes
 
 ## Workstream 3: Rerank Damping Under High Assessor SD
 
@@ -277,18 +455,37 @@ When assessor SD or rank instability is high:
 
 ### Proposed Mechanics
 
-Add a `stability_gate_weight` per student:
+Extend the existing `global_rerank.py` mechanics rather than creating a parallel damping layer.
+
+Specifically:
+- feed per-student `rubric_sd`, `rank_sd`, and disagreement density into incident support classification
+- scale `incident_weight` downward when disagreement is high
+- make `compute_displacement_caps()` stability-aware
+- scale `min_crossing_margin` upward when disagreement is high
+
+Add a per-student stability penalty:
 
 ```text
-stability_gate_weight
+stability_penalty
 = f(rubric_sd, rank_sd, disagreement_flags, pairwise_conflict_density)
 ```
 
-Then apply it to:
-- pairwise support weight
-- incident weight
-- max displacement
-- boundary calibration freedom
+Apply it to the current reranker inputs:
+- effective pairwise support weight
+- effective incident weight
+- displacement-cap tier selection
+- crossing-margin multiplier
+
+### Concrete Parameter Direction
+
+For live cohorts:
+- `low_support` cap remains `1`
+- `medium_support` cap reduces from `3` to `2` when stability penalty is high
+- `high_support` cap must become bounded for live cohorts
+  - initial target: `5`, not unlimited
+- `min_crossing_margin`
+  - baseline: current value
+  - noisy cohorts: multiply toward `2.0x`
 
 ### Concrete Rule Direction
 
@@ -301,8 +498,8 @@ Then apply it to:
 
 ### Acceptance Criteria
 
-- swap rate falls materially on novel cohorts
-- top-of-cohort churn across repeated runs decreases
+- swap rate falls from the current `0.51` smoke baseline to `< 0.30` after damping alone
+- top-5 rerun overlap increases from the observed `0.40` baseline to `>= 0.70`
 - benchmark corpus does not regress
 
 ## Workstream 4: Committee Consensus For Novel Scopes
@@ -349,20 +546,36 @@ Add:
 - `scripts/benchmark_family_stability.py`
 - `config/llm_routing.json`
 
-### Cost Control
+### Budget
 
-Committee mode should be conditional on:
-- scope novelty
-- rubric ambiguity
-- disagreement after first pass
+Committee mode must stay inside existing product budgets unless the teacher explicitly opts into a higher-cost diagnostic run.
 
-This avoids multiplying cost on already-supported cohorts.
+Default budget:
+- total projected cost must remain `<= $0.25` per student
+- total projected cost must remain `<= $10.00` per job
+- committee uplift budget target: `<= +$0.08` per student relative to single-pass
+
+Latency target:
+- no more than `1.5x` single-pass live latency for a novel cohort
+- anchor resume path should remain cheaper than a full committee rerun
+
+### Hold-Harmless Rule
+
+Committee consensus is accepted only if:
+- mean student level variance decreases
+- mean student rank variance decreases
+- Kendall and pairwise agreement are non-worse in repeated-run evaluation
+
+Otherwise:
+- fall back to single-pass outputs
+- emit `fallback_reason: committee_not_helpful`
 
 ### Acceptance Criteria
 
 - novel-scope level/rank variance decreases
 - latency remains acceptable under conditional activation
 - committee mode is not activated on all normal cohorts
+- committee mode stays inside the live budget envelope by default
 
 ## Workstream 5: Retrieval-Backed Scope Grounding
 
@@ -383,15 +596,25 @@ Before pass1 scoring, retrieve nearest grounded references from:
 - source-family calibration profiles
 - prior teacher-reviewed finalized cohorts
 
-### Proposed Retrieval Inputs
+### Retrieval Architecture Decision
 
-Build embeddings or deterministic feature vectors from:
+Phase 1 should use deterministic retrieval, not embeddings.
+
+Reason:
+- current server architecture is local FastAPI + subprocess oriented
+- deterministic retrieval fits the existing `build_run_scope()` style matching
+- it avoids introducing vector infrastructure before the feature is proven
+
+Phase-1 retrieval features:
 - normalized rubric criteria and weights
 - assignment outline
 - grade level / band
 - genre / form
 - evidence expectations
-- discourse markers from writing samples
+- rubric-family alias overlap
+- prompt/form terminology overlap
+
+Embeddings can be reconsidered later if deterministic retrieval saturates.
 
 ### Retrieved Objects
 
@@ -400,6 +623,18 @@ For each live cohort, return:
 - nearest exemplar set
 - nearest calibrated cohort scopes
 - nearest successful calibration profile
+
+### Coverage Constraint
+
+Retrieval should only influence scoring when support is real.
+
+Phase-1 activation rule:
+- use retrieval hints only when there are at least:
+  - `2` prior calibrated cohorts in the candidate family, or
+  - `3` grounded exemplar hits in the candidate family
+- otherwise abstain
+
+This prevents sparse-bank false positives.
 
 ### Proposed Artifact
 
@@ -426,7 +661,10 @@ Suggested schema:
       "path": "inputs/exemplars/grade_6_7/literary_analysis",
       "distance": 0.16
     }
-  ]
+  ],
+  "accepted": true,
+  "fallback_used": false,
+  "fallback_reason": ""
 }
 ```
 
@@ -444,6 +682,8 @@ Suggested schema:
 - fewer live runs end up in `rubric_unknown`
 - cold-start cohorts receive stronger grounded prompts and calibration hints
 - benchmark performance does not regress due to over-broad retrieval
+- phase 1 uses deterministic feature retrieval only
+- uncovered exemplar territory results in abstention, not forced grounding
 
 ## Workstream 6: Governed Post-Release Calibration Learning
 
@@ -455,6 +695,33 @@ But this must be governed. Most project traffic should not become training data.
 ### Core Rule
 
 Only retain cohorts for product learning when teacher engagement appears intentional and substantial.
+
+### Mapping To Existing Infrastructure
+
+This workstream extends the current learning stack rather than replacing it.
+
+Mapping:
+- `discarded`
+  - new outcome from the engagement gate
+  - not retained beyond local transient runtime artifacts
+- `local_only`
+  - existing `local_only` mode
+  - eligible for local teacher priors only
+- `aggregate_candidate`
+  - existing `opt_in` or `policy_compliant` records that also pass the new engagement gate
+- `promoted_asset`
+  - existing promotion pipeline output after adjudication
+
+Anonymization base already exists in:
+- `server/review_store.py`
+  - `hash_identifier()`
+  - `redact_text()`
+  - deletion/tombstone semantics
+
+So the truly new components are:
+- `scripts/engagement_gate.py`
+- optional cohort-level packaging glue
+  - not a separate anonymization subsystem
 
 ### Retention Rule
 
@@ -496,17 +763,6 @@ Prefer:
 - boundary decisions
 - selected anonymized examples promoted through governance
 
-### Proposed Data Tiers
-
-1. `discarded`
-   - no meaningful teacher engagement
-2. `local_only`
-   - supports only local teacher personalization
-3. `aggregate_candidate`
-   - anonymized, governed, eligible for adjudication
-4. `promoted_asset`
-   - human-approved benchmark / calibration / exemplar asset
-
 ### Likely Implementation Surface
 
 - `server/review_store.py`
@@ -515,7 +771,6 @@ Prefer:
 - `scripts/export_aggregate_feedback.py`
 - `scripts/ingest_aggregate_feedback.py`
 - `scripts/promote_aggregate_learning.py`
-- new `scripts/anonymize_teacher_cohort.py`
 - new `scripts/engagement_gate.py`
 
 ### Proposed Artifact
@@ -531,7 +786,34 @@ Add:
 - product learning remains opt-in or policy-compliant
 - all promoted data retain provenance and deletion semantics
 
+## Quantitative Targets
+
+These are the working numeric targets for the live-cohort hardening track.
+They should be updated when enough post-change live cohorts exist, but they should not stay vague.
+
+| Metric | Current smoke baseline | Target after R3 | Target after R2+R3+R4 |
+|---|---:|---:|---:|
+| Mean assessor SD | `6.87` | `< 4.5` | `< 3.0` |
+| P95 assessor SD | `11.89` | `< 8.0` | `< 6.0` |
+| Swap rate | `0.51` | `< 0.30` | `< 0.15` |
+| Top-5 rerun overlap | `0.40` | `>= 0.70` | `>= 0.85` |
+| Cohort confidence false-anchor rate | unknown | shadow only | `< 10%` |
+| Missed-unstable-cohort rate | unknown | shadow only | `< 5%` |
+| Anchor burden | n/a | n/a | `<= 6 papers` |
+| Anchor rerun incremental latency | n/a | n/a | `<= 45s` |
+
 ## Concrete Build Sequence
+
+### Phase R0: Conditional Pipeline State Machine
+
+Build:
+- paused/resumable project execution states
+- pre/post intervention snapshots
+- partial rerun path for anchor resume
+- fallback/revert semantics
+
+Exit:
+- runtime can pause for teacher input and resume from post-assessment steps only
 
 ### Phase R1: Cohort Confidence Gate
 
@@ -539,9 +821,12 @@ Build:
 - `scripts/cohort_confidence.py`
 - dashboard + UI exposure
 - runtime states: auto / provisional / anchor required
+- shadow-mode logging only
+- threshold report against live cohort outcomes
 
 Exit:
 - every live cohort now has an explicit confidence status
+- no blocking behavior yet
 
 ### Phase R2: Cold-Start Anchors
 
@@ -558,6 +843,7 @@ Exit:
 Build:
 - SD-aware displacement caps
 - disagreement-aware pairwise weighting
+- dynamic crossing-margin scaling
 
 Exit:
 - swap rate drops materially on novel live cohorts
@@ -574,7 +860,7 @@ Exit:
 ### Phase R5: Retrieval Scope Grounding
 
 Build:
-- retrieval over rubric contract + exemplars + prior calibrated cohorts
+- deterministic retrieval over rubric contract + exemplars + prior calibrated cohorts
 
 Exit:
 - fewer runs depend on generic `rubric_unknown` behavior
@@ -583,11 +869,18 @@ Exit:
 
 Build:
 - engagement gate
-- anonymization package
+- cohort-level anonymized packaging
 - promotion rules for real teacher-reviewed data
 
 Exit:
 - post-release learning is real, privacy-aware, and quality-controlled
+
+### Threshold Recalibration Step
+
+After Phase R3 and Phase R4:
+- recompute live-cohort distributions for SD, swap rate, and rerun overlap
+- revise Workstream 1 thresholds from observed post-change behavior
+- only then promote cohort confidence from shadow mode to blocking mode
 
 ## Metrics That Matter
 
@@ -624,12 +917,27 @@ For post-release data quality:
 4. Restrict local anchor calibration to local cohort scope unless promoted deliberately.
 5. Treat teacher interaction as calibration data only when engagement passes policy thresholds.
 
+## Additional Risks Not In The First Six Workstreams
+
+These are important, but they are not the first build items.
+
+1. Locale and jurisdiction policy normalization
+   - worldwide teacher use will eventually require stronger handling of:
+     - local achievement-level semantics
+     - conventions tolerance by grade and region
+     - mark-band translation across systems
+2. Teacher-facing explanation quality
+   - if the product says "anchor calibration required", the explanation must be short, specific, and trustworthy
+3. Exemplar-bank density outside covered families
+   - retrieval and cold-start support will only be as good as the exemplar/calibration coverage underneath them
+
 ## Immediate Recommendation
 
 If work starts now, the right next implementation order is:
 
-1. runtime cohort-confidence gate
-2. cold-start anchor calibration flow
-3. rerank damping under high assessor SD
+1. conditional pipeline state machine
+2. runtime cohort-confidence gate in shadow mode
+3. cold-start anchor calibration flow
+4. rerank damping under high assessor SD
 
-Those three together are the shortest path from the current benchmark-strong system to a live teacher product that fails safely and improves quickly.
+Those four together are the shortest path from the current benchmark-strong system to a live teacher product that fails safely and improves quickly.
