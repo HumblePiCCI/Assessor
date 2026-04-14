@@ -453,6 +453,11 @@ Reason:
 - raw `rubric_sd_points` comes from pass1 assessor spread and does not materially change if anchor calibration only re-centers aggregation and banding
 - anchor acceptance should therefore be judged on metrics that are expected to move on rerun
 
+Metric definition:
+- `boundary_disagreement_concentration` for live cohorts is computed in `global_rerank.py` and persisted in `consistency_report.json`
+- the calibration-time metric in `calibration_bias.json` remains a separate quantity derived from repeated gold-exemplar runs
+- anchor hold-harmless comparisons use the `consistency_report.json` value from the pre-anchor and post-anchor runs
+
 Otherwise:
 - mark anchor patch `accepted: false`
 - revert to pre-anchor outputs
