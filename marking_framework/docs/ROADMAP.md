@@ -233,6 +233,21 @@ Suggested schema:
 - `scripts/build_dashboard_data.py`
 - `ui/app.js`
 
+### Gate Precedence Rule
+
+`cohort_confidence` is a live-runtime tightening gate, not a replacement for the existing publish/SOTA gates.
+
+Execution rule:
+1. `quality_gate`
+2. `sota_gate`
+3. `cohort_confidence`
+
+Authority rule:
+- if `quality_gate` or `sota_gate` blocks, the cohort is not auto-publish-ready regardless of `cohort_confidence`
+- `cohort_confidence` may tighten the runtime outcome
+  - for example: convert a publish/SOTA-passing run into `provisional_review_recommended` or `anchor_calibration_required`
+- `cohort_confidence` may never loosen a publish/SOTA failure
+
 ### Decision Inputs
 
 Start with:
@@ -375,10 +390,13 @@ The anchor flow should:
 5. resume from post-assessment steps only
 
 The resume path should re-execute:
-- `aggregate`
+- `aggregate_1`
 - `boundary`
+- `aggregate_2`
 - `consistency`
 - `rerank`
+- `quality_gate`
+- `sota_gate`
 - `grade`
 - `dashboard`
 
@@ -387,6 +405,12 @@ The resume path should not re-execute:
 - `extract`
 - `conventions`
 - `assess`
+- `pairwise`
+
+`pairwise` is explicitly skipped on anchor resume.
+Reason:
+- the reranker already consumes the existing pairwise evidence collected during the first full run
+- anchor resume should re-center aggregation and banding without paying the full pairwise recomputation cost unless a later failure mode proves it necessary
 
 That means this is a runtime state-machine change spanning:
 - `server/step_runner.py`
@@ -402,6 +426,14 @@ Apply a local run-scoped patch:
 - local rank correction near anchor neighborhoods
 - local trust uplift only for the current cohort and matching scope
 
+### Interaction With `local_teacher_prior`
+
+Anchor calibration and `local_teacher_prior` are different mechanisms and should not both drive the same rerun independently.
+
+Rule:
+- for the current anchor rerun, anchor calibration supersedes `local_teacher_prior`
+- after the teacher finalizes the anchored cohort, the resulting finalized deltas remain eligible to feed `local_teacher_prior` for future cohorts in the same scope
+
 ### Teacher UX Requirement
 
 Keep this simple:
@@ -413,9 +445,13 @@ Keep this simple:
 ### Hold-Harmless Rule
 
 Anchor calibration is accepted only if:
-- mean assessor SD decreases by at least `20%` or `1.0` absolute point
 - swap rate does not increase
 - top-5 rerun overlap does not decrease
+- boundary disagreement concentration does not increase
+
+Reason:
+- raw `rubric_sd_points` comes from pass1 assessor spread and does not materially change if anchor calibration only re-centers aggregation and banding
+- anchor acceptance should therefore be judged on metrics that are expected to move on rerun
 
 Otherwise:
 - mark anchor patch `accepted: false`
@@ -425,8 +461,8 @@ Otherwise:
 ### Acceptance Criteria
 
 - anchor workflow runs from provisional live cohorts only
-- `4-6` teacher judgments reduce mean assessor SD from `6.87` baseline toward `< 3.0`
 - `4-6` teacher judgments reduce swap rate from `0.51` baseline toward `< 0.15`
+- `4-6` teacher judgments reduce boundary disagreement concentration from the pre-anchor snapshot
 - workflow is optional when confidence is already high
 - anchor rerun completes without re-running assessor passes
 
@@ -553,7 +589,11 @@ Committee mode must stay inside existing product budgets unless the teacher expl
 Default budget:
 - total projected cost must remain `<= $0.25` per student
 - total projected cost must remain `<= $10.00` per job
-- committee uplift budget target: `<= +$0.08` per student relative to single-pass
+- committee uplift is whatever remains under the hard `$0.25` per-student cap after projected single-pass actual
+
+Hard rule:
+- the absolute cap governs
+- there is no separate uplift allowance that may exceed the absolute per-student limit
 
 Latency target:
 - no more than `1.5x` single-pass live latency for a novel cohort
@@ -811,6 +851,13 @@ Build:
 - pre/post intervention snapshots
 - partial rerun path for anchor resume
 - fallback/revert semantics
+
+Before implementation starts, write a short design sketch for R0 covering:
+- where paused project state is persisted on disk
+- which artifacts belong in a snapshot
+- how paused state is exposed to the UI
+- how resume/revert survives server restart
+- how queue jobs map onto paused/resumed project state
 
 Exit:
 - runtime can pause for teacher input and resume from post-assessment steps only
