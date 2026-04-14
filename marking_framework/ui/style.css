@@ -589,6 +589,19 @@ body[data-view="split"] #comparePanel {
   flex: 1;
 }
 
+.curve-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.curve-control label {
+  color: var(--muted);
+}
+
 .control label {
   display: block;
   margin-bottom: 6px;
@@ -663,8 +676,7 @@ body[data-theme="dark"] .editable {
 #workspaceEmpty.is-hidden,
 #actionsEmpty.is-hidden,
 #teacherSpotlight.is-hidden,
-#feedbackSection.is-hidden,
-#advancedSection.is-hidden {
+#feedbackSection.is-hidden {
   display: none;
 }
 
@@ -759,7 +771,8 @@ body[data-running="true"] .pipeline-overlay {
   .intake-grid,
   .details-grid,
   .summary-grid,
-  .compact-controls {
+  .compact-controls,
+  .curve-range {
     grid-template-columns: 1fr;
   }
 

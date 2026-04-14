@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Assessor</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body data-theme="light" data-view="single">
   <header class="topbar">
@@ -139,6 +139,16 @@
           <input id="gradeOverride" type="number" placeholder="Final mark" />
           <button id="copyFeedback" class="ghost">Copy feedback</button>
         </div>
+        <div class="curve-range">
+          <div class="control curve-control">
+            <label for="topGrade">Top mark</label>
+            <input id="topGrade" type="number" value="92" />
+          </div>
+          <div class="control curve-control">
+            <label for="bottomGrade">Bottom mark</label>
+            <input id="bottomGrade" type="number" value="58" />
+          </div>
+        </div>
       </div>
 
       <details id="feedbackSection" class="secondary-details" open>
@@ -162,19 +172,6 @@
         </div>
       </details>
 
-      <details id="advancedSection" class="secondary-details">
-        <summary>Advanced controls</summary>
-        <div class="controls compact-controls">
-          <div class="control">
-            <label for="topGrade">Top mark</label>
-            <input id="topGrade" type="number" value="92" />
-          </div>
-          <div class="control">
-            <label for="bottomGrade">Bottom mark</label>
-            <input id="bottomGrade" type="number" value="58" />
-          </div>
-        </div>
-      </details>
     </aside>
   </main>
   <div id="pipelineOverlay" class="pipeline-overlay">
@@ -185,7 +182,7 @@
   </div>
   <script src="grade_adjust.js?v=2"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

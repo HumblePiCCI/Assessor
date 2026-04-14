@@ -98,7 +98,6 @@ function updateControlVisibility() {
   document.getElementById('actionsEmpty')?.classList.toggle('is-hidden', hasScored);
   document.getElementById('teacherSpotlight')?.classList.toggle('is-hidden', !hasScored);
   document.getElementById('feedbackSection')?.classList.toggle('is-hidden', !hasScored);
-  document.getElementById('advancedSection')?.classList.toggle('is-hidden', !hasScored);
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
   if (prevBtn) prevBtn.disabled = !hasScored || currentIndex <= 0;
@@ -644,6 +643,41 @@ async function saveReviewBundle(action = 'draft') {
 }
 function getCompareIndex() { if (!data || data.students.length < 2) return null; const target = currentIndex + compareDirection; if (target >= 0 && target < data.students.length) return target; const fallback = currentIndex - compareDirection; if (fallback >= 0 && fallback < data.students.length) return fallback; return null; }
 function getAdjustment(studentId) { if (!adjustments[studentId]) adjustments[studentId] = { overall: 0, rubric: 0, conventions: 0, comparative: 0 }; return adjustments[studentId]; }
+function currentCohortMarks() {
+  if (!data?.students?.length) return [];
+  return data.students.map((student, idx) => ({ student_id: student.student_id, mark: num(getGradeForIndex(idx), 0) }));
+}
+function scaledMarksForRange(existingMarks, top, bottom) {
+  const count = existingMarks.length;
+  if (!count) return [];
+  if (count === 1) return [Math.round(top)];
+  const oldTop = num(existingMarks[0]?.mark, top);
+  const oldBottom = num(existingMarks[count - 1]?.mark, bottom);
+  if (oldTop <= oldBottom) return computeGrades(top, bottom, count);
+  return existingMarks.map(({ mark }, idx) => {
+    if (idx === 0) return Math.round(top);
+    if (idx === count - 1) return Math.round(bottom);
+    const ratio = clamp((num(mark, oldBottom) - oldBottom) / (oldTop - oldBottom), 0, 1);
+    return Math.round(bottom + ((top - bottom) * ratio));
+  });
+}
+function applyCurveBounds(top, bottom, preserveShape = true) {
+  if (!data?.students?.length) return;
+  const currentMarks = preserveShape ? currentCohortMarks() : [];
+  grades = computeGrades(top, bottom, data.students.length);
+  delete data.curve_top;
+  delete data.curve_bottom;
+  data.curve_top = top;
+  data.curve_bottom = bottom;
+  if (preserveShape) {
+    const scaledMarks = scaledMarksForRange(currentMarks, top, bottom);
+    overrides = {};
+    data.students.forEach((student, idx) => {
+      const adj = getAdjustment(student.student_id);
+      adj.overall = (scaledMarks[idx] ?? grades[idx] ?? 0) - (grades[idx] ?? 0);
+    });
+  }
+}
 function getGradeForIndex(idx) {
   if (!data || !data.students || !data.students.length) return '';
   const s = data.students[idx];
@@ -843,7 +877,19 @@ function renderDetail() {
 function applyAdjustment(studentId, key, delta) { const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0); currentIndex = sidx; const adj = getAdjustment(studentId); adj[key] += delta; const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null; if (data?.students?.length && window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId)); if (target === null) break; const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
 function applyOverallTarget(target) { if (!data?.students?.length) return; const sid = sliderStudentId || data.students[currentIndex]?.student_id; const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex]; currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const curr = getGradeForIndex(currentIndex); const delta = target - curr; const adj = getAdjustment(s.student_id); const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 }; adj.rubric += num(spread.rubric, 0); adj.conventions += num(spread.conventions, 0); adj.comparative += num(spread.comparative, 0); adj.overall += delta; delete overrides[s.student_id]; const inp = document.getElementById('gradeOverride'); if (inp) inp.value = Math.round(target); const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = Math.round(target); if (window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
 function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true); renderDetail(); }
-function updateGradesFromCurve() { if (!data || !data.students || !data.students.length) return; const top = num(document.getElementById('topGrade').value, 92); const bottom = num(document.getElementById('bottomGrade').value, 58); if (top <= bottom) return; grades = computeGrades(top, bottom, data.students.length); updateRail(); renderDetail(); }
+function updateGradesFromCurve() {
+  if (!data || !data.students || !data.students.length) return;
+  const topInput = document.getElementById('topGrade');
+  const bottomInput = document.getElementById('bottomGrade');
+  const top = clamp(num(topInput?.value, 92), 0, 100);
+  const bottom = clamp(num(bottomInput?.value, 58), 0, 100);
+  if (top <= bottom) return;
+  if (topInput) topInput.value = Math.round(top);
+  if (bottomInput) bottomInput.value = Math.round(bottom);
+  applyCurveBounds(top, bottom, true);
+  updateRail();
+  renderDetail();
+}
 function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; updateWorkflowState(); }
 function pipelineLog(msg) { const log = document.getElementById('pipelineLog'); if (!log) return; const line = document.createElement('div'); line.textContent = msg; log.appendChild(line); log.scrollTop = log.scrollHeight; }
 function startPipelineNarrative() { const log = document.getElementById('pipelineLog'); if (log) log.innerHTML = ''; const steps = ['Getting your files ready and organized…', "In this first pass, we’re conducting an initial assessment based on the rubric.", 'Next, we compare essays side‑by‑side to keep the ordering consistent.', 'Now we scan conventions: spelling, grammar, sentence structure, and format.', 'We’re integrating all signals into a final, coherent ordering.', 'Building the teacher review dashboard…']; pipelineStep = 0; pipelineLog(steps[0]); pipelineTimer = setInterval(() => { pipelineStep += 1; if (pipelineStep < steps.length) pipelineLog(steps[pipelineStep]); }, 2400); }
@@ -1009,7 +1055,7 @@ async function boot(payload) {
   }
   if (data.curve_top) document.getElementById('topGrade').value = data.curve_top;
   if (data.curve_bottom) document.getElementById('bottomGrade').value = data.curve_bottom;
-  grades = computeGrades(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), data.students.length);
+  applyCurveBounds(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), false);
   await detectApiBase();
   setupControls();
   renderRubricReview(
