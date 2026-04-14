@@ -270,3 +270,28 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
     assert payload["rubric_manifest"]["rubric_family"] == "rubric_a"
     assert payload["rubric_verification"]["status"] == "warning"
     assert payload["uncertainty_summary"]["counts"]["boundary_cases"] == 1
+
+
+def test_build_dashboard_data_surfaces_live_runtime_artifacts(tmp_path, monkeypatch):
+    fallback = tmp_path / "consensus.csv"
+    write_csv(fallback, [{"student_id": "s1", "consensus_rank": "1"}], ["student_id", "consensus_rank"])
+    texts = tmp_path / "texts"
+    texts.mkdir()
+    (texts / "s1.txt").write_text("Essay", encoding="utf-8")
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "scope_grounding.json").write_text(json.dumps({"accepted": True}), encoding="utf-8")
+    (outputs / "cohort_confidence.json").write_text(json.dumps({"effective_runtime_state": "provisional_review_recommended"}), encoding="utf-8")
+    (outputs / "teacher_anchor_packet.json").write_text(json.dumps({"anchors": [{"student_id": "s1"}]}), encoding="utf-8")
+    (outputs / "committee_consensus_report.json").write_text(json.dumps({"activated": True}), encoding="utf-8")
+    (outputs / "engagement_signal.json").write_text(json.dumps({"eligible": False}), encoding="utf-8")
+    out = tmp_path / "dash.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["bdd", "--input", str(tmp_path / "missing.csv"), "--fallback", str(fallback), "--output", str(out), "--texts", str(texts)])
+    assert bdd.main() == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["scope_grounding"]["accepted"] is True
+    assert payload["cohort_confidence"]["effective_runtime_state"] == "provisional_review_recommended"
+    assert payload["teacher_anchor_packet"]["anchors"][0]["student_id"] == "s1"
+    assert payload["committee_consensus_report"]["activated"] is True
+    assert payload["engagement_signal"]["eligible"] is False

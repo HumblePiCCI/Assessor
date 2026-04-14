@@ -48,6 +48,10 @@ class RubricConfirmationPayload(BaseModel):
     teacher_notes: str | None = None
     criteria: list[dict] | None = None
     levels: list[dict] | None = None
+
+
+class AnchorConfirmationPayload(BaseModel):
+    anchors: list[dict] = []
 def save_upload(upload: UploadFile, dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
@@ -323,6 +327,26 @@ async def pipeline_v2_rubric_confirm(job_id: str, payload: RubricConfirmationPay
         job_id,
         action=action,
         teacher_edits=teacher_edits,
+        identity=request_identity(request),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return result
+
+
+@app.get("/pipeline/v2/jobs/{job_id}/anchors")
+async def pipeline_v2_anchor_status(job_id: str, request: Request):
+    payload = PIPELINE_QUEUE.anchor_status(job_id, identity=request_identity(request))
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return payload
+
+
+@app.post("/pipeline/v2/jobs/{job_id}/anchors")
+async def pipeline_v2_anchor_confirm(job_id: str, payload: AnchorConfirmationPayload, request: Request):
+    result = PIPELINE_QUEUE.confirm_anchor_scores(
+        job_id,
+        teacher_scores={"anchors": payload.anchors},
         identity=request_identity(request),
     )
     if result is None:

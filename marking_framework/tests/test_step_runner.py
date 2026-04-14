@@ -11,6 +11,8 @@ def test_pipeline_steps_structure():
     assert ids[0] == "rubric"
     assert ids[-1] == "dashboard"
     assert {"rubric", "assess", "consistency", "rerank", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
+    assert "scope_grounding" in ids
+    assert "cohort_confidence" in ids
     assert all("cmd" in item and "label" in item for item in steps)
     rubric = next(item for item in steps if item["id"] == "rubric")
     assert "normalize_rubric.py" in " ".join(str(part) for part in rubric["cmd"])
@@ -28,6 +30,9 @@ def test_pipeline_steps_structure():
     assert sota_gate["required"] is False
     grade = next(item for item in steps if item["id"] == "grade")
     assert "--non-interactive" in grade["cmd"]
+    assert step_runner.pipeline_step_ids() == tuple(ids)
+    anchor_ids = [item["id"] for item in step_runner.anchor_resume_steps()]
+    assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
 
 
 def test_can_stream_subprocess_detection():

@@ -177,6 +177,84 @@ def _truncate_compact(text: str, max_chars: int) -> str:
     return compact
 
 
+def build_scope_grounding_context(scope_grounding: dict | None) -> str:
+    payload = scope_grounding if isinstance(scope_grounding, dict) else {}
+    if not payload.get("accepted", False):
+        return ""
+    prompt = str(payload.get("retrieval_prompt", "") or "").strip()
+    suggested_scope = payload.get("suggested_scope", {}) if isinstance(payload.get("suggested_scope", {}), dict) else {}
+    scope_bits = []
+    for key in ("grade_band", "genre", "rubric_family"):
+        value = str(suggested_scope.get(key, "") or "").strip()
+        if value:
+            scope_bits.append(f"{key}={value}")
+    scope_line = f"Suggested nearest grounded scope: {', '.join(scope_bits)}." if scope_bits else ""
+    parts = [
+        "GROUNDING CONTEXT:",
+        scope_line,
+        prompt,
+        "Use this only to stabilize expectations for similar cohorts. The rubric contract still governs the score.",
+    ]
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _rank_positions(order: list[str]) -> dict[str, int]:
+    return {sid: idx for idx, sid in enumerate(order, start=1)}
+
+
+def build_committee_consensus_report(
+    pass1_scores_by_assessor: dict[str, dict],
+    pass2_rankings_by_assessor: dict[str, list[str]],
+    known_ids: list[str],
+    scope_grounding: dict | None,
+) -> dict:
+    per_student = {}
+    for sid in known_ids:
+        pass1_scores = [
+            float(scores.get(sid, 0.0) or 0.0)
+            for scores in pass1_scores_by_assessor.values()
+            if sid in scores
+        ]
+        rank_positions = []
+        for ranking in pass2_rankings_by_assessor.values():
+            positions = _rank_positions(ranking)
+            if sid in positions:
+                rank_positions.append(float(positions[sid]))
+        pass1_mean = _mean_numeric(pass1_scores)
+        pass1_variance = _mean_numeric([(value - pass1_mean) ** 2 for value in pass1_scores]) if pass1_scores else 0.0
+        rank_mean = _mean_numeric(rank_positions)
+        rank_variance = _mean_numeric([(value - rank_mean) ** 2 for value in rank_positions]) if rank_positions else 0.0
+        per_student[sid] = {
+            "rubric_mean": round(pass1_mean, 6),
+            "rubric_sd": round(pass1_variance ** 0.5, 6),
+            "rank_mean": round(rank_mean, 6),
+            "rank_sd": round(rank_variance ** 0.5, 6),
+            "committee_size_pass1": len(pass1_scores),
+            "committee_size_pass2": len(rank_positions),
+        }
+    mean_rubric_sd = _mean_numeric([item["rubric_sd"] for item in per_student.values()])
+    mean_rank_sd = _mean_numeric([item["rank_sd"] for item in per_student.values()])
+    payload = scope_grounding if isinstance(scope_grounding, dict) else {}
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "existing_multi_assessor_panel",
+        "activated": bool(payload.get("committee_mode_recommended", False)),
+        "fallback_used": not bool(payload.get("committee_mode_recommended", False)),
+        "fallback_reason": "" if payload.get("committee_mode_recommended", False) else "committee_not_requested",
+        "scope_grounding": {
+            "accepted": bool(payload.get("accepted", False)),
+            "familiarity_label": str(payload.get("familiarity_label", "") or ""),
+            "committee_mode_recommended": bool(payload.get("committee_mode_recommended", False)),
+        },
+        "summary": {
+            "student_count": len(known_ids),
+            "mean_rubric_sd": round(mean_rubric_sd, 6),
+            "mean_rank_sd": round(mean_rank_sd, 6),
+        },
+        "students": per_student,
+    }
+
+
 def _criterion_scores_from_item(item: dict) -> dict[str, float]:
     scores = {}
     for key, value in (item.get("criteria_points") or {}).items():
@@ -832,6 +910,8 @@ def main() -> int:
     parser.add_argument("--rubric-manifest", default="outputs/rubric_manifest.json", help="Rubric manifest JSON")
     parser.add_argument("--rubric-verification", default="outputs/rubric_verification.json", help="Rubric verification JSON")
     parser.add_argument("--portfolio-piece-report", default="outputs/portfolio_piece_report.json", help="Portfolio piece scoring report JSON")
+    parser.add_argument("--scope-grounding", default="outputs/scope_grounding.json", help="Scope grounding JSON")
+    parser.add_argument("--committee-report", default="outputs/committee_consensus_report.json", help="Committee consensus report JSON")
     parser.add_argument("--fallback", choices=["none", "deterministic"], default="deterministic", help="Fallback strategy when model output is invalid")
     parser.add_argument("--require-model-usage", action="store_true", help="Fail if no model outputs are accepted")
     args = parser.parse_args()
@@ -920,12 +1000,16 @@ def main() -> int:
     reqs = contract["reqs"]
     require_evidence = contract["require_evidence"]
     assessors = [a.strip() for a in args.assessors.split(",") if a.strip()]
+    scope_grounding = load_json(Path(args.scope_grounding))
     run_scope = build_run_scope(
         metadata=metadata | {"grade_level": grade_level, "genre": genre},
         routing=routing,
         rubric_path=rubric_path,
         rubric_manifest=rubric_manifest,
     )
+    grounding_context = build_scope_grounding_context(scope_grounding)
+    if grounding_context:
+        grade_context = f"{grade_context}\n\n{grounding_context}".strip() if grade_context else grounding_context
     gate_error = calibration_gate_error(
         routing,
         assessors,
@@ -1240,6 +1324,7 @@ def main() -> int:
     summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
     instructions_seed_order = build_instructions_seed_order(known_ids, pass1_items_by_assessor) if use_instructions_seed_order(metadata, genre, portfolio_scope) else None
     argumentative_seed_order = build_argumentative_seed_order(known_ids, pass1_items_by_assessor) if use_argumentative_seed_order(metadata, genre, portfolio_scope) else None
+    pass2_rankings_by_assessor = {}
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
         ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope, metadata)
@@ -1343,8 +1428,18 @@ def main() -> int:
             lines = list(instructions_seed_order)
         elif argumentative_seed_order:
             lines = list(argumentative_seed_order)
+        pass2_rankings_by_assessor[assessor] = list(lines)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
         write_text_atomic(out_path, "\n".join(lines))
+    committee_report = build_committee_consensus_report(
+        pass1_scores_by_assessor,
+        pass2_rankings_by_assessor,
+        known_ids,
+        scope_grounding,
+    )
+    committee_report_path = Path(args.committee_report)
+    committee_report_path.parent.mkdir(parents=True, exist_ok=True)
+    committee_report_path.write_text(json.dumps(committee_report, indent=2), encoding="utf-8")
     if mode == "openai":
         print(f"Model coverage: {model_successes}/{model_attempts} successful structured outputs.")
         coverage = (model_successes / model_attempts) if model_attempts else 0.0

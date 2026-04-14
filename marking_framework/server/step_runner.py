@@ -9,6 +9,39 @@ from pathlib import Path
 RUNTIME_ASSET_DIRS = ("scripts", "config", "prompts", "templates", "docs", "ui")
 ARTIFACT_WATCH_ROOTS = ("inputs", "processing", "assessments", "outputs")
 
+FULL_PIPELINE_STEP_IDS = (
+    "rubric",
+    "scope_grounding",
+    "extract",
+    "conventions",
+    "assess",
+    "cost",
+    "aggregate_1",
+    "boundary",
+    "aggregate_2",
+    "consistency",
+    "rerank",
+    "quality_gate",
+    "sota_gate",
+    "cohort_confidence",
+    "pairwise",
+    "grade",
+    "dashboard",
+)
+
+ANCHOR_RESUME_STEP_IDS = (
+    "aggregate_1",
+    "boundary",
+    "aggregate_2",
+    "consistency",
+    "rerank",
+    "quality_gate",
+    "sota_gate",
+    "cohort_confidence",
+    "grade",
+    "dashboard",
+)
+
 def pipeline_steps() -> list[dict]:
     return [
         {
@@ -18,6 +51,15 @@ def pipeline_steps() -> list[dict]:
                 "python3",
                 "scripts/normalize_rubric.py",
             ],
+        },
+        {
+            "id": "scope_grounding",
+            "label": "Grounding live cohort scope",
+            "cmd": [
+                "python3",
+                "scripts/scope_retrieval.py",
+            ],
+            "required": False,
         },
         {
             "id": "extract",
@@ -69,6 +111,12 @@ def pipeline_steps() -> list[dict]:
             "cmd": ["python3", "scripts/sota_gate.py", "--gate-config", "config/sota_gate.json"],
             "required": False,
         },
+        {
+            "id": "cohort_confidence",
+            "label": "Evaluating live cohort confidence",
+            "cmd": ["python3", "scripts/cohort_confidence.py"],
+            "required": False,
+        },
         {"id": "pairwise", "label": "Preparing pairwise review", "cmd": ["python3", "scripts/generate_pairwise_review.py"]},
         {"id": "grade", "label": "Applying level-aware bell curve", "cmd": ["python3", "scripts/review_and_grade.py", "--non-interactive"]},
         {"id": "dashboard", "label": "Building dashboard output", "cmd": ["python3", "scripts/build_dashboard_data.py"]},
@@ -77,6 +125,19 @@ def pipeline_steps() -> list[dict]:
 
 def pipeline_step_map() -> dict[str, dict]:
     return {step["id"]: step for step in pipeline_steps()}
+
+
+def pipeline_step_ids() -> tuple[str, ...]:
+    return tuple(step["id"] for step in pipeline_steps())
+
+
+def pipeline_steps_by_ids(step_ids: list[str] | tuple[str, ...]) -> list[dict]:
+    step_map = pipeline_step_map()
+    return [dict(step_map[step_id]) for step_id in step_ids if step_id in step_map]
+
+
+def anchor_resume_steps() -> list[dict]:
+    return pipeline_steps_by_ids(ANCHOR_RESUME_STEP_IDS)
 
 
 def pipeline_step_command(step_id: str) -> list[str]:

@@ -26,6 +26,7 @@ from scripts.aggregate_review_learning import (
     tombstone_path,
     write_json as write_aggregate_json,
 )
+from scripts.engagement_gate import evaluate_engagement
 from scripts.local_teacher_prior import build_local_teacher_prior, write_json as write_prior_json
 
 
@@ -1003,6 +1004,7 @@ def materialize_workspace_review_state(root: Path, bundle: dict) -> None:
     write_json(outputs / "local_teacher_prior.json", bundle.get("local_teacher_prior", {}))
     write_json(outputs / "review_replay_exports.json", bundle.get("replay_exports", {}))
     write_json(outputs / "aggregate_learning_summary.json", bundle.get("aggregate_learning", {}))
+    write_json(outputs / "engagement_signal.json", bundle.get("engagement_signal", {}))
 
 
 def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None) -> dict:
@@ -1049,6 +1051,7 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
         }
     aggregate_summary = aggregate_learning_summary(base_dir, scope_id, current_project)
     write_json(aggregate_learning_summary_path(base_dir, scope_id), aggregate_summary)
+    engagement_signal = load_json(scope_dir(base_dir, scope_id) / "engagement_signal.json")
     return {
         "scope_id": scope_id,
         "project": current_project or {"id": scope_id, "name": "Workspace"},
@@ -1059,6 +1062,7 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
         "local_teacher_prior": prior,
         "replay_exports": replay,
         "aggregate_learning": aggregate_summary,
+        "engagement_signal": engagement_signal,
         "anonymized_aggregate": {
             "mode": aggregate_summary.get("mode", "local_only"),
             "collection_allowed": bool(aggregate_summary.get("collection_allowed", False)),
@@ -1150,7 +1154,12 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
     prior = build_local_teacher_prior(scope_id, records)
     write_prior_json(local_teacher_prior_path(base_dir, scope_id), prior)
     replay = write_replay_exports(base_dir, scope_id, record)
-    aggregate_record = build_aggregate_learning_record(base_dir, scope_id, record, students, current_project)
+    aggregate_allowed = bool(collection_eligibility(aggregate_learning_policy(current_project))[0])
+    engagement_signal = evaluate_engagement(record, collection_allowed=aggregate_allowed)
+    write_json(scope_dir(base_dir, scope_id) / "engagement_signal.json", engagement_signal)
+    aggregate_record = None
+    if engagement_signal.get("retention_state") == "aggregate_candidate":
+        aggregate_record = build_aggregate_learning_record(base_dir, scope_id, record, students, current_project)
     if aggregate_record:
         write_aggregate_learning_record(base_dir, scope_id, aggregate_record)
     bundle = load_review_bundle(base_dir, root, current_project)
