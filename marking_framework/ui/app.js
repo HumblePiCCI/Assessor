@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -26,10 +26,192 @@ function pairReview(studentId, otherStudentId) {
   if (!reviewPairs[key]) reviewPairs[key] = { student_id: studentId, other_student_id: otherStudentId, preferred_student_id: '', confidence: 'teacher', rationale: '' };
   return reviewPairs[key];
 }
-async function refreshAuthStatus() { const status = document.getElementById('authStatus'); if (!status) return; const codexBtn = document.getElementById('codexLogin'); try { const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const codex = codexRes.ok ? await codexRes.json() : null; const api = apiRes.ok ? await apiRes.json() : null; if (codex && codex.available && codex.connected) { status.textContent = 'Codex connected'; if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; } } else if (api && api.connected) { status.textContent = 'API key connected'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } else if (codex && codex.available) { status.textContent = 'Codex not connected'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } else { status.textContent = 'Offline'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } } catch (err) { status.textContent = 'Offline'; if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; } } }
-async function connectApiKey() { const input = document.getElementById('apiKeyInput'); const status = document.getElementById('authStatus'); if (!input || !status) return; const key = input.value.trim(); if (!key) return; try { const res = await fetch(apiUrl('/auth'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key }) }); if (!res.ok) { status.textContent = 'Invalid key'; return; } input.value = ''; status.textContent = 'API key connected'; } catch (err) { status.textContent = 'Offline'; } }
-async function startCodexLogin() { const status = document.getElementById('authStatus'); if (!status) return; try { const res = await fetch(apiUrl('/codex/login'), { method: 'POST' }); if (!res.ok) { let msg = 'Codex login failed'; try { const err = await res.json(); if (err.detail) msg = err.detail; } catch (_) {} status.textContent = msg; return; } const payload = await res.json().catch(() => ({})); status.textContent = payload.status === 'already_connected' ? 'Codex connected' : 'Codex login started'; setTimeout(refreshAuthStatus, 1500); } catch (err) { status.textContent = 'Offline'; } }
-async function loadProjects() { const select = document.getElementById('projectSelect'); if (!select) return; try { const res = await fetch(apiUrl('/projects')); if (!res.ok) return; const payload = await res.json(); projects = payload.projects || []; currentProject = payload.current || null; select.innerHTML = ''; if (!projects.length) { const opt = document.createElement('option'); opt.textContent = 'No saved projects'; opt.value = ''; opt.disabled = true; opt.selected = true; select.appendChild(opt); } else { projects.forEach(p => { const opt = document.createElement('option'); opt.textContent = p.name || p.id; opt.value = p.id; if (currentProject && p.id === currentProject.id) opt.selected = true; select.appendChild(opt); }); } const status = document.getElementById('projectStatus'); if (status) status.textContent = currentProject ? `Current: ${currentProject.name}` : 'No project loaded'; } catch (_) {} }
+function compactLabel(text, max = 42) {
+  const clean = String(text || '').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
+}
+function setNodeState(node, text, state = 'idle') {
+  if (!node) return;
+  node.textContent = text;
+  node.dataset.state = state;
+}
+function inferConnectionState(text) {
+  const low = String(text || '').toLowerCase();
+  if (low.includes('connected')) return 'ready';
+  if (low.includes('started') || low.includes('login')) return 'warn';
+  if (low.includes('failed') || low.includes('offline') || low.includes('invalid')) return 'danger';
+  return 'idle';
+}
+function inferPipelineState(text) {
+  const low = String(text || '').toLowerCase();
+  if (running || low.includes('running') || low.includes('working')) return 'running';
+  if (low.includes('complete') || low.includes('ready') || low.includes('done')) return 'ready';
+  if (low.includes('failed') || low.includes('rejected') || low.includes('timed out')) return 'danger';
+  if (low.includes('need') || low.includes('add ') || low.includes('checking') || low.includes('idle')) return 'warn';
+  return 'idle';
+}
+function updateWorkflowState() {
+  const authText = document.getElementById('authStatus')?.textContent || 'Offline';
+  const projectText = currentProject ? currentProject.name : 'unsaved';
+  const pipelineText = document.getElementById('pipelineStatus')?.textContent || 'Idle';
+  const authState = inferConnectionState(authText);
+  const pipelineState = inferPipelineState(pipelineText);
+  const essayCount = document.getElementById('uploadEssays')?.files?.length || 0;
+  const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
+  const outlineReady = !!document.getElementById('uploadOutline')?.files?.[0];
+  const students = getStudents();
+  const hasReview = !!(data?.students?.length);
+  const filesReady = essayCount > 0 && rubricReady && outlineReady;
+  setNodeState(document.getElementById('projectBadge'), `Project · ${compactLabel(projectText, 28)}`, currentProject ? 'ready' : 'idle');
+  setNodeState(document.getElementById('connectionBadge'), `Connection · ${compactLabel(authText, 24)}`, authState);
+  setNodeState(document.getElementById('runBadge'), `Pipeline · ${compactLabel(pipelineText, 26)}`, pipelineState);
+  const hint = document.getElementById('intakeHint');
+  if (hint) {
+    if (hasReview) {
+      hint.textContent = `${students.length} essays loaded. Review the order, correct the exceptions, then finalize.`;
+    } else if (!essayCount && !rubricReady && !outlineReady) {
+      hint.textContent = 'Add essays, rubric, and outline. Then run the assessment.';
+    } else {
+      const parts = [
+        essayCount ? `${essayCount} essay file${essayCount === 1 ? '' : 's'} ready` : 'add essays',
+        rubricReady ? 'rubric ready' : 'add rubric',
+        outlineReady ? 'outline ready' : 'add outline',
+      ];
+      hint.textContent = parts.join(' · ');
+    }
+  }
+  const railMeta = document.getElementById('railMeta');
+  if (railMeta) railMeta.textContent = students.length ? `${students.length} essays in order` : 'No essays loaded';
+  const runButton = document.getElementById('runPipelinePrimary');
+  if (runButton) {
+    runButton.disabled = running || !filesReady || authState !== 'ready';
+    runButton.textContent = running ? 'Running…' : 'Run assessment';
+  }
+}
+function setPipelineStatus(text, state = inferPipelineState(text)) {
+  setNodeState(document.getElementById('pipelineStatus'), text, state);
+  updateWorkflowState();
+}
+function updateControlVisibility() {
+  const hasScored = !!(data && data.students && data.students.length);
+  const multipleStudents = hasScored && data.students.length > 1;
+  document.getElementById('actionsEmpty')?.classList.toggle('is-hidden', hasScored);
+  document.getElementById('teacherSpotlight')?.classList.toggle('is-hidden', !hasScored);
+  document.getElementById('feedbackSection')?.classList.toggle('is-hidden', !hasScored);
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  if (prevBtn) prevBtn.disabled = !hasScored || currentIndex <= 0;
+  if (nextBtn) nextBtn.disabled = !hasScored || currentIndex >= (data.students.length - 1);
+  const viewToggle = document.getElementById('viewToggle');
+  if (viewToggle) {
+    viewToggle.disabled = !multipleStudents;
+    if (!multipleStudents && document.body.dataset.view === 'split') document.body.dataset.view = 'single';
+    viewToggle.textContent = document.body.dataset.view === 'split' ? 'Single view' : 'Compare';
+  }
+  const copyFeedback = document.getElementById('copyFeedback');
+  if (copyFeedback) copyFeedback.disabled = !hasScored;
+  const generateFeedback = document.getElementById('generateFeedback');
+  if (generateFeedback) generateFeedback.disabled = !hasScored;
+}
+async function refreshAuthStatus() {
+  const status = document.getElementById('authStatus');
+  if (!status) return;
+  const codexBtn = document.getElementById('codexLogin');
+  try {
+    const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]);
+    const codex = codexRes.ok ? await codexRes.json() : null;
+    const api = apiRes.ok ? await apiRes.json() : null;
+    if (codex && codex.available && codex.connected) {
+      status.textContent = 'Codex connected';
+      if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; }
+    } else if (api && api.connected) {
+      status.textContent = 'API key connected';
+      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+    } else if (codex && codex.available) {
+      status.textContent = 'Codex not connected';
+      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+    } else {
+      status.textContent = 'Offline';
+      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+    }
+  } catch (err) {
+    status.textContent = 'Offline';
+    if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+  }
+  updateWorkflowState();
+}
+async function connectApiKey() {
+  const input = document.getElementById('apiKeyInput');
+  const status = document.getElementById('authStatus');
+  if (!input || !status) return;
+  const key = input.value.trim();
+  if (!key) return;
+  try {
+    const res = await fetch(apiUrl('/auth'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key }) });
+    if (!res.ok) {
+      status.textContent = 'Invalid key';
+      updateWorkflowState();
+      return;
+    }
+    input.value = '';
+    status.textContent = 'API key connected';
+  } catch (err) {
+    status.textContent = 'Offline';
+  }
+  updateWorkflowState();
+}
+async function startCodexLogin() {
+  const status = document.getElementById('authStatus');
+  if (!status) return;
+  try {
+    const res = await fetch(apiUrl('/codex/login'), { method: 'POST' });
+    if (!res.ok) {
+      let msg = 'Codex login failed';
+      try { const err = await res.json(); if (err.detail) msg = err.detail; } catch (_) {}
+      status.textContent = msg;
+      updateWorkflowState();
+      return;
+    }
+    const payload = await res.json().catch(() => ({}));
+    status.textContent = payload.status === 'already_connected' ? 'Codex connected' : 'Codex login started';
+    updateWorkflowState();
+    setTimeout(refreshAuthStatus, 1500);
+  } catch (err) {
+    status.textContent = 'Offline';
+    updateWorkflowState();
+  }
+}
+async function loadProjects() {
+  const select = document.getElementById('projectSelect');
+  if (!select) return;
+  try {
+    const res = await fetch(apiUrl('/projects'));
+    if (!res.ok) return;
+    const payload = await res.json();
+    projects = payload.projects || [];
+    currentProject = payload.current || null;
+    select.innerHTML = '';
+    if (!projects.length) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No saved projects';
+      opt.value = '';
+      opt.disabled = true;
+      opt.selected = true;
+      select.appendChild(opt);
+    } else {
+      projects.forEach(p => {
+        const opt = document.createElement('option');
+        opt.textContent = p.name || p.id;
+        opt.value = p.id;
+        if (currentProject && p.id === currentProject.id) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+    const status = document.getElementById('projectStatus');
+    if (status) status.textContent = currentProject ? `Current: ${currentProject.name}` : 'No project loaded';
+  } catch (_) {}
+  updateWorkflowState();
+}
 async function saveProject() { const name = currentProject ? null : prompt('Project name', '') || ''; if (!currentProject && !name) return; try { const res = await fetch(apiUrl('/projects/save'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(name ? { name } : {}) }); if (!res.ok) return; currentProject = await res.json(); await loadProjects(); } catch (_) {} }
 async function newProject() { const name = prompt('New project name', '') || ''; if (!name) return; try { const res = await fetch(apiUrl('/projects/new'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); if (!res.ok) return; currentProject = await res.json(); location.reload(); } catch (_) {} }
 function resetUploadLabels() {
@@ -55,16 +237,24 @@ function clearLocalState() {
   reviewSessionId = '';
   activeJobId = '';
   rubricReview = null;
+  anchorReview = null;
   grades = [];
   currentIndex = 0; sliderStudentId = null; focusLock = false;
   resetUploadLabels();
-  const status = document.getElementById('pipelineStatus'); if (status) status.textContent = 'Idle';
+  setPipelineStatus('Idle', 'idle');
   renderRubricReview(null);
-  renderRail(); renderDetail();
+  renderAnchorReview(null);
+  renderRail(); renderDetail(); updateWorkflowState();
 }
 async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error('clear failed'); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) { if (status) status.textContent = 'Server unavailable: local view cleared only'; } }
 async function loadProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; try { const res = await fetch(apiUrl('/projects/load'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: select.value }) }); if (!res.ok) return; location.reload(); } catch (_) {} }
 async function deleteProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; if (!confirm('Delete this project?')) return; try { const res = await fetch(apiUrl(`/projects/${select.value}`), { method: 'DELETE' }); if (!res.ok) return; await loadProjects(); } catch (_) {} }
+function actionsInsertionAnchor(actions) {
+  if (!actions) return null;
+  return document.getElementById('teacherSpotlight')
+    || Array.from(actions.children).find(child => child.classList && child.classList.contains('secondary-details'))
+    || null;
+}
 function ensureReviewPanel() {
   let section = document.getElementById('reviewSection');
   if (section) return section;
@@ -74,11 +264,20 @@ function ensureReviewPanel() {
   section.id = 'reviewSection';
   section.className = 'auth review-section';
   section.innerHTML = `
-    <div class="label">Review Learning</div>
+    <div class="panel-row">
+      <div>
+        <div class="label">Teacher review</div>
+        <div id="reviewDraftStatus" class="auth-status">No draft review yet.</div>
+      </div>
+      <div class="project-actions">
+        <button id="saveReview" class="ghost">Save draft</button>
+        <button id="finalizeReview" class="primary">Finalize review</button>
+      </div>
+    </div>
     <div id="reviewUncertainty" class="review-flags"></div>
     <div class="controls">
       <div class="control">
-        <label for="reviewLevelOverride">Level override</label>
+        <label for="reviewLevelOverride">Final level</label>
         <select id="reviewLevelOverride">
           <option value="">No override</option>
           <option value="1">Level 1</option>
@@ -89,43 +288,43 @@ function ensureReviewPanel() {
         </select>
       </div>
       <div class="control">
-        <label for="reviewDesiredRank">Teacher rank</label>
-        <input id="reviewDesiredRank" type="number" min="1" placeholder="Keep machine order" />
-      </div>
-      <div class="control">
-        <label for="reviewEvidenceQuality">Evidence signal</label>
-        <select id="reviewEvidenceQuality">
-          <option value="">No note</option>
-          <option value="strong">Strong evidence</option>
-          <option value="thin">Thin evidence</option>
-          <option value="misaligned">Misaligned evidence</option>
-          <option value="unclear">Unclear evidence</option>
-        </select>
-      </div>
-      <div class="control">
-        <label for="reviewEvidenceComment">Evidence comment or justification</label>
-        <textarea id="reviewEvidenceComment" rows="4" placeholder="Why you changed the level, rank, or pairwise order."></textarea>
+        <label for="reviewEvidenceComment">Teacher note</label>
+        <textarea id="reviewEvidenceComment" rows="4" placeholder="Only add a note if the machine missed something important."></textarea>
       </div>
     </div>
     <div class="review-pairwise">
-      <div class="label">Pairwise adjudication</div>
+      <div class="label">Pairwise check</div>
       <div class="project-actions">
-        <button id="preferCurrent" class="ghost">Current above compare</button>
-        <button id="preferCompare" class="ghost">Compare above current</button>
+        <button id="preferCurrent" class="ghost">Keep current above compare</button>
+        <button id="preferCompare" class="ghost">Move compare above current</button>
         <button id="clearPairwise" class="ghost">Clear pair</button>
       </div>
       <div class="auth-status" id="pairwiseStatus">Open split view to compare two essays.</div>
     </div>
-    <div class="project-actions">
-      <button id="saveReview" class="ghost">Save draft</button>
-      <button id="finalizeReview" class="ghost">Finalize review</button>
-    </div>
+    <details class="secondary-details">
+      <summary>More review options</summary>
+      <div class="controls compact-controls">
+        <div class="control">
+          <label for="reviewDesiredRank">Teacher rank</label>
+          <input id="reviewDesiredRank" type="number" min="1" placeholder="Keep machine order" />
+        </div>
+        <div class="control">
+          <label for="reviewEvidenceQuality">Evidence signal</label>
+          <select id="reviewEvidenceQuality">
+            <option value="">No note</option>
+            <option value="strong">Strong evidence</option>
+            <option value="thin">Thin evidence</option>
+            <option value="misaligned">Misaligned evidence</option>
+            <option value="unclear">Unclear evidence</option>
+          </select>
+        </div>
+      </div>
+    </details>
     <div id="reviewStatus" class="auth-status">No finalized review yet.</div>
-    <div id="reviewDraftStatus" class="auth-status">No draft review yet.</div>
     <div id="learningSummary" class="auth-status">Local profile unavailable.</div>
   `;
-  const auth = actions.querySelector('.auth');
-  if (auth) actions.insertBefore(section, auth);
+  const anchor = actionsInsertionAnchor(actions);
+  if (anchor) actions.insertBefore(section, anchor);
   else actions.appendChild(section);
   return section;
 }
@@ -136,42 +335,50 @@ function ensureRubricPanel() {
   if (!actions) return null;
   section = document.createElement('div');
   section.id = 'rubricSection';
-  section.className = 'auth review-section';
+  section.className = 'auth review-section is-hidden';
   section.innerHTML = `
-    <div class="label">Rubric Contract</div>
-    <div id="rubricStatus" class="auth-status">No rubric review pending.</div>
+    <div class="panel-row">
+      <div>
+        <div class="label">Rubric review</div>
+        <div id="rubricStatus" class="auth-status">No rubric review pending.</div>
+      </div>
+      <div class="project-actions">
+        <button id="confirmRubric" class="primary">Confirm rubric</button>
+        <button id="saveRubricEdits" class="ghost">Correct interpretation</button>
+        <button id="rejectRubric" class="ghost">Reject</button>
+      </div>
+    </div>
     <div id="rubricSummary" class="auth-status"></div>
     <div id="rubricWarnings" class="review-flags"></div>
-    <div class="controls">
-      <div class="control">
-        <label for="rubricGenre">Genre</label>
-        <input id="rubricGenre" type="text" placeholder="literary_analysis" />
+    <details class="secondary-details">
+      <summary>Correct our interpretation</summary>
+      <div class="controls">
+        <div class="control">
+          <label for="rubricGenre">Genre</label>
+          <input id="rubricGenre" type="text" placeholder="literary_analysis" />
+        </div>
+        <div class="control">
+          <label for="rubricFamily">Rubric family</label>
+          <input id="rubricFamily" type="text" placeholder="rubric family" />
+        </div>
+        <div class="control">
+          <label for="rubricCriteria">Criteria (JSON)</label>
+          <textarea id="rubricCriteria" rows="6" placeholder='[{"name":"Ideas and Analysis","weight":0.25}]'></textarea>
+        </div>
+        <div class="control">
+          <label for="rubricLevels">Levels (JSON)</label>
+          <textarea id="rubricLevels" rows="6" placeholder='[{"label":"4","band_min":80,"band_max":100}]'></textarea>
+        </div>
+        <div class="control">
+          <label for="rubricNotes">Verification notes</label>
+          <textarea id="rubricNotes" rows="3" placeholder="Only add notes if our interpretation needs a correction."></textarea>
+        </div>
       </div>
-      <div class="control">
-        <label for="rubricFamily">Rubric family</label>
-        <input id="rubricFamily" type="text" placeholder="rubric family" />
-      </div>
-      <div class="control">
-        <label for="rubricCriteria">Criteria (JSON)</label>
-        <textarea id="rubricCriteria" rows="6" placeholder='[{"name":"Ideas and Analysis","weight":0.25}]'></textarea>
-      </div>
-      <div class="control">
-        <label for="rubricLevels">Levels (JSON)</label>
-        <textarea id="rubricLevels" rows="6" placeholder='[{"label":"4","band_min":80,"band_max":100}]'></textarea>
-      </div>
-      <div class="control">
-        <label for="rubricNotes">Verification notes</label>
-        <textarea id="rubricNotes" rows="3" placeholder="Only add notes if our interpretation needs a correction."></textarea>
-      </div>
-    </div>
-    <div class="project-actions">
-      <button id="confirmRubric" class="ghost">Confirm rubric</button>
-      <button id="saveRubricEdits" class="ghost">Save edits & continue</button>
-      <button id="rejectRubric" class="ghost">Reject rubric</button>
-    </div>
+    </details>
   `;
   const review = document.getElementById('reviewSection');
-  if (review) actions.insertBefore(section, review);
+  const anchor = review || actionsInsertionAnchor(actions);
+  if (anchor) actions.insertBefore(section, anchor);
   else actions.appendChild(section);
   return section;
 }
@@ -187,7 +394,7 @@ function parseRubricJson(id) {
   return JSON.parse(text);
 }
 function renderRubricReview(bundle) {
-  ensureRubricPanel();
+  const section = ensureRubricPanel();
   rubricReview = bundle || null;
   const status = document.getElementById('rubricStatus');
   const summary = document.getElementById('rubricSummary');
@@ -200,8 +407,9 @@ function renderRubricReview(bundle) {
   const confirmBtn = document.getElementById('confirmRubric');
   const editBtn = document.getElementById('saveRubricEdits');
   const rejectBtn = document.getElementById('rejectRubric');
-  if (!status || !summary || !warnings || !genre || !family || !criteria || !levels || !notes) return;
+  if (!status || !summary || !warnings || !genre || !family || !criteria || !levels || !notes || !section) return;
   if (!bundle) {
+    section.classList.add('is-hidden');
     status.textContent = 'No rubric review pending.';
     summary.textContent = '';
     warnings.innerHTML = '';
@@ -220,6 +428,7 @@ function renderRubricReview(bundle) {
   const pending = bundle.status === 'awaiting_rubric_confirmation' || verification.required_confirmation;
   const verificationLabel = verification.status ? verification.status.replaceAll('_', ' ') : 'unknown';
   const confidence = validation.confidence || {};
+  section.classList.toggle('is-hidden', !(pending || (verification.errors || []).length || (verification.warnings || []).length));
   status.textContent = pending
     ? `Rubric review required before scoring continues. Status: ${verificationLabel}.`
     : `Rubric status: ${verificationLabel}. Confidence: ${confidence.status || manifest.confidence_status || 'unknown'}.`;
@@ -238,6 +447,86 @@ function renderRubricReview(bundle) {
   notes.value = ((verification.teacher_edits || {}).teacher_notes || '');
   [confirmBtn, editBtn, rejectBtn].forEach(btn => { if (btn) btn.disabled = !pending; });
 }
+function ensureAnchorPanel() {
+  let section = document.getElementById('anchorSection');
+  if (section) return section;
+  const actions = document.getElementById('actions');
+  if (!actions) return null;
+  section = document.createElement('div');
+  section.id = 'anchorSection';
+  section.className = 'auth review-section is-hidden';
+  section.innerHTML = `
+    <div class="panel-row">
+      <div>
+        <div class="label">Anchor calibration</div>
+        <div id="anchorStatus" class="auth-status">No anchor calibration pending.</div>
+      </div>
+      <div class="project-actions">
+        <button id="submitAnchors" class="primary">Apply anchors</button>
+      </div>
+    </div>
+    <div id="anchorReasons" class="auth-status"></div>
+    <div id="anchorList" class="controls compact-controls"></div>
+  `;
+  const review = document.getElementById('reviewSection');
+  const anchor = review || actionsInsertionAnchor(actions);
+  if (anchor) actions.insertBefore(section, anchor);
+  else actions.appendChild(section);
+  return section;
+}
+function renderAnchorReview(bundle) {
+  const section = ensureAnchorPanel();
+  anchorReview = bundle || null;
+  const status = document.getElementById('anchorStatus');
+  const reasons = document.getElementById('anchorReasons');
+  const list = document.getElementById('anchorList');
+  const submitBtn = document.getElementById('submitAnchors');
+  if (!section || !status || !reasons || !list || !submitBtn) return;
+  if (!bundle) {
+    section.classList.add('is-hidden');
+    status.textContent = 'No anchor calibration pending.';
+    reasons.textContent = '';
+    list.innerHTML = '';
+    submitBtn.disabled = true;
+    return;
+  }
+  const pending = bundle.status === 'awaiting_anchor_scores';
+  const confidence = bundle.cohort_confidence || {};
+  const packet = bundle.anchor_packet || {};
+  const anchors = packet.anchors || [];
+  section.classList.toggle('is-hidden', !pending && !anchors.length);
+  status.textContent = pending
+    ? 'Score 4–6 anchor papers to calibrate this cohort, then rerun ordering and banding.'
+    : 'Anchor calibration is not required right now.';
+  reasons.textContent = (confidence.reasons || []).length
+    ? `Why: ${(confidence.reasons || []).join(' · ').replaceAll('_', ' ')}`
+    : '';
+  list.innerHTML = '';
+  anchors.forEach((anchor, idx) => {
+    const row = document.createElement('div');
+    row.className = 'control';
+    row.innerHTML = `
+      <label>${anchor.display_name || anchor.student_id} · machine ${anchor.machine_level || '—'} · ${anchor.machine_percent || '—'}%</label>
+      <div class="curve-range">
+        <select data-anchor-level="${idx}">
+          <option value="">Level</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="4+">4+</option>
+        </select>
+        <input data-anchor-mark="${idx}" type="number" min="0" max="100" placeholder="mark (optional)" />
+      </div>
+    `;
+    list.appendChild(row);
+    const levelNode = row.querySelector(`[data-anchor-level="${idx}"]`);
+    const markNode = row.querySelector(`[data-anchor-mark="${idx}"]`);
+    if (levelNode) levelNode.value = anchor.teacher_level || '';
+    if (markNode) markNode.value = anchor.teacher_mark || '';
+  });
+  submitBtn.disabled = !pending || !anchors.length;
+}
 async function fetchRubricReview(jobId) {
   const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/rubric`));
   if (!res.ok) throw new Error('Rubric review unavailable');
@@ -245,15 +534,21 @@ async function fetchRubricReview(jobId) {
   renderRubricReview(payload);
   return payload;
 }
+async function fetchAnchorReview(jobId) {
+  const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/anchors`));
+  if (!res.ok) throw new Error('Anchor review unavailable');
+  const payload = await res.json();
+  renderAnchorReview(payload);
+  return payload;
+}
 async function continueJobAfterRubric(result) {
-  const status = document.getElementById('pipelineStatus');
   if (result.status === 'failed') {
-    if (status) status.textContent = 'Rubric review rejected.';
+    setPipelineStatus('Rubric review rejected.', 'danger');
     stopShuffle();
     stopPipelineNarrative('Rubric review rejected.');
     return;
   }
-  if (status) status.textContent = 'Rubric confirmed. Running...';
+  setPipelineStatus('Rubric confirmed. Running...', 'running');
   setRunning(true);
   startPipelineNarrative();
   startShuffle();
@@ -262,13 +557,92 @@ async function continueJobAfterRubric(result) {
     await fetchRubricReview(activeJobId);
     return;
   }
+  if (job.status === 'awaiting_anchor_scores') {
+    setPipelineStatus('Anchor calibration needed', 'warn');
+    stopShuffle();
+    stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.');
+    await fetchAnchorReview(activeJobId);
+    return;
+  }
   const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
   if (!dataRes.ok) throw new Error('Dashboard data unavailable');
   previewStudents = [];
   await boot(await dataRes.json());
-  if (status) status.textContent = 'Complete';
+  setPipelineStatus('Complete', 'ready');
   stopShuffle();
   stopPipelineNarrative('Done. Review is ready.');
+}
+function anchorPayload() {
+  const anchors = (anchorReview && anchorReview.anchor_packet && anchorReview.anchor_packet.anchors) ? anchorReview.anchor_packet.anchors : [];
+  return anchors.map((anchor, idx) => ({
+    student_id: anchor.student_id,
+    teacher_level: (document.querySelector(`[data-anchor-level="${idx}"]`)?.value || '').trim(),
+    teacher_mark: (document.querySelector(`[data-anchor-mark="${idx}"]`)?.value || '').trim(),
+  })).filter(item => item.teacher_level || item.teacher_mark);
+}
+function validateAnchorPayload(anchors) {
+  const byId = new Map(((anchorReview && anchorReview.anchor_packet && anchorReview.anchor_packet.anchors) || []).map(anchor => [anchor.student_id, anchor]));
+  const allowedLevels = new Set(['1', '2', '3', '4', '4+']);
+  for (const anchor of anchors) {
+    const label = byId.get(anchor.student_id)?.display_name || anchor.student_id;
+    if (anchor.teacher_level && !allowedLevels.has(anchor.teacher_level)) {
+      return `${label} has an invalid level.`;
+    }
+    if (anchor.teacher_mark) {
+      const mark = Number(anchor.teacher_mark);
+      if (!Number.isFinite(mark) || mark < 0 || mark > 100) {
+        return `${label} mark must be between 0 and 100.`;
+      }
+      anchor.teacher_mark = mark;
+    }
+  }
+  return '';
+}
+async function submitAnchorReview() {
+  if (!activeJobId) return;
+  const anchors = anchorPayload();
+  if (!anchors.length) {
+    const status = document.getElementById('anchorStatus');
+    if (status) status.textContent = 'Score at least one anchor before rerunning.';
+    return;
+  }
+  const status = document.getElementById('anchorStatus');
+  const validationError = validateAnchorPayload(anchors);
+  if (validationError) {
+    if (status) status.textContent = validationError;
+    return;
+  }
+  if (status) status.textContent = 'Applying anchor calibration...';
+  try {
+    const res = await fetch(apiUrl(`/pipeline/v2/jobs/${activeJobId}/anchors`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anchors }),
+    });
+    if (!res.ok) {
+      let detail = 'Anchor submission failed';
+      try {
+        const payload = await res.json();
+        detail = payload.detail || detail;
+      } catch (_) {
+        // keep default
+      }
+      throw new Error(detail);
+    }
+    renderAnchorReview(await res.json());
+    const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${activeJobId}/data`));
+    if (!dataRes.ok) throw new Error('Dashboard data unavailable');
+    previewStudents = [];
+    await boot(await dataRes.json());
+    setPipelineStatus('Complete', 'ready');
+    stopShuffle();
+    stopPipelineNarrative('Done. Anchor calibration applied.');
+  } catch (err) {
+    if (status) status.textContent = `Anchor calibration failed: ${err.message || 'unknown error'}`;
+    setPipelineStatus('Anchor calibration failed', 'danger');
+    stopShuffle();
+    stopPipelineNarrative('Anchor calibration failed.');
+  }
 }
 async function submitRubricReview(action) {
   if (!activeJobId) return;
@@ -298,6 +672,8 @@ async function submitRubricReview(action) {
 }
 function applyReviewBundle(bundle) {
   ensureRubricPanel();
+  ensureAnchorPanel();
+  ensureReviewPanel();
   reviewBundle = bundle || null;
   reviewStudents = {};
   reviewPairs = {};
@@ -340,13 +716,11 @@ function applyReviewBundle(bundle) {
   if (learningSummary) {
     const profile = (bundle && bundle.local_learning_profile) ? bundle.local_learning_profile : {};
     const prior = (bundle && bundle.local_teacher_prior) ? bundle.local_teacher_prior : {};
-    const delta = (bundle && bundle.latest_delta) ? bundle.latest_delta : {};
-    const replay = (bundle && bundle.replay_exports) ? bundle.replay_exports : {};
     const aggregate = (bundle && bundle.aggregate_learning) ? bundle.aggregate_learning : {};
     const anon = (bundle && bundle.anonymized_aggregate) ? bundle.anonymized_aggregate : {};
     const activeLabel = prior.active ? 'active' : (prior.activation && prior.activation.reason) ? prior.activation.reason.replaceAll('_', ' ') : 'inactive';
     const aggregateMode = aggregate.mode || anon.mode || 'local_only';
-    learningSummary.textContent = `Local profile: ${profile.review_count || 0} finalized reviews, ${profile.student_review_count || 0} student decisions, ${profile.pairwise_adjudication_count || 0} pairwise adjudications. Latest delta: ${delta.summary ? (delta.summary.rank_movement_count || 0) : 0} rank moves, ${delta.summary ? (delta.summary.level_override_count || 0) : 0} level overrides. Local prior: ${activeLabel}. Replay exports: ${replay.benchmark_gold_count || 0} benchmark rows, ${replay.calibration_exemplars_count || 0} exemplar candidates. Aggregate learning: ${aggregateMode} (${anon.record_count || 0} scope records, ${anon.global_record_count || 0} total).`;
+    learningSummary.textContent = `Local learning: ${profile.review_count || 0} finalized reviews · ${profile.student_review_count || 0} essay decisions · ${profile.pairwise_adjudication_count || 0} pairwise calls · prior ${activeLabel} · aggregate mode ${aggregateMode}.`;
   }
 }
 async function loadReviewBundle() {
@@ -359,14 +733,15 @@ async function loadReviewBundle() {
   } catch (_) {}
 }
 function renderReviewPanel(student) {
-  ensureReviewPanel();
+  const section = ensureReviewPanel();
   const uncertainty = document.getElementById('reviewUncertainty');
   const level = document.getElementById('reviewLevelOverride');
   const desiredRank = document.getElementById('reviewDesiredRank');
   const quality = document.getElementById('reviewEvidenceQuality');
   const comment = document.getElementById('reviewEvidenceComment');
   const pairStatus = document.getElementById('pairwiseStatus');
-  if (!uncertainty || !level || !desiredRank || !quality || !comment || !pairStatus) return;
+  if (!uncertainty || !level || !desiredRank || !quality || !comment || !pairStatus || !section) return;
+  section.classList.toggle('is-hidden', !student && !(data?.students?.length));
   if (!student) {
     uncertainty.innerHTML = '';
     level.value = '';
@@ -397,12 +772,12 @@ function renderReviewPanel(student) {
   }
   const compareIndex = getCompareIndex();
   if (compareIndex === null || document.body.dataset.view !== 'split') {
-    pairStatus.textContent = 'Open split view to record a pairwise adjudication.';
+    pairStatus.textContent = 'Switch to compare view if you need to adjudicate a close pair.';
   } else {
     const compare = data.students[compareIndex];
     const pair = reviewPairs[pairKey(student.student_id, compare.student_id)];
     const preferred = pair && pair.preferred_student_id ? labelFor(data.students.find(item => item.student_id === pair.preferred_student_id) || { student_id: pair.preferred_student_id }) : 'none saved';
-    pairStatus.textContent = `Comparing with ${labelFor(compare)}. Saved pairwise preference: ${preferred}.`;
+    pairStatus.textContent = `Comparing with ${labelFor(compare)}. Saved preference: ${preferred}.`;
   }
 }
 function reviewPayload() {
@@ -437,6 +812,41 @@ async function saveReviewBundle(action = 'draft') {
 }
 function getCompareIndex() { if (!data || data.students.length < 2) return null; const target = currentIndex + compareDirection; if (target >= 0 && target < data.students.length) return target; const fallback = currentIndex - compareDirection; if (fallback >= 0 && fallback < data.students.length) return fallback; return null; }
 function getAdjustment(studentId) { if (!adjustments[studentId]) adjustments[studentId] = { overall: 0, rubric: 0, conventions: 0, comparative: 0 }; return adjustments[studentId]; }
+function currentCohortMarks() {
+  if (!data?.students?.length) return [];
+  return data.students.map((student, idx) => ({ student_id: student.student_id, mark: num(getGradeForIndex(idx), 0) }));
+}
+function scaledMarksForRange(existingMarks, top, bottom) {
+  const count = existingMarks.length;
+  if (!count) return [];
+  if (count === 1) return [Math.round(top)];
+  const oldTop = num(existingMarks[0]?.mark, top);
+  const oldBottom = num(existingMarks[count - 1]?.mark, bottom);
+  if (oldTop <= oldBottom) return computeGrades(top, bottom, count);
+  return existingMarks.map(({ mark }, idx) => {
+    if (idx === 0) return Math.round(top);
+    if (idx === count - 1) return Math.round(bottom);
+    const ratio = clamp((num(mark, oldBottom) - oldBottom) / (oldTop - oldBottom), 0, 1);
+    return Math.round(bottom + ((top - bottom) * ratio));
+  });
+}
+function applyCurveBounds(top, bottom, preserveShape = true) {
+  if (!data?.students?.length) return;
+  const currentMarks = preserveShape ? currentCohortMarks() : [];
+  grades = computeGrades(top, bottom, data.students.length);
+  delete data.curve_top;
+  delete data.curve_bottom;
+  data.curve_top = top;
+  data.curve_bottom = bottom;
+  if (preserveShape) {
+    const scaledMarks = scaledMarksForRange(currentMarks, top, bottom);
+    overrides = {};
+    data.students.forEach((student, idx) => {
+      const adj = getAdjustment(student.student_id);
+      adj.overall = (scaledMarks[idx] ?? grades[idx] ?? 0) - (grades[idx] ?? 0);
+    });
+  }
+}
 function getGradeForIndex(idx) {
   if (!data || !data.students || !data.students.length) return '';
   const s = data.students[idx];
@@ -475,6 +885,7 @@ function renderRail(animate = false) {
     });
   }
   updateRail();
+  updateWorkflowState();
 }
 function updateRail() { const rail = document.getElementById('railScroll'); rail.querySelectorAll('.rail-item').forEach((item, idx) => { item.classList.toggle('active', idx === currentIndex); const gradeEl = item.querySelector('.rail-grade'); if (gradeEl) gradeEl.textContent = getGradeForIndex(idx) || '—'; }); }
 function scrollToIndex(idx, smooth) { if (!getStudents().length) return; const rail = document.getElementById('railScroll'); const item = rail.querySelector(`[data-index="${idx}"]`); if (!item) return; item.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', inline: 'center', block: 'nearest' }); currentIndex = idx; updateRail(); renderDetail(); }
@@ -528,37 +939,38 @@ function feedbackForStudent(studentId, feedbackText) { if (!feedbackDrafts[stude
 function renderSummary(student) {
   const summary = document.getElementById('summaryList');
   summary.innerHTML = '';
-  const adj = getAdjustment(student.student_id);
+  const uncertaintyFlags = student.uncertainty_flags || [];
+  const uncertaintyReasons = student.uncertainty_reasons || [];
   const rows = [
-    { key: 'overall', label: 'Overall grade', value: getGradeForIndex(currentIndex), adjustable: true },
-    { key: 'rubric', label: 'Rubric score', value: num(student.rubric_mean_percent), adjustable: true },
-    { key: 'conventions', label: 'Conventions %', value: num(student.conventions_mistake_rate_percent), adjustable: true },
-    { key: 'comparative', label: 'Comparative', value: num(student.borda_points), adjustable: true },
-    { key: 'composite', label: 'Composite', value: num(student.composite_score), adjustable: false },
-    { key: 'level', label: 'Level', value: student.level_with_modifier || student.adjusted_level || '', adjustable: false },
-    { key: 'uncertainty', label: 'Uncertainty', value: (student.uncertainty_flags || []).join(', ') || '—', adjustable: false },
-    { key: 'flags', label: 'Flags', value: student.flags || '—', adjustable: false },
+    {
+      label: 'Recommended level',
+      value: student.level_with_modifier || student.adjusted_level || '—',
+      support: student.flags || 'Machine recommendation',
+    },
+    {
+      label: 'Assigned mark',
+      value: getGradeForIndex(currentIndex) || '—',
+      support: `Rank ${student.rank} of ${data.students.length}`,
+    },
+    {
+      label: 'Rubric signal',
+      value: `${Math.round(num(student.rubric_mean_percent))}%`,
+      support: `Conventions ${Math.round(num(student.conventions_mistake_rate_percent))}% error rate`,
+    },
+    {
+      label: 'Uncertainty',
+      value: uncertaintyFlags.length ? uncertaintyFlags.map(flag => flag.replaceAll('_', ' ')).join(', ') : 'Stable',
+      support: uncertaintyReasons[0] || 'No uncertainty flags on this essay.',
+    },
   ];
   rows.forEach(row => {
-    const value = row.key in adj ? row.value + adj[row.key] : row.value;
     const stage = document.createElement('div');
-    stage.className = 'stage-row';
+    stage.className = 'summary-card';
     stage.innerHTML = `
       <div class="stage-label">${row.label}</div>
-      <div class="stage-value">${value}</div>
-      <div class="adjusters"></div>
+      <div class="stage-value">${row.value}</div>
+      <div class="summary-support">${row.support}</div>
     `;
-    if (row.adjustable) {
-      const adjusters = stage.querySelector('.adjusters');
-      const up = document.createElement('button');
-      up.textContent = '▲';
-      const down = document.createElement('button');
-      down.textContent = '▼';
-      up.addEventListener('click', () => applyAdjustment(student.student_id, row.key, 1));
-      down.addEventListener('click', () => applyAdjustment(student.student_id, row.key, -1));
-      adjusters.appendChild(up);
-      adjusters.appendChild(down);
-    }
     summary.appendChild(stage);
   });
 }
@@ -586,14 +998,26 @@ function renderFeedback(student) {
   wish.oninput = () => { draft.wish = wish.innerText.trim(); };
 }
 function renderDetail() {
+  const summaryPanel = document.getElementById('summary');
+  const emptyState = document.getElementById('workspaceEmpty');
+  const essayGrid = document.getElementById('essayGrid');
   if (previewStudents.length || !data || !data.students || !data.students.length) {
-    document.getElementById('detailTitle').textContent = 'Upload essays to begin';
-    document.getElementById('essay').innerHTML = '';
+    document.getElementById('detailTitle').textContent = previewStudents.length ? 'Files ready. Run the assessment to review the cohort.' : 'Upload essays to begin';
+    document.getElementById('essay').innerHTML = '<p>Once the assessment runs, the essay text and comparison view will appear here.</p>';
     document.getElementById('essayLabelPrimary').textContent = '';
+    document.getElementById('essayLabelCompare').textContent = '';
+    if (summaryPanel) summaryPanel.classList.add('is-hidden');
+    if (emptyState) emptyState.classList.remove('is-hidden');
+    if (essayGrid) essayGrid.classList.add('is-hidden');
     renderReviewPanel(null);
+    updateControlVisibility();
+    updateWorkflowState();
     return;
 	}
 	const student = data.students[currentIndex];
+  if (summaryPanel) summaryPanel.classList.remove('is-hidden');
+  if (emptyState) emptyState.classList.add('is-hidden');
+  if (essayGrid) essayGrid.classList.remove('is-hidden');
 	document.getElementById('detailTitle').textContent = `${labelFor(student)} • Rank ${student.rank}`;
 	renderSummary(student);
 	document.getElementById('essayLabelPrimary').textContent = `${labelFor(student)} • Rank ${student.rank}`;
@@ -616,31 +1040,54 @@ function renderDetail() {
   const override = overrides[student.student_id];
   gradeInput.value = override !== undefined ? override : getGradeForIndex(currentIndex);
   const gradeSlider = document.getElementById('overallGradeSlider'); if (gradeSlider) gradeSlider.value = gradeInput.value || getGradeForIndex(currentIndex);
+  updateControlVisibility();
+  updateWorkflowState();
 }
 function applyAdjustment(studentId, key, delta) { const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0); currentIndex = sidx; const adj = getAdjustment(studentId); adj[key] += delta; const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null; if (data?.students?.length && window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId)); if (target === null) break; const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
 function applyOverallTarget(target) { if (!data?.students?.length) return; const sid = sliderStudentId || data.students[currentIndex]?.student_id; const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex]; currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const curr = getGradeForIndex(currentIndex); const delta = target - curr; const adj = getAdjustment(s.student_id); const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 }; adj.rubric += num(spread.rubric, 0); adj.conventions += num(spread.conventions, 0); adj.comparative += num(spread.comparative, 0); adj.overall += delta; delete overrides[s.student_id]; const inp = document.getElementById('gradeOverride'); if (inp) inp.value = Math.round(target); const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = Math.round(target); if (window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
 function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true); renderDetail(); }
-function updateGradesFromCurve() { if (!data || !data.students || !data.students.length) return; const top = num(document.getElementById('topGrade').value, 92); const bottom = num(document.getElementById('bottomGrade').value, 58); if (top <= bottom) return; grades = computeGrades(top, bottom, data.students.length); updateRail(); renderDetail(); }
-function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; }
+function updateGradesFromCurve() {
+  if (!data || !data.students || !data.students.length) return;
+  const topInput = document.getElementById('topGrade');
+  const bottomInput = document.getElementById('bottomGrade');
+  const top = clamp(num(topInput?.value, 92), 0, 100);
+  const bottom = clamp(num(bottomInput?.value, 58), 0, 100);
+  if (top <= bottom) return;
+  if (topInput) topInput.value = Math.round(top);
+  if (bottomInput) bottomInput.value = Math.round(bottom);
+  applyCurveBounds(top, bottom, true);
+  updateRail();
+  renderDetail();
+}
+function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; updateWorkflowState(); }
 function pipelineLog(msg) { const log = document.getElementById('pipelineLog'); if (!log) return; const line = document.createElement('div'); line.textContent = msg; log.appendChild(line); log.scrollTop = log.scrollHeight; }
 function startPipelineNarrative() { const log = document.getElementById('pipelineLog'); if (log) log.innerHTML = ''; const steps = ['Getting your files ready and organized…', "In this first pass, we’re conducting an initial assessment based on the rubric.", 'Next, we compare essays side‑by‑side to keep the ordering consistent.', 'Now we scan conventions: spelling, grammar, sentence structure, and format.', 'We’re integrating all signals into a final, coherent ordering.', 'Building the teacher review dashboard…']; pipelineStep = 0; pipelineLog(steps[0]); pipelineTimer = setInterval(() => { pipelineStep += 1; if (pipelineStep < steps.length) pipelineLog(steps[pipelineStep]); }, 2400); }
 function stopPipelineNarrative(msg) { if (msg) pipelineLog(msg); if (pipelineTimer) clearInterval(pipelineTimer); pipelineTimer = null; setTimeout(() => setRunning(false), 2000); }
 function startShuffle() { if (shuffleTimer || !previewStudents.length) return; shuffleTimer = setInterval(() => { if (previewStudents.length < 2) return; const i = Math.floor(Math.random() * (previewStudents.length - 1)); const t = previewStudents[i]; previewStudents[i] = previewStudents[i + 1]; previewStudents[i + 1] = t; previewStudents.forEach((s, idx) => { s.rank = idx + 1; }); renderRail(true); }, 900); }
 function stopShuffle() { if (shuffleTimer) clearInterval(shuffleTimer); shuffleTimer = null; }
-function updatePreviewFromUploads() { const essays = document.getElementById('uploadEssays'); if (!essays || !essays.files || !essays.files.length) return; previewStudents = Array.from(essays.files).map((f, idx) => ({ student_id: baseName(f.name), rank: idx + 1, text: '' })); currentIndex = 0; renderRail(true); }
+function updatePreviewFromUploads() {
+  const essays = document.getElementById('uploadEssays');
+  if (!essays) return;
+  previewStudents = essays.files && essays.files.length
+    ? Array.from(essays.files).map((f, idx) => ({ student_id: baseName(f.name), rank: idx + 1, text: '' }))
+    : [];
+  currentIndex = 0;
+  renderRail(true);
+  renderDetail();
+  updateWorkflowState();
+}
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
+async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
 async function runPipeline() {
-  const status = document.getElementById('pipelineStatus'); if (!status) return;
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
-  if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { status.textContent = 'Add essays, rubric, outline'; return; }
+  if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { setPipelineStatus('Add essays, rubric, outline', 'warn'); return; }
   if (!previewStudents.length) updatePreviewFromUploads();
-  status.textContent = 'Checking connection...'; let mode = '';
-  try { const [cRes, aRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const c = cRes.ok ? await cRes.json() : null; const a = aRes.ok ? await aRes.json() : null; mode = c && c.connected ? 'codex_local' : (a && a.connected ? 'openai' : ''); } catch (err) { status.textContent = 'Offline'; return; }
-  if (!mode) { status.textContent = 'Connect Codex or API key'; return; }
-  const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode);
-  status.textContent = 'Running...'; setRunning(true); startPipelineNarrative(); startShuffle();
-  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { status.textContent = 'Rubric confirmation needed'; stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { status.textContent = 'Rubric confirmation needed'; stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); status.textContent = 'Complete'; stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; status.textContent = msg; stopShuffle(); stopPipelineNarrative(msg); }
+  setPipelineStatus('Checking connection...', 'warn'); let mode = '';
+  try { const [cRes, aRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const c = cRes.ok ? await cRes.json() : null; const a = aRes.ok ? await aRes.json() : null; mode = c && c.connected ? 'codex_local' : (a && a.connected ? 'openai' : ''); } catch (err) { setPipelineStatus('Offline', 'danger'); return; }
+  if (!mode) { setPipelineStatus('Connect Codex or API key', 'warn'); return; }
+  const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode); if (currentProject?.id) form.append('project_id', currentProject.id);
+  setPipelineStatus('Running...', 'running'); setRunning(true); startPipelineNarrative(); startShuffle();
+  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } if (job.status === 'awaiting_anchor_scores') { setPipelineStatus('Anchor calibration needed', 'warn'); stopShuffle(); stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.'); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (dataRes.ok) { previewStudents = []; await boot(await dataRes.json()); } await fetchAnchorReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); setPipelineStatus('Complete', 'ready'); stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); }
 }
 function setupUploads() {
   document.querySelectorAll('.upload').forEach(zone => {
@@ -656,10 +1103,12 @@ function setupUploads() {
       input.files = e.dataTransfer.files;
       zone.querySelector('span').textContent = `${input.files.length} file(s) selected`;
       if (input.id === 'uploadEssays') updatePreviewFromUploads();
+      else updateWorkflowState();
     });
     input.addEventListener('change', () => {
       zone.querySelector('span').textContent = `${input.files.length} file(s) selected`;
       if (input.id === 'uploadEssays') updatePreviewFromUploads();
+      else updateWorkflowState();
     });
   });
 }
@@ -680,6 +1129,7 @@ function setupControls() {
     const value = e.target.value.trim(); if (!value) return; applyOverallTarget(clamp(num(value, 0), 0, 100));
   });
   document.getElementById('copyFeedback').addEventListener('click', () => {
+    if (!data?.students?.length) return;
     const student = data.students[currentIndex]; const draft = feedbackForStudent(student.student_id, student.feedback_text || '');
     const payload = [`Two Stars and a Wish — ${student.student_id}`, `Star 1: ${draft.star1 || '—'}`, `Star 2: ${draft.star2 || '—'}`, `Wish: ${draft.wish || '—'}`].join('\n'); navigator.clipboard.writeText(payload);
   });
@@ -689,7 +1139,7 @@ function setupControls() {
   if (connectBtn) connectBtn.addEventListener('click', connectApiKey);
   const codexBtn = document.getElementById('codexLogin');
   if (codexBtn) codexBtn.addEventListener('click', startCodexLogin);
-  const runBtn = document.getElementById('runPipeline');
+  const runBtn = document.getElementById('runPipelinePrimary');
   if (runBtn) runBtn.addEventListener('click', runPipeline);
   document.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() !== 'f') return;
@@ -704,7 +1154,7 @@ function setupControls() {
   viewToggle.addEventListener('click', () => {
     const body = document.body;
     body.dataset.view = body.dataset.view === 'split' ? 'single' : 'split';
-    viewToggle.textContent = body.dataset.view === 'split' ? 'Single' : 'Split';
+    updateControlVisibility();
     renderDetail();
   });
   document.getElementById('railScroll').addEventListener('scroll', updateFromScroll);
@@ -760,19 +1210,22 @@ function setupControls() {
   const confirmRubric = document.getElementById('confirmRubric'); if (confirmRubric) confirmRubric.addEventListener('click', () => submitRubricReview('confirm'));
   const saveRubricEdits = document.getElementById('saveRubricEdits'); if (saveRubricEdits) saveRubricEdits.addEventListener('click', () => submitRubricReview('edit'));
   const rejectRubric = document.getElementById('rejectRubric'); if (rejectRubric) rejectRubric.addEventListener('click', () => submitRubricReview('reject'));
+  const submitAnchors = document.getElementById('submitAnchors'); if (submitAnchors) submitAnchors.addEventListener('click', submitAnchorReview);
+  updateWorkflowState();
 }
 async function boot(payload) {
   data = payload;
   if (!data.students) data.students = [];
   data.students.sort((a, b) => a.rank - b.rank);
+  document.title = 'Assessor';
   if (data.class_metadata && data.class_metadata.grade_level) {
     const title = document.querySelector('.brand h1');
-    title.textContent = `Hero Path • Grade ${data.class_metadata.grade_level}`;
+    title.textContent = 'Assessor';
+    document.title = `Assessor • Grade ${data.class_metadata.grade_level}`;
   }
   if (data.curve_top) document.getElementById('topGrade').value = data.curve_top;
   if (data.curve_bottom) document.getElementById('bottomGrade').value = data.curve_bottom;
-  grades = computeGrades(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), data.students.length);
-  document.getElementById('viewToggle').textContent = document.body.dataset.view === 'split' ? 'Single' : 'Split';
+  applyCurveBounds(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), false);
   await detectApiBase();
   setupControls();
   renderRubricReview(
@@ -786,9 +1239,21 @@ async function boot(payload) {
         }
       : null,
   );
+  renderAnchorReview(
+    payload && ((payload.teacher_anchor_packet && (payload.teacher_anchor_packet.anchors || []).length) || payload.cohort_confidence)
+      ? {
+          status: 'completed',
+          cohort_confidence: payload.cohort_confidence || {},
+          anchor_packet: payload.teacher_anchor_packet || {},
+          anchor_calibration: payload.anchor_calibration || {},
+        }
+      : null,
+  );
   await loadReviewBundle();
   renderRail();
   scrollToIndex(0, false);
+  updateControlVisibility();
+  updateWorkflowState();
   refreshAuthStatus();
 }
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })

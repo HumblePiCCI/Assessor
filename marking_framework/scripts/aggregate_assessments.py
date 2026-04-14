@@ -28,6 +28,12 @@ try:
         write_irr_metrics,
         write_ranked_list,
     )
+    from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report
+    from scripts.portfolio_aggregation import (
+        apply_portfolio_mode,
+        apply_portfolio_scale_calibration,
+        write_report as write_portfolio_report,
+    )
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import (  # pragma: no cover
         apply_bias_correction,  # pragma: no cover
@@ -53,8 +59,105 @@ except ImportError:  # pragma: no cover - Running as a script
         write_irr_metrics,  # pragma: no cover
         write_ranked_list,  # pragma: no cover
     )
+    from boundary_calibrator import apply_boundary_calibration, load_scope_context, write_report  # pragma: no cover
+    from portfolio_aggregation import (  # pragma: no cover
+        apply_portfolio_mode,  # pragma: no cover
+        apply_portfolio_scale_calibration,  # pragma: no cover
+        write_report as write_portfolio_report,  # pragma: no cover
+    )
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _level_order_value(level: str, level_bands: list[dict]) -> float:
+    for band in level_bands:
+        if str(band.get("level", "") or "").strip() == str(level or "").strip():
+            return float(band.get("min", 0.0) or 0.0)
+    return -1.0
+
+
+def _interpolate_anchor_patch(score: float, patch: dict) -> tuple[float, float]:
+    points = patch.get("interpolation_points", []) if isinstance(patch, dict) else []
+    ordered = []
+    for point in points if isinstance(points, list) else []:
+        if not isinstance(point, dict):
+            continue
+        if "x" not in point or "y" not in point:
+            continue
+        ordered.append((float(point["x"]), float(point["y"])))
+    ordered.sort(key=lambda item: item[0])
+    if len(ordered) >= 2:
+        x = float(score)
+        if x <= ordered[0][0]:
+            corrected = ordered[0][1]
+        elif x >= ordered[-1][0]:
+            corrected = ordered[-1][1]
+        else:
+            corrected = x
+            for idx in range(1, len(ordered)):
+                x0, y0 = ordered[idx - 1]
+                x1, y1 = ordered[idx]
+                if x0 <= x <= x1:
+                    ratio = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+                    corrected = y0 + ((y1 - y0) * ratio)
+                    break
+        return corrected, corrected - x
+    delta = float(patch.get("mean_delta", 0.0) or 0.0)
+    return float(score) + delta, delta
+
+
+def apply_anchor_patch(rows: list[dict], patch: dict, level_bands: list[dict]) -> tuple[list[dict], dict]:
+    if not isinstance(patch, dict) or not patch or not patch.get("active", False):
+        return rows, {"active": False, "applied": 0, "fit_method": "", "movement_count": 0}
+    updated = []
+    movement_count = 0
+    for row in rows:
+        current = float(row.get("rubric_after_penalty_percent", row.get("rubric_mean_percent", 0.0)) or 0.0)
+        corrected, delta = _interpolate_anchor_patch(current, patch)
+        corrected = max(0.0, min(100.0, corrected))
+        if abs(delta) >= 0.01:
+            movement_count += 1
+        adjusted_band = get_level_band(corrected, level_bands)
+        adjusted_level = adjusted_band["level"] if adjusted_band else row.get("adjusted_level", "")
+        adjusted_letter = adjusted_band["letter"] if adjusted_band else row.get("adjusted_letter", "")
+        level_modifier = row.get("level_modifier", "")
+        level_with_modifier = f"{adjusted_level}{level_modifier}" if adjusted_level else row.get("level_with_modifier", "")
+        updated_row = dict(row)
+        updated_row["rubric_after_penalty_percent"] = round(corrected, 2)
+        updated_row["anchor_adjustment_points"] = round(delta, 2)
+        updated_row["anchor_calibration_active"] = "true"
+        updated_row["adjusted_level"] = adjusted_level
+        updated_row["adjusted_letter"] = adjusted_letter
+        updated_row["level_with_modifier"] = level_with_modifier
+        updated_row["_level_order"] = _level_order_value(adjusted_level, level_bands)
+        updated.append(updated_row)
+    report = {
+        "active": True,
+        "applied": len(updated),
+        "fit_method": str(patch.get("fit_method", "") or ""),
+        "movement_count": movement_count,
+        "mean_delta": round(float(patch.get("mean_delta", 0.0) or 0.0), 6),
+    }
+    return updated, report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to marking_config.json")
@@ -66,11 +169,19 @@ def main() -> int:
     parser.add_argument("--calibration-bias", default="outputs/calibration_bias.json", help="Calibration bias JSON")
     parser.add_argument("--rubric-criteria", default="config/rubric_criteria.json", help="Rubric criteria JSON")
     parser.add_argument("--scope-key", default="", help="Optional calibration scope key (e.g. grade_6_7|literary_analysis)")
+    parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
+    parser.add_argument("--grade-profiles", default="config/grade_level_profiles.json", help="Grade level profiles JSON")
+    parser.add_argument("--routing", default="config/llm_routing.json", help="Routing config JSON")
+    parser.add_argument("--boundary-report", default="outputs/boundary_calibration_report.json", help="Boundary calibration report JSON")
+    parser.add_argument("--portfolio-report", default="outputs/portfolio_mode_report.json", help="Portfolio scoring mode report JSON")
+    parser.add_argument("--anchor-calibration", default="outputs/cohort_anchor_calibration.json", help="Local anchor calibration patch JSON")
     args = parser.parse_args()
     config = load_config(Path(args.config), logger)
+    scope = load_scope_context(Path(args.class_metadata), Path(args.grade_profiles), Path(args.routing))
     pass1 = read_pass1(Path(args.pass1), logger)
     pass2 = read_pass2(Path(args.pass2), logger)
     conventions = read_conventions_report(Path(args.conventions), logger)
+    pass1, portfolio_report = apply_portfolio_mode(pass1, config, scope)
     student_ids = set()
     for assessor in pass1:
         for score in assessor.get("scores", []):
@@ -181,6 +292,13 @@ def main() -> int:
     logger.info(f"  Mean rubric SD: {irr['mean_rubric_sd']:.2f}")
     logger.info(f"  Mean rank SD: {irr['mean_rank_sd']:.2f}")
     weights = config.get("weights", {})
+    if scope.get("is_portfolio"):
+        portfolio_weights = config.get("portfolio_mode", {}).get("weights", {})
+        weights = {
+            "rubric": portfolio_weights.get("rubric", weights.get("rubric", 0.70)),
+            "conventions": portfolio_weights.get("conventions", weights.get("conventions", 0.15)),
+            "comparative": portfolio_weights.get("comparative", weights.get("comparative", 0.15)),
+        }
     rubric_w = weights.get("rubric", 0.70)
     conv_w = weights.get("conventions", 0.15)
     comp_w = weights.get("comparative", 0.15)
@@ -189,6 +307,10 @@ def main() -> int:
     mistake_rate_threshold = conventions_config.get("mistake_rate_threshold", 0.07)
     max_level_drop = conventions_config.get("max_level_drop", 1)
     missing_data_mistake_rate_percent = conventions_config.get("missing_data_mistake_rate_percent", 100.0)
+    if scope.get("is_portfolio"):
+        portfolio_cfg = config.get("portfolio_mode", {})
+        mistake_rate_threshold += (_safe_float(portfolio_cfg.get("conventions_threshold_bonus_percent"), 0.0) / 100.0)
+        max_level_drop = float(max_level_drop) * max(0.0, _safe_float(portfolio_cfg.get("max_level_drop_scale"), 1.0))
     modifier_bands = conventions_config.get(
         "modifier_bands",
         [
@@ -203,6 +325,11 @@ def main() -> int:
     logger.info(f"Weighting: rubric={rubric_w}, conventions={conv_w}, comparative={comp_w}")
     logger.info(f"Conventions penalty: mistake_rate_threshold={mistake_rate_threshold}, max_level_drop={max_level_drop}")
     logger.info(f"Level bands: {', '.join([b['level'] for b in level_bands])}")
+    if portfolio_report.get("enabled"):
+        logger.info(
+            "Portfolio mode normalized %s assessor score(s)",
+            portfolio_report.get("applied", 0),
+        )
     rows = []
     conventions_penalties_applied = 0
     for sid in student_ids:
@@ -245,6 +372,7 @@ def main() -> int:
         composite = (rubric_w * (rubric_after_penalty / 100.0)) + (conv_w * conv_component) + (comp_w * borda_percent)
 
         rank_sd = stdev(rankings_by_student.get(sid, []))
+        portfolio_summary = portfolio_report.get("student_summaries", {}).get(sid, {})
 
         flags = []
         if rubric_sd_points >= config.get("consensus", {}).get("rubric_sd_threshold", 0.8):
@@ -257,6 +385,8 @@ def main() -> int:
             flags.append("missing_rank")
         if not rubric_scores:
             flags.append("missing_rubric")
+        if portfolio_summary.get("note_votes", 0):
+            flags.append("portfolio_mode")
         if conventions_penalty_applied:
             flags.append("conventions_penalty")
 
@@ -288,6 +418,19 @@ def main() -> int:
                 "adjusted_letter": adjusted_letter,
                 "level_modifier": level_modifier,
                 "level_with_modifier": level_with_modifier,
+                "portfolio_note_estimate": portfolio_summary.get("note_estimate_mean", ""),
+                "portfolio_note_level": portfolio_summary.get("note_canonical_level", ""),
+                "portfolio_note_votes": portfolio_summary.get("note_votes", 0),
+                "portfolio_piece_count_mean": portfolio_summary.get("piece_count_mean", ""),
+                "portfolio_piece_overall_mean": portfolio_summary.get("piece_overall_mean", ""),
+                "portfolio_piece_median_mean": portfolio_summary.get("piece_median_mean", ""),
+                "portfolio_piece_lower_half_mean": portfolio_summary.get("piece_lower_half_mean", ""),
+                "portfolio_piece_upper_half_mean": portfolio_summary.get("piece_upper_half_mean", ""),
+                "portfolio_piece_top70_mean": portfolio_summary.get("piece_top70_mean", ""),
+                "portfolio_piece_top80_mean": portfolio_summary.get("piece_top80_mean", ""),
+                "portfolio_piece_lt60_mean": portfolio_summary.get("piece_lt60_mean", ""),
+                "anchor_adjustment_points": 0.0,
+                "anchor_calibration_active": "false",
                 "flags": ";".join(flags),
                 "_level_order": float(adjusted_band.get("min", -1.0) if adjusted_band else (base_band.get("min", -1.0) if base_band else -1.0)),
                 "_composite_bucket": round(composite, 3),
@@ -297,6 +440,41 @@ def main() -> int:
     
     if conventions_penalties_applied > 0:
         logger.warning(f"Conventions penalty applied to {conventions_penalties_applied} student(s)")
+
+    rows, portfolio_scale_report = apply_portfolio_scale_calibration(rows, config, scope, level_bands)
+    if portfolio_report.get("enabled"):
+        portfolio_report["scale_calibration"] = portfolio_scale_report
+    write_portfolio_report(Path(args.portfolio_report), portfolio_report)
+    if portfolio_scale_report.get("applied", 0):
+        logger.info(
+            "Portfolio ordinal-scale calibration adjusted %s student(s)",
+            portfolio_scale_report.get("applied", 0),
+        )
+
+    anchor_patch = load_json(Path(args.anchor_calibration))
+    rows, anchor_report = apply_anchor_patch(rows, anchor_patch, level_bands)
+    if anchor_report.get("active", False):
+        logger.info(
+            "Anchor calibration adjusted %s student(s) using %s",
+            anchor_report.get("movement_count", 0),
+            anchor_report.get("fit_method", "global_shift"),
+        )
+    else:
+        logger.info("Anchor calibration inactive")
+
+    rows, boundary_report = apply_boundary_calibration(rows, config, scope)
+    if anchor_report.get("active", False):
+        boundary_report["anchor_calibration"] = anchor_report
+    write_report(Path(args.boundary_report), boundary_report)
+    if boundary_report.get("movement_count", 0):
+        logger.info(
+            "Boundary calibration applied to %s student(s) for scope grade=%s genre=%s",
+            boundary_report.get("movement_count", 0),
+            boundary_report.get("scope", {}).get("grade_level"),
+            boundary_report.get("scope", {}).get("genre"),
+        )
+    else:
+        logger.info("Boundary calibration made no score adjustments")
 
     logger.info("Sorting by composite score (weighted: rubric + conventions + comparative)")
     rows_sorted = sorted(

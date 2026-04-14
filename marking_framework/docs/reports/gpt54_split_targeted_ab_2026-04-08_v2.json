@@ -1,0 +1,131 @@
+{
+  "report_date": "2026-04-08",
+  "report_variant": "v2",
+  "run_output_dir": "/tmp/model_split_small_20260408_tuned",
+  "candidate_mode": "gpt54_split",
+  "baseline_mode": "gpt52_legacy",
+  "candidate_routing": {
+    "pass1_assessor": "gpt-5.4-mini",
+    "pass2_ranker": "gpt-5.4-mini",
+    "pairwise_reviewer": "gpt-5.4-mini",
+    "feedback_drafter": "gpt-5.4-nano"
+  },
+  "baseline_routing": {
+    "pass1_assessor": "gpt-5.2",
+    "pass2_ranker": "gpt-5.2",
+    "pairwise_reviewer": "gpt-5.2",
+    "feedback_drafter": "gpt-5.2"
+  },
+  "tuning_focus": [
+    "small ordinal portfolio banding under gpt-5.4-mini",
+    "NAEP source-native top-band calibration under gpt-5.4-mini"
+  ],
+  "datasets": [
+    {
+      "name": "naep_1998_g8_informative_tv_show",
+      "candidate": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 5.763333,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.072234,
+        "latency_seconds": 72.785391
+      },
+      "baseline": {
+        "exact_level_hit_rate": 0.833333,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 2.646667,
+        "kendall_tau": 0.866667,
+        "pairwise_order_agreement": 0.933333,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.213203,
+        "latency_seconds": 135.120019
+      }
+    },
+    {
+      "name": "uk_sta_2018_ks1_writing_portfolios",
+      "candidate": {
+        "exact_level_hit_rate": 1.0,
+        "within_one_level_hit_rate": 1.0,
+        "score_band_mae": 0.0,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.214955,
+        "latency_seconds": 240.621571
+      },
+      "baseline": {
+        "exact_level_hit_rate": 0.333333,
+        "within_one_level_hit_rate": 0.666667,
+        "score_band_mae": 6.446667,
+        "kendall_tau": 1.0,
+        "pairwise_order_agreement": 1.0,
+        "model_usage_ratio": 1.0,
+        "cost_usd": 0.656133,
+        "latency_seconds": 388.674069
+      }
+    }
+  ],
+  "weighted_summary": {
+    "candidate": {
+      "cost_usd_mean": 0.119808,
+      "exact_level_hit_rate_mean": 1.0,
+      "kendall_tau_mean": 1.0,
+      "latency_seconds_mean": 128.730784,
+      "max_rank_displacement_mean": 0.0,
+      "mean_rank_displacement_mean": 0.0,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 1.0,
+      "score_band_mae_mean": 3.842222,
+      "within_one_level_hit_rate_mean": 1.0
+    },
+    "baseline": {
+      "cost_usd_mean": 0.360846,
+      "exact_level_hit_rate_mean": 0.666666,
+      "kendall_tau_mean": 0.911111,
+      "latency_seconds_mean": 219.638036,
+      "max_rank_displacement_mean": 0.666667,
+      "mean_rank_displacement_mean": 0.222222,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.955555,
+      "score_band_mae_mean": 3.913334,
+      "within_one_level_hit_rate_mean": 0.888889
+    },
+    "delta_candidate_minus_baseline": {
+      "cost_usd_mean": -0.241038,
+      "exact_level_hit_rate_mean": 0.333334,
+      "kendall_tau_mean": 0.088889,
+      "latency_seconds_mean": -90.907252,
+      "max_rank_displacement_mean": -0.666667,
+      "mean_rank_displacement_mean": -0.222222,
+      "model_usage_ratio_mean": 0.0,
+      "pairwise_order_agreement_mean": 0.044445,
+      "score_band_mae_mean": -0.071112,
+      "within_one_level_hit_rate_mean": 0.111111
+    }
+  },
+  "delta_from_prior_targeted_report": {
+    "candidate_cost_usd_mean": 0.002508,
+    "candidate_exact_level_hit_rate_mean": 0.444445,
+    "candidate_kendall_tau_mean": 0.0,
+    "candidate_latency_seconds_mean": 17.589488,
+    "candidate_max_rank_displacement_mean": 0.0,
+    "candidate_mean_rank_displacement_mean": 0.0,
+    "candidate_model_usage_ratio_mean": 0.0,
+    "candidate_pairwise_order_agreement_mean": 0.0,
+    "candidate_score_band_mae_mean": -2.036667,
+    "candidate_within_one_level_hit_rate_mean": 0.111111
+  },
+  "conclusion": {
+    "reliability": "fixed_for_this_slice",
+    "quality_vs_gpt52": "better_on_this_slice",
+    "speed_vs_gpt52": "better",
+    "cost_vs_gpt52": "better",
+    "next_targets": [
+      "broader external corpus rerun with gpt-5.4-mini split routing",
+      "validate that the new NAEP and small-ordinal calibration does not overfit outside the targeted slice"
+    ]
+  }
+}

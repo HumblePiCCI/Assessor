@@ -163,9 +163,29 @@ def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch)
     )
     (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
     (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "speech": {
+                        "additional_criteria": [{"id": "SP1", "name": "Audience engagement", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
 
     def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
         prompt = messages[0]["content"]
+        prompts.append(prompt)
         text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
         if "Return ONLY valid JSON" not in prompt:
             text = "s1"
@@ -182,15 +202,194 @@ def test_run_llm_assessors_explicit_genre_skips_inference(tmp_path, monkeypatch)
             "--routing", str(tmp_path / "routing.json"),
             "--rubric", str(tmp_path / "rubric.md"),
             "--outline", str(tmp_path / "outline.md"),
-            "--rubric-criteria", str(tmp_path / "none.json"),
+            "--rubric-criteria", str(criteria_path),
             "--pass1-out", str(pass1_out),
             "--pass2-out", str(pass2_out),
             "--assessors", "A",
-            "--genre", "argumentative",
+            "--genre", "speech",
             "--ignore-cost-limits",
         ],
     )
     assert rla.main() == 0
+    pass1_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("SP1" in prompt and "Audience engagement" in prompt for prompt in pass1_prompts)
+
+
+def test_run_llm_assessors_uses_portfolio_metadata_for_criteria(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        rla,
+        "infer_genre_from_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not infer")),
+    )
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Portfolio writing sample", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 2,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "portfolio": {
+                        "additional_criteria": [{"id": "PF1", "name": "Cross-piece consistency", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        text = json.dumps({"student_id": "s1", "rubric_total_points": 10, "criteria_points": {}, "notes": "ok"})
+        if "Return ONLY valid JSON" not in prompt:
+            text = "s1"
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(criteria_path),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    pass1_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("PF1" in prompt and "Cross-piece consistency" in prompt for prompt in pass1_prompts)
+
+
+def test_run_llm_assessors_scores_portfolio_pieces_and_aggregates(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text(
+        "Opening the Fridge\nA polished narrative about sneaking downstairs.\n\n"
+        "The Applause\nA vivid performance recount with sensory detail.\n\n"
+        "How Pointe Shoes Came To Be\nAn explanatory report about ballet shoes.",
+        encoding="utf-8",
+    )
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 6,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    criteria_path = tmp_path / "criteria.json"
+    criteria_path.write_text(
+        json.dumps(
+            {
+                "categories": {
+                    "communication": {
+                        "criteria": [{"id": "C1", "name": "Expression", "description": "desc"}]
+                    }
+                },
+                "genre_specific_criteria": {
+                    "portfolio": {
+                        "additional_criteria": [{"id": "PF1", "name": "Cross-piece consistency", "description": "desc"}]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        if "Return ONLY valid JSON" not in prompt:
+            return {"output": [{"type": "output_text", "text": "s1"}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        if "s1::p01" in prompt:
+            text = json.dumps({"student_id": "s1::p01", "rubric_total_points": 84, "criteria_points": {}, "notes": "Strong narrative"})
+        elif "s1::p02" in prompt:
+            text = json.dumps({"student_id": "s1::p02", "rubric_total_points": 81, "criteria_points": {}, "notes": "Strong recount"})
+        else:
+            text = json.dumps({"student_id": "s1::p03", "rubric_total_points": 76, "criteria_points": {}, "notes": "Good report"})
+        return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    portfolio_report = tmp_path / "portfolio_piece_report.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(criteria_path),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--portfolio-piece-report", str(portfolio_report),
+            "--assessors", "A",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    payload = json.loads((pass1_out / "assessor_A.json").read_text(encoding="utf-8"))
+    item = payload["scores"][0]
+    assert item["student_id"] == "s1"
+    assert item["portfolio_piece_count"] == 3
+    assert item["portfolio_overall_level"] == "4"
+    assert len(item["portfolio_piece_scores"]) == 3
+    report = json.loads(portfolio_report.read_text(encoding="utf-8"))
+    assert report["enabled"] is True
+    assert report["students"]["s1"]["piece_count"] == 3
+    piece_prompts = [prompt for prompt in prompts if "Return ONLY valid JSON" in prompt]
+    assert any("C1" in prompt for prompt in piece_prompts)
+    assert all("PF1" not in prompt for prompt in piece_prompts)
+    pass2_prompts = [prompt for prompt in prompts if "Rank the students best to worst." in prompt]
+    assert any("Portfolio overall score" in prompt and "Piece profile:" in prompt for prompt in pass2_prompts)
 
 
 def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
@@ -244,6 +443,167 @@ def test_run_llm_assessors_pass2_repair_success(tmp_path, monkeypatch):
     assert rla.main() == 0
     ranking = (pass2_out / "assessor_A.txt").read_text(encoding="utf-8").strip().splitlines()
     assert ranking == ["s2", "s1"]
+
+
+def test_run_llm_assessors_uses_unanimous_portfolio_seed_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Title A\nStrong first piece.\n\nTitle B\nStrong second piece.", encoding="utf-8")
+    (texts_dir / "s2.txt").write_text("Title C\nMiddle piece.\n\nTitle D\nMiddle follow-up.", encoding="utf-8")
+    (texts_dir / "s3.txt").write_text("Title E\nWeak piece.\n\nTitle F\nWeak follow-up.", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 2,
+                "genre_form": "mixed writing portfolio",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    score_map = {
+        ("A", "s1::p01"): 84,
+        ("A", "s1::p02"): 82,
+        ("A", "s2::p01"): 72,
+        ("A", "s2::p02"): 70,
+        ("A", "s3::p01"): 60,
+        ("A", "s3::p02"): 58,
+        ("B", "s1::p01"): 85,
+        ("B", "s1::p02"): 83,
+        ("B", "s2::p01"): 73,
+        ("B", "s2::p02"): 71,
+        ("B", "s3::p01"): 61,
+        ("B", "s3::p02"): 59,
+        ("C", "s1::p01"): 86,
+        ("C", "s1::p02"): 84,
+        ("C", "s2::p01"): 74,
+        ("C", "s2::p02"): 72,
+        ("C", "s3::p01"): 62,
+        ("C", "s3::p02"): 60,
+    }
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            student_piece = prompt.split("Student ID: ", 1)[1].splitlines()[0].strip()
+            assessor = prompt.split("You are Assessor ", 1)[1].split(".", 1)[0].strip()
+            score = score_map[(assessor, student_piece)]
+            text = json.dumps({"student_id": student_piece, "rubric_total_points": score, "criteria_points": {}, "notes": "ok"})
+            return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s3", "s2", "s1"]})}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "no_criteria.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A,B,C",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    for assessor in ("A", "B", "C"):
+        ranking = (pass2_out / f"assessor_{assessor}.txt").read_text(encoding="utf-8").strip().splitlines()
+        assert ranking == ["s1", "s2", "s3"]
+
+
+def test_run_llm_assessors_uses_argumentative_seed_order_for_thoughtful_cross_topic(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Argument essay one", encoding="utf-8")
+    (texts_dir / "s2.txt").write_text("Argument essay two", encoding="utf-8")
+    (texts_dir / "s3.txt").write_text("Argument essay three", encoding="utf-8")
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps(
+            {
+                "grade_level": 10,
+                "assignment_genre": "argumentative",
+                "source_family": "thoughtful_learning_assessment_models",
+                "cohort_shape": "same_rubric_family_cross_topic",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    score_map = {
+        ("A", "s1"): {"rubric_total_points": 88, "criteria_points": {"AR1": 90, "AR2": 88, "AR3": 76, "C1": 82, "C3": 78}},
+        ("A", "s2"): {"rubric_total_points": 79, "criteria_points": {"AR1": 80, "AR2": 74, "AR3": 64, "C1": 76, "C3": 72}},
+        ("A", "s3"): {"rubric_total_points": 69, "criteria_points": {"AR1": 66, "AR2": 60, "AR3": 52, "C1": 68, "C3": 68}},
+        ("B", "s1"): {"rubric_total_points": 87, "criteria_points": {"AR1": 88, "AR2": 86, "AR3": 78, "C1": 84, "C3": 76}},
+        ("B", "s2"): {"rubric_total_points": 80, "criteria_points": {"AR1": 82, "AR2": 76, "AR3": 62, "C1": 78, "C3": 72}},
+        ("B", "s3"): {"rubric_total_points": 68, "criteria_points": {"AR1": 64, "AR2": 58, "AR3": 50, "C1": 66, "C3": 66}},
+        ("C", "s1"): {"rubric_total_points": 89, "criteria_points": {"AR1": 92, "AR2": 90, "AR3": 78, "C1": 84, "C3": 80}},
+        ("C", "s2"): {"rubric_total_points": 81, "criteria_points": {"AR1": 84, "AR2": 78, "AR3": 64, "C1": 78, "C3": 74}},
+        ("C", "s3"): {"rubric_total_points": 70, "criteria_points": {"AR1": 68, "AR2": 60, "AR3": 50, "C1": 68, "C3": 68}},
+    }
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            student_id = prompt.split("Student ID: ", 1)[1].splitlines()[0].strip()
+            assessor = prompt.split("You are Assessor ", 1)[1].split(".", 1)[0].strip()
+            payload = score_map[(assessor, student_id)]
+            text = json.dumps(
+                {
+                    "student_id": student_id,
+                    "rubric_total_points": payload["rubric_total_points"],
+                    "criteria_points": payload["criteria_points"],
+                    "notes": "Clear claim and well-supported reasoning.",
+                }
+            )
+            return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s3", "s2", "s1"]})}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "no_criteria.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A,B,C",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    for assessor in ("A", "B", "C"):
+        ranking = (pass2_out / f"assessor_{assessor}.txt").read_text(encoding="utf-8").strip().splitlines()
+        assert ranking == ["s1", "s2", "s3"]
 
 
 def test_run_llm_assessors_pass2_repair_fallback(tmp_path, monkeypatch):
@@ -731,7 +1091,7 @@ def test_run_llm_assessors_min_coverage_gate_fails(tmp_path, monkeypatch):
 
     def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
         prompt = messages[0]["content"]
-        if "Score this student" in prompt:
+        if "Return ONLY valid JSON" in prompt:
             return {"output": [{"type": "output_text", "text": "not json"}], "usage": {}}
         return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s1"]})}], "usage": {}}
 

@@ -2,26 +2,26 @@
   "mode": "openai",
   "tasks": {
     "pass1_assessor": {
-      "model": "gpt-5.2",
-      "reasoning": "medium",
+      "model": "gpt-5.4-mini",
+      "reasoning": "low",
       "temperature": 0.0,
       "max_output_tokens": 1200,
       "require_evidence": false
     },
     "pass2_ranker": {
-      "model": "gpt-5.2",
-      "reasoning": "medium",
+      "model": "gpt-5.4-mini",
+      "reasoning": "low",
       "temperature": 0.0,
       "max_output_tokens": 500
     },
     "pairwise_reviewer": {
-      "model": "gpt-5.2",
-      "reasoning": "medium",
+      "model": "gpt-5.4-mini",
+      "reasoning": "low",
       "temperature": 0.0,
       "max_output_tokens": 500
     },
     "feedback_drafter": {
-      "model": "gpt-5.2",
+      "model": "gpt-5.4-nano",
       "reasoning": "medium",
       "temperature": 0.0,
       "max_output_tokens": 800

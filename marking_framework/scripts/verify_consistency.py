@@ -267,7 +267,7 @@ def main() -> int:
     parser.add_argument("--rubric", default="inputs/rubric.md", help="Rubric file")
     parser.add_argument("--outline", default="inputs/assignment_outline.md", help="Assignment outline file")
     parser.add_argument("--routing", default="config/llm_routing.json", help="Routing config")
-    parser.add_argument("--model", default="gpt-5.2", help="Model for pairwise checks")
+    parser.add_argument("--model", default="gpt-5.4-mini", help="Model for pairwise checks")
     parser.add_argument("--reasoning", default="low", help="Reasoning effort for pairwise checks")
     parser.add_argument("--window", type=int, default=2, help="How many lower-seeded neighbors to compare against each essay")
     parser.add_argument("--max-output-tokens", type=int, default=300, help="Max model output tokens")

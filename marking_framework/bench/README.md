@@ -16,6 +16,7 @@ Required gold fields:
 
 Optional gold fields:
 
+- `gold_canonical_level`
 - `gold_neighbors`
 - `boundary_flag`
 - `adjudication_notes`
@@ -26,6 +27,7 @@ Notes:
 
 - `student_id` must match the deterministic IDs produced by `scripts/extract_text.py`. For a dataset with lexicographically sorted submissions, that means `s001`, `s002`, and so on in sorted filename order.
 - `gold_rank` is `1` for the strongest submission in the cohort.
+- `gold_level` should preserve the source-native label when the external benchmark uses a different scale. In those cases, set `gold_canonical_level` to the app's canonical comparison level (`1`, `2`, `3`, `4`, or `4+`) so the harness can score the dataset without discarding the original source label.
 - `gold_neighbors` should be a JSON array in `gold.jsonl`, or a JSON array string in `gold.csv`.
 - Datasets without explicit gold are not valid release benchmarks and should not be used for gating.
 - For reproducible internet-corpus sweeps, use `scripts/benchmark_corpus.py`.
@@ -47,3 +49,8 @@ Current public benchmark families in this repo include:
 - `thoughtful_assessment_grade6_8_persuasive_letter`
 - `thoughtful_assessment_grade9_10_argument`
 - `thoughtful_assessment_grade11_12_speech`
+- `naep_1998_g4_narrative_castle`
+- `naep_1998_g8_informative_tv_show`
+- `naep_1998_g12_persuasive_one_vote`
+- `uk_sta_2018_ks1_writing_portfolios`
+- `uk_sta_2018_ks2_writing_portfolios`

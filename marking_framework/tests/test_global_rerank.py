@@ -1,6 +1,5 @@
 import csv
 import json
-
 import scripts.global_rerank as gr
 
 
@@ -75,6 +74,8 @@ def test_global_rerank_known_optimum_order(tmp_path):
     assert legacy.exists()
     report_payload = json.loads(report.read_text(encoding="utf-8"))
     assert report_payload["summary"]["pairwise_agreement_with_final_order"] == 1.0
+    assert "pairwise_conflict_density" in report_payload["summary"]
+    assert "boundary_disagreement_concentration" in report_payload["summary"]
 
 
 def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
@@ -154,3 +155,22 @@ def test_global_rerank_local_teacher_prior_surfaces_bounded_adjustments_on_ambig
     assert rows["s1"]["teacher_preference_adjustment"] < 0
     assert rows["s2"]["teacher_preference_adjustment"] > 0
     assert all(abs(int(row["rerank_displacement"])) <= 1 for row in result["final_rows"])
+
+
+def test_global_rerank_suppresses_local_prior_during_anchor_calibration(tmp_path, monkeypatch):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "80.1", "composite_score": "0.800"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "4", "rubric_after_penalty_percent": "79.9", "composite_score": "0.799"},
+    ]
+    local_prior = {
+        "active": True,
+        "run_scope": {},
+        "support": {"support_scalar": 1.0, "freshness_scalar": 1.0},
+        "weights": {"boundary_level_bias": 0.08, "seed_order_bias": 0.0, "max_adjustment": 0.08, "boundary_margin": 1.5},
+    }
+    monkeypatch.setenv("ANCHOR_CALIBRATION_ACTIVE", "1")
+    result, *_ = run_rerank(tmp_path, seed_rows, [], local_prior=local_prior)
+    rows = {row["student_id"]: row for row in result["final_rows"]}
+    assert rows["s1"]["teacher_preference_adjustment"] == 0.0
+    assert rows["s2"]["teacher_preference_adjustment"] == 0.0
+    assert result["report"]["teacher_prior"]["suppressed_by_anchor_calibration"] is True

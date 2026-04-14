@@ -1,0 +1,54 @@
+{
+  "report_date": "2026-04-03",
+  "scope": "focused_recovery_remaining_weak_spots",
+  "code_changes": [
+    "openai_client transient retry/backoff",
+    "boundary_calibrator richer source-profile matching and Thoughtful early-grade narrative profile",
+    "portfolio_aggregation bottom-bucket non-promotion fix",
+    "llm_assessors_core truncated outer JSON rescue"
+  ],
+  "datasets": {
+    "thoughtful_assessment_grade3_personal_narrative": {
+      "validation_mode": "candidate_vs_fallback",
+      "candidate_completed": true,
+      "candidate_exact_level_hit_rate": 1.0,
+      "candidate_within_one_level_hit_rate": 1.0,
+      "candidate_score_band_mae": 0.0,
+      "candidate_kendall_tau": 1.0,
+      "candidate_pairwise_order_agreement": 1.0,
+      "status": "fixed"
+    },
+    "thoughtful_assessment_grade6_8_persuasive_letter": {
+      "validation_mode": "main_only",
+      "candidate_completed": true,
+      "model_usage_ratio": 1.0,
+      "candidate_exact_level_hit_rate": 0.5,
+      "candidate_within_one_level_hit_rate": 1.0,
+      "candidate_score_band_mae": 1.835,
+      "candidate_kendall_tau": 1.0,
+      "candidate_pairwise_order_agreement": 1.0,
+      "status": "coverage_fixed_banding_remaining"
+    },
+    "thoughtful_assessment_grade6_8_summary_iron": {
+      "validation_mode": "main_only",
+      "candidate_completed": true,
+      "model_usage_ratio": 1.0,
+      "candidate_exact_level_hit_rate": 0.25,
+      "candidate_within_one_level_hit_rate": 1.0,
+      "candidate_score_band_mae": 4.72,
+      "candidate_kendall_tau": 0.666667,
+      "candidate_pairwise_order_agreement": 0.833333,
+      "status": "coverage_fixed_ordering_remaining"
+    },
+    "uk_sta_2018_ks1_writing_portfolios": {
+      "validation_mode": "partial_main_inspection",
+      "candidate_completed": true,
+      "candidate_levels": {
+        "s001": "4",
+        "s002": "2",
+        "s003": "2"
+      },
+      "status": "calibration_regression_removed_ordering_remaining"
+    }
+  }
+}

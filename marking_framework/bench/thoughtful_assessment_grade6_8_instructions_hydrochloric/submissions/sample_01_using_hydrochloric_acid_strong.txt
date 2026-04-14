@@ -2,10 +2,25 @@ Hydrochloric acid is corrosive and can burn you! Usually HCl is dissolved in wat
 
 Storage:
 
+* Keep hydrochloric acid in glass bottles back from the edge of the shelf.
+* Keep bottles away from metals. Contact will corrode metals and could even release hydrogen gas, which is really explosive.
+
 Protection:
+
+* Always wear safety glasses to protect your eyes.
+* Wear latex gloves and old clothes when you use concentrated HCl-not short-sleeved shirts, shorts, or sandals.
+* Do not breathe the fumes. They can knock you out.
+* If acid spills on your skin or splashes in your eyes, rinse the area with water for 5 minutes.
+* Cover mild burns with a gauze bandage. Always ask a doctor to check your eyes or major burns.
 
 Uses:
 
 In the lab, you will either dilute or titrate hydrochloric acid. Listen to your teacher and follow these tips.
 
+* When diluting, always pour the acid into the water. Doing it backwards can cause boiling, splashing, and burning!
+* When titrating, use a buret to measure the HCl you need. Then react the HCl with a sample that has a base such as sodium hydroxide or sodium carbonate. That way, you will get an accurate measurement of the base in the sample.
+
 Disposal:
+
+* To dispose of HCl, neutralize it by mixing the acid with a sodium hydroxide solution. Then test the mixture with litmus paper. Flush the neutralized solution down the drain.
+* If you spill HCl, cover the spill with a lot of baking soda. After the fizzing stops, sweep up the soda and put it in the garbage or flush it down the drain.

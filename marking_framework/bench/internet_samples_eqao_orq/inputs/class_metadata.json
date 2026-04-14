@@ -1,4 +1,19 @@
 {
   "grade_level": 6,
-  "assignment_genre": "argumentative"
+  "assignment_genre": "argumentative",
+  "assessment_unit": "single_prompt",
+  "prompt_shared": true,
+  "sample_count": 4,
+  "source_family": "EQAO ORQ",
+  "rubric_family": "EQAO open response",
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": ["Level 1", "Level 2", "Level 3", "Level 4"],
+    "numeric_mapping": {
+      "Level 1": 1,
+      "Level 2": 2,
+      "Level 3": 3,
+      "Level 4": 4
+    }
+  }
 }

@@ -227,7 +227,8 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert calls["env"]["OPENAI_API_KEY"] == "k"
     assert calls["env"]["PIPELINE_MANIFEST_HASH"] == result["manifest_hash"]
     assert "PYTHONPATH" in calls["env"]
-    assert not (root / "outputs" / "dashboard_data.json").exists()
+    assert (root / "outputs" / "dashboard_data.json").exists()
+    assert json.loads((root / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))["students"][0]["student_id"] == "s1"
     assert (workspace_dir / "pipeline_manifest.json").exists()
     assert (workspace_dir / "outputs" / "normalized_rubric.json").exists()
     assert (workspace_dir / "outputs" / "rubric_manifest.json").exists()
@@ -260,6 +261,206 @@ def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):
     assert confirmed["status"] == "queued"
     queue._process_job(submitted["job_id"])
     assert queue.get_job(submitted["job_id"])["status"] == "completed"
+
+
+def test_anchor_calibration_pause_and_resume(tmp_path):
+    def run_anchor(cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "consensus_scores.csv").write_text(
+            "student_id,seed_rank,consensus_rank,adjusted_level,rubric_after_penalty_percent,rubric_sd_points,rank_sd,composite_score\n"
+            "s1,1,1,4,82,4.5,1.2,0.82\n"
+            "s2,2,2,3,74,4.0,1.0,0.74\n",
+            encoding="utf-8",
+        )
+        (out / "final_order.csv").write_text(
+            "student_id,final_rank,seed_rank,adjusted_level,rubric_after_penalty_percent\ns1,1,1,4,82\ns2,2,2,3,74\n",
+            encoding="utf-8",
+        )
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1", "rank": 1}, {"student_id": "s2", "rank": 2}]}), encoding="utf-8")
+        if env and env.get("ANCHOR_CALIBRATION_ACTIVE") == "1":
+            (out / "cohort_anchor_calibration.json").write_text(
+                json.dumps({"active": True, "fit_method": "global_shift", "mean_delta": 1.0}),
+                encoding="utf-8",
+            )
+            (out / "cohort_confidence.json").write_text(
+                json.dumps({"blocking_enabled": True, "effective_runtime_state": "provisional_review_recommended"}),
+                encoding="utf-8",
+            )
+            (out / "consistency_report.json").write_text(
+                json.dumps({"summary": {"swap_rate": 0.1, "boundary_disagreement_concentration": 0.2, "pairwise_conflict_density": 0.1}}),
+                encoding="utf-8",
+            )
+        else:
+            (out / "teacher_anchor_packet.json").write_text(
+                json.dumps({"anchors": [{"student_id": "s1", "display_name": "Student 1", "machine_level": "4", "machine_percent": 82}]}),
+                encoding="utf-8",
+            )
+            (out / "cohort_confidence.json").write_text(
+                json.dumps({"blocking_enabled": True, "effective_runtime_state": "anchor_calibration_required"}),
+                encoding="utf-8",
+            )
+            (out / "consistency_report.json").write_text(
+                json.dumps({"summary": {"swap_rate": 0.1, "boundary_disagreement_concentration": 0.2, "pairwise_conflict_density": 0.1}}),
+                encoding="utf-8",
+            )
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_anchor)
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._process_job(submitted["job_id"])
+    paused_job = queue.get_job(submitted["job_id"])
+    assert paused_job["status"] == "awaiting_anchor_scores"
+    assert queue.load_dashboard_data(submitted["job_id"])["students"][0]["student_id"] == "s1"
+    anchor_status = queue.anchor_status(submitted["job_id"])
+    assert anchor_status["anchor_packet"]["anchors"][0]["student_id"] == "s1"
+    resumed = queue.confirm_anchor_scores(
+        submitted["job_id"],
+        teacher_scores={"anchors": [{"student_id": "s1", "teacher_level": "4", "teacher_mark": 84}]},
+    )
+    final_job = queue.get_job(submitted["job_id"])
+    assert final_job["status"] == "completed"
+    assert resumed["anchor_calibration"]["accepted"] is True
+
+
+def test_anchor_calibration_rejects_and_restores_snapshot(tmp_path):
+    def run_anchor(cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        if env and env.get("ANCHOR_CALIBRATION_ACTIVE") == "1":
+            (out / "consensus_scores.csv").write_text(
+                "student_id,seed_rank,consensus_rank,adjusted_level,rubric_after_penalty_percent,rubric_sd_points,rank_sd,composite_score\n"
+                "s2,1,1,4,84,4.0,1.1,0.84\n"
+                "s3,2,2,4,82,4.2,1.2,0.82\n"
+                "s4,3,3,3,80,4.1,1.0,0.8\n"
+                "s5,4,4,3,78,4.0,0.9,0.78\n"
+                "s6,5,5,3,76,3.8,0.8,0.76\n"
+                "s1,6,6,2,70,4.5,1.5,0.7\n",
+                encoding="utf-8",
+            )
+            (out / "final_order.csv").write_text(
+                "student_id,final_rank,seed_rank,adjusted_level,rubric_after_penalty_percent\n"
+                "s2,1,1,4,84\ns3,2,2,4,82\ns4,3,3,3,80\ns5,4,4,3,78\ns6,5,5,3,76\ns1,6,6,2,70\n",
+                encoding="utf-8",
+            )
+            (out / "dashboard_data.json").write_text(
+                json.dumps({"students": [{"student_id": "s2", "rank": 1}, {"student_id": "s1", "rank": 6}]}),
+                encoding="utf-8",
+            )
+            (out / "cohort_anchor_calibration.json").write_text(
+                json.dumps({"active": True, "fit_method": "global_shift", "mean_delta": 1.0}),
+                encoding="utf-8",
+            )
+            (out / "cohort_confidence.json").write_text(
+                json.dumps({"blocking_enabled": True, "effective_runtime_state": "provisional_review_recommended"}),
+                encoding="utf-8",
+            )
+            (out / "consistency_report.json").write_text(
+                json.dumps({"summary": {"swap_rate": 0.35, "boundary_disagreement_concentration": 0.45, "pairwise_conflict_density": 0.2}}),
+                encoding="utf-8",
+            )
+        else:
+            (out / "consensus_scores.csv").write_text(
+                "student_id,seed_rank,consensus_rank,adjusted_level,rubric_after_penalty_percent,rubric_sd_points,rank_sd,composite_score\n"
+                "s1,1,1,4,88,4.5,1.2,0.88\n"
+                "s2,2,2,4,84,4.0,1.0,0.84\n"
+                "s3,3,3,3,82,4.1,0.9,0.82\n"
+                "s4,4,4,3,79,4.0,0.9,0.79\n"
+                "s5,5,5,3,76,3.8,0.8,0.76\n"
+                "s6,6,6,2,70,3.5,0.7,0.70\n",
+                encoding="utf-8",
+            )
+            (out / "final_order.csv").write_text(
+                "student_id,final_rank,seed_rank,adjusted_level,rubric_after_penalty_percent\n"
+                "s1,1,1,4,88\ns2,2,2,4,84\ns3,3,3,3,82\ns4,4,4,3,79\ns5,5,5,3,76\ns6,6,6,2,70\n",
+                encoding="utf-8",
+            )
+            (out / "dashboard_data.json").write_text(
+                json.dumps({"students": [{"student_id": "s1", "rank": 1}, {"student_id": "s2", "rank": 2}]}),
+                encoding="utf-8",
+            )
+            (out / "teacher_anchor_packet.json").write_text(
+                json.dumps({"anchors": [{"student_id": "s1", "display_name": "Student 1", "machine_level": "4", "machine_percent": 88}]}),
+                encoding="utf-8",
+            )
+            (out / "cohort_confidence.json").write_text(
+                json.dumps({"blocking_enabled": True, "effective_runtime_state": "anchor_calibration_required"}),
+                encoding="utf-8",
+            )
+            (out / "consistency_report.json").write_text(
+                json.dumps({"summary": {"swap_rate": 0.1, "boundary_disagreement_concentration": 0.2, "pairwise_conflict_density": 0.1}}),
+                encoding="utf-8",
+            )
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_anchor)
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._process_job(submitted["job_id"])
+    resumed = queue.confirm_anchor_scores(
+        submitted["job_id"],
+        teacher_scores={"anchors": [{"student_id": "s1", "teacher_level": "4", "teacher_mark": 84}]},
+    )
+    final_job = queue.get_job(submitted["job_id"])
+    assert final_job["status"] == "completed"
+    assert resumed["anchor_calibration"]["accepted"] is False
+    assert resumed["anchor_calibration"]["fallback_used"] is True
+    assert resumed["anchor_calibration"]["fallback_reason"] == "anchor_patch_not_helpful"
+    assert resumed["anchor_calibration"]["required_top_5_overlap_count"] == 4
+    assert queue.load_dashboard_data(submitted["job_id"])["students"][0]["student_id"] == "s1"
+    consistency = json.loads((queue._workspace_dir(submitted["job_id"], "local-dev-tenant") / "outputs" / "consistency_report.json").read_text(encoding="utf-8"))
+    assert consistency["summary"]["swap_rate"] == 0.1
+
+
+def test_confirm_anchor_scores_rejects_invalid_teacher_mark(tmp_path):
+    def run_anchor(cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "consensus_scores.csv").write_text(
+            "student_id,seed_rank,consensus_rank,adjusted_level,rubric_after_penalty_percent,rubric_sd_points,rank_sd,composite_score\n"
+            "s1,1,1,4,82,4.5,1.2,0.82\n",
+            encoding="utf-8",
+        )
+        (out / "final_order.csv").write_text(
+            "student_id,final_rank,seed_rank,adjusted_level,rubric_after_penalty_percent\ns1,1,1,4,82\n",
+            encoding="utf-8",
+        )
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1", "rank": 1}]}), encoding="utf-8")
+        if env and env.get("ANCHOR_CALIBRATION_ACTIVE") == "1":
+            (out / "cohort_anchor_calibration.json").write_text(json.dumps({"active": True}), encoding="utf-8")
+            (out / "cohort_confidence.json").write_text(json.dumps({"blocking_enabled": True, "effective_runtime_state": "provisional_review_recommended"}), encoding="utf-8")
+        else:
+            (out / "teacher_anchor_packet.json").write_text(
+                json.dumps({"anchors": [{"student_id": "s1", "display_name": "Student 1", "machine_level": "4", "machine_percent": 82}]}),
+                encoding="utf-8",
+            )
+            (out / "cohort_confidence.json").write_text(
+                json.dumps({"blocking_enabled": True, "effective_runtime_state": "anchor_calibration_required"}),
+                encoding="utf-8",
+            )
+            (out / "consistency_report.json").write_text(
+                json.dumps({"summary": {"swap_rate": 0.1, "boundary_disagreement_concentration": 0.2, "pairwise_conflict_density": 0.1}}),
+                encoding="utf-8",
+            )
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_anchor)
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._process_job(submitted["job_id"])
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        queue.confirm_anchor_scores(
+            submitted["job_id"],
+            teacher_scores={"anchors": [{"student_id": "s1", "teacher_level": "4", "teacher_mark": 150}]},
+        )
+    assert queue.get_job(submitted["job_id"])["status"] == "awaiting_anchor_scores"
 
 
 def test_submit_cached_completed_snapshot(tmp_path):

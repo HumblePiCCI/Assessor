@@ -1,0 +1,193 @@
+{
+  "accepted_explicit_gold_ready_datasets_added": [
+    {
+      "classification": "explicit_gold_ready",
+      "copying_exact_text_permitted": true,
+      "dataset_name": "naep_1998_g4_narrative_castle",
+      "duplicates_current_corpus": false,
+      "genre_form": "narrative",
+      "grades": "Grade 4",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official NCES release with prompt, six-level rubric, six labeled student responses, and public-domain reuse note.",
+      "samples_added": 6,
+      "source_family": "NAEP / NCES",
+      "source_url": "https://nces.ed.gov/pubs2000/2000495.PDF"
+    },
+    {
+      "classification": "explicit_gold_ready",
+      "copying_exact_text_permitted": true,
+      "dataset_name": "naep_1998_g8_informative_tv_show",
+      "duplicates_current_corpus": false,
+      "genre_form": "informative letter",
+      "grades": "Grade 8",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official NCES release with prompt, six-level rubric, and six labeled released responses.",
+      "samples_added": 6,
+      "source_family": "NAEP / NCES",
+      "source_url": "https://nces.ed.gov/pubs2000/2000506.pdf"
+    },
+    {
+      "classification": "explicit_gold_ready",
+      "copying_exact_text_permitted": true,
+      "dataset_name": "naep_1998_g12_persuasive_one_vote",
+      "duplicates_current_corpus": false,
+      "genre_form": "persuasive response",
+      "grades": "Grade 12",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official NCES release with prompt, six-level rubric, and six labeled persuasive responses.",
+      "samples_added": 6,
+      "source_family": "NAEP / NCES",
+      "source_url": "https://nces.ed.gov/pubs2000/2000488.pdf"
+    },
+    {
+      "classification": "explicit_gold_ready",
+      "copying_exact_text_permitted": true,
+      "dataset_name": "uk_sta_2018_ks1_writing_portfolios",
+      "duplicates_current_corpus": false,
+      "genre_form": "portfolio / mixed forms",
+      "grades": "Key Stage 1 / Year 2",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official GOV.UK exemplification with explicit WTS/EXS/GDS judgements, recoverable framework, and OGL v3.0 reuse.",
+      "samples_added": 3,
+      "source_family": "Standards and Testing Agency / GOV.UK",
+      "source_url": "https://www.gov.uk/government/publications/teacher-assessment-exemplification-ks1-english-writing"
+    },
+    {
+      "classification": "explicit_gold_ready",
+      "copying_exact_text_permitted": true,
+      "dataset_name": "uk_sta_2018_ks2_writing_portfolios",
+      "duplicates_current_corpus": false,
+      "genre_form": "portfolio / mixed forms",
+      "grades": "Key Stage 2 / Year 6",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official GOV.UK exemplification with explicit WTS/EXS/GDS judgements, recoverable framework, and OGL v3.0 reuse.",
+      "samples_added": 4,
+      "source_family": "Standards and Testing Agency / GOV.UK",
+      "source_url": "https://www.gov.uk/government/publications/teacher-assessment-exemplification-ks2-english-writing"
+    }
+  ],
+  "adjudication_candidate_sources": [
+    {
+      "classification": "adjudication_candidate",
+      "copying_exact_text_permitted": "non-commercial only",
+      "duplicates_current_corpus": false,
+      "genre_form": "persuasive writing",
+      "grades": "Years 3, 5, 7, 9",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Excellent explicit scoring and rich sample scripts, but reuse text is limited to non-commercial purposes; repo-use context needs legal confirmation before ingesting as benchmark gold.",
+      "source_family": "ACARA / NAPLAN marking guides",
+      "source_url": "https://nap.edu.au/_resources/Amended_2013_Persuasive_Writing_Marking_Guide_-With_cover.pdf"
+    },
+    {
+      "classification": "adjudication_candidate",
+      "copying_exact_text_permitted": "unclear",
+      "duplicates_current_corpus": false,
+      "genre_form": "essay / constructed response",
+      "grades": "High school (English III example found)",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Official source with scored student work and rubric commentary, but explicit reuse permission for exact-text benchmark redistribution was not established in the reviewed material.",
+      "source_family": "Louisiana Department of Education sample student responses",
+      "source_url": "https://louisianabelieves.com/docs/default-source/assessment-guidance/english-iii-sample-test-items.pdf?sfvrsn=31f4bcec_26"
+    },
+    {
+      "classification": "adjudication_candidate",
+      "copying_exact_text_permitted": "unclear",
+      "duplicates_current_corpus": false,
+      "genre_form": "argument / textual analysis",
+      "grades": "High school",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "Anchor papers and scoring materials are explicit and useful, but the review did not establish a clear permission basis for exact-text redistribution into this benchmark corpus.",
+      "source_family": "NYSED Regents rating guides / anchor papers",
+      "source_url": "https://www.nysedregents.org/hsela/625/reela-62025-rga.pdf"
+    }
+  ],
+  "benchmark_status": {
+    "attempted": true,
+    "baseline_exact_level_hit": 0.492754,
+    "baseline_score_band_mae": 3.702174,
+    "candidate_exact_level_hit": 0.478261,
+    "candidate_score_band_mae": 2.976812,
+    "new_datasets_baseline_exact_level_hit": 0.36,
+    "new_datasets_baseline_score_band_mae": 6.9644,
+    "new_datasets_candidate_exact_level_hit": 0.44,
+    "new_datasets_candidate_score_band_mae": 4.0588,
+    "status": "integrated_and_benchmarked",
+    "tracked_report_json": "docs/reports/external_benchmark_corpus_2026-03-31.json",
+    "tracked_report_md": "docs/reports/external_benchmark_corpus_2026-03-31.md",
+    "updated_corpus_total": 69,
+    "updated_dataset_total": 16
+  },
+  "counts": {
+    "counts_by_genre": {
+      "informative letter": 6,
+      "mixed portfolio": 7,
+      "narrative": 6,
+      "persuasive response": 6
+    },
+    "counts_by_grade": {
+      "Grade 12": 6,
+      "Grade 4": 6,
+      "Grade 8": 6,
+      "Year 2 / KS1": 3,
+      "Year 6 / KS2": 4
+    },
+    "datasets_added": 5,
+    "samples_added": 25,
+    "updated_corpus_total": 69,
+    "updated_dataset_total": 16
+  },
+  "dedupe_log": [
+    "Audited the current corpus against bench/*/inputs/sources.md and found no source-URL overlap with the five imported datasets.",
+    "Research candidates were also deduped against one another by URL and source family."
+  ],
+  "environment_limitations": {
+    "effects": [
+      "Current bench/*/inputs/sources.md manifests were audited during integration.",
+      "Research patch URLs were deduped against the existing corpus and no overlaps were found.",
+      "The imported datasets were normalized to the benchmark contract and benchmarked inside the real repository."
+    ],
+    "repo_mount_present": true,
+    "repo_path_requested": "/Users/bldt/Desktop/Essays/marking_framework"
+  },
+  "git_status": {
+    "attempted": false,
+    "branch": "codex/stable-bell-curve",
+    "commit_sha": null,
+    "status": "pending_local_commit"
+  },
+  "rejected_sources": [
+    {
+      "classification": "reject",
+      "copying_exact_text_permitted": false,
+      "duplicates_current_corpus": false,
+      "genre_form": "portfolio / mixed",
+      "grades": "Year 6 (example reviewed)",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "The reviewed PDF explicitly states that student work samples are not licensed under ACARA\u2019s Creative Commons terms and instead carry a more restrictive licence.",
+      "source_family": "ACARA curriculum work-sample portfolios",
+      "source_url": "https://www.acara.edu.au/curriculum/worksamples/Year_6_English_Portfolio_Above.pdf"
+    },
+    {
+      "classification": "reject",
+      "copying_exact_text_permitted": false,
+      "duplicates_current_corpus": false,
+      "genre_form": "informational / argumentative / short constructed response",
+      "grades": "Grade 4 through high school (examples reviewed: Grade 4, English I, English II)",
+      "labels_explicit": true,
+      "prompt_rubric_recoverable": true,
+      "rationale": "TEA scoring guides are strong exemplars, but the guides are explicitly copyrighted and reproduction requires permission beyond narrow local-use carve-outs.",
+      "source_family": "Texas Education Agency STAAR scoring guides",
+      "source_url": "https://tea.texas.gov/student-assessment/staar/2025-staar-english-i-scoring-guide.pdf"
+    }
+  ],
+  "report_date": "2026-03-31"
+}

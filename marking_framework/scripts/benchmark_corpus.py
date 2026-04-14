@@ -74,7 +74,7 @@ def aggregate_level_confusion(dataset_reports: list[dict], mode: str) -> dict[st
         if not first_ok:
             continue
         for student in first_ok.get("students", {}).values():
-            gold = str(student.get("gold_level", ""))
+            gold = str(student.get("gold_canonical_level") or student.get("gold_level", ""))
             predicted = str(student.get("predicted_level", ""))
             if not gold or not predicted:
                 continue
@@ -100,6 +100,7 @@ def collect_mismatches(dataset_reports: list[dict], mode: str, limit: int = 40) 
                     "student_id": student.get("student_id"),
                     "display_name": student.get("display_name"),
                     "gold_level": student.get("gold_level"),
+                    "gold_canonical_level": student.get("gold_canonical_level"),
                     "predicted_level": student.get("predicted_level"),
                     "predicted_score": student.get("predicted_score"),
                     "score_band_error": student.get("score_band_error"),
@@ -197,8 +198,14 @@ def build_markdown(summary: dict) -> str:
     if mismatches:
         lines.extend(["", "## Largest Candidate Misses"])
         for row in mismatches[:20]:
+            gold_label = str(row.get("gold_level") or "")
+            gold_canonical = str(row.get("gold_canonical_level") or gold_label)
+            if gold_label and gold_label != gold_canonical:
+                gold_display = f"{gold_label} (canon {gold_canonical})"
+            else:
+                gold_display = gold_canonical
             lines.append(
-                f"- {row['dataset']} / {row['display_name']} ({row['student_id']}): gold {row['gold_level']}, predicted {row['predicted_level']}, "
+                f"- {row['dataset']} / {row['display_name']} ({row['student_id']}): gold {gold_display}, predicted {row['predicted_level']}, "
                 f"score-band error {float(row['score_band_error'] or 0.0):.2f}, rank displacement {int(row['rank_displacement'] or 0)}"
             )
     return "\n".join(lines) + "\n"

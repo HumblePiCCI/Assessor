@@ -1,0 +1,191 @@
+{
+  "generated_at": "2026-04-09T17:47:47.527741+00:00",
+  "candidate_label": "gpt54_split",
+  "baseline_label": "gpt52_legacy",
+  "pre_calibration_summary_path": "/Users/bldt/Desktop/Essays/marking_framework/work/external_corpus_gpt54mini_20260409/benchmark_corpus_summary.json",
+  "post_calibration_summary_path": "/Users/bldt/Desktop/Essays/marking_framework/work/external_corpus_gpt54mini_20260409_tuned/benchmark_corpus_summary.json",
+  "pre_calibration_comparison": {
+    "baseline_mode": "gpt52_legacy",
+    "baseline_weighted_summary": {
+      "cost_usd_mean": 0.25304,
+      "exact_level_hit_rate_mean": 0.637681,
+      "kendall_tau_mean": 0.829952,
+      "latency_seconds_mean": 221.560386,
+      "max_rank_displacement_mean": 0.521739,
+      "mean_rank_displacement_mean": 0.26087,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.914976,
+      "score_band_mae_mean": 2.844638,
+      "within_one_level_hit_rate_mean": 0.942029
+    },
+    "candidate_mode": "gpt54_split",
+    "candidate_weighted_summary": {
+      "cost_usd_mean": 0.082094,
+      "exact_level_hit_rate_mean": 0.623188,
+      "kendall_tau_mean": 0.731401,
+      "latency_seconds_mean": 133.707057,
+      "max_rank_displacement_mean": 0.971014,
+      "mean_rank_displacement_mean": 0.434783,
+      "model_usage_ratio_mean": 0.995169,
+      "pairwise_order_agreement_mean": 0.865701,
+      "score_band_mae_mean": 4.703333,
+      "within_one_level_hit_rate_mean": 0.884058
+    },
+    "delta": {
+      "cost_usd_mean": -0.170946,
+      "exact_level_hit_rate_mean": -0.014493,
+      "kendall_tau_mean": -0.098551,
+      "latency_seconds_mean": -87.853329,
+      "max_rank_displacement_mean": 0.449275,
+      "mean_rank_displacement_mean": 0.173913,
+      "model_usage_ratio_mean": -0.004831,
+      "pairwise_order_agreement_mean": -0.049275,
+      "score_band_mae_mean": 1.858695,
+      "within_one_level_hit_rate_mean": -0.057971
+    }
+  },
+  "post_calibration_comparison": {
+    "baseline_mode": "gpt52_legacy",
+    "baseline_weighted_summary": {
+      "cost_usd_mean": 0.252486,
+      "exact_level_hit_rate_mean": 0.637681,
+      "kendall_tau_mean": 0.816425,
+      "latency_seconds_mean": 185.495842,
+      "max_rank_displacement_mean": 0.681159,
+      "mean_rank_displacement_mean": 0.318841,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.908213,
+      "score_band_mae_mean": 2.966957,
+      "within_one_level_hit_rate_mean": 0.913043
+    },
+    "candidate_mode": "gpt54_split",
+    "candidate_weighted_summary": {
+      "cost_usd_mean": 0.081478,
+      "exact_level_hit_rate_mean": 0.710145,
+      "kendall_tau_mean": 0.688889,
+      "latency_seconds_mean": 118.505349,
+      "max_rank_displacement_mean": 0.913043,
+      "mean_rank_displacement_mean": 0.463768,
+      "model_usage_ratio_mean": 1.0,
+      "pairwise_order_agreement_mean": 0.844444,
+      "score_band_mae_mean": 3.428406,
+      "within_one_level_hit_rate_mean": 0.913044
+    },
+    "delta": {
+      "cost_usd_mean": -0.171008,
+      "exact_level_hit_rate_mean": 0.072464,
+      "kendall_tau_mean": -0.127536,
+      "latency_seconds_mean": -66.990493,
+      "max_rank_displacement_mean": 0.231884,
+      "mean_rank_displacement_mean": 0.144927,
+      "model_usage_ratio_mean": 0.0,
+      "pairwise_order_agreement_mean": -0.063769,
+      "score_band_mae_mean": 0.461449,
+      "within_one_level_hit_rate_mean": 1e-06
+    }
+  },
+  "post_minus_pre_candidate_metrics": {
+    "exact_level_hit_rate_mean": 0.086957,
+    "within_one_level_hit_rate_mean": 0.028986,
+    "score_band_mae_mean": -1.274927,
+    "mean_rank_displacement_mean": 0.028985,
+    "kendall_tau_mean": -0.042512,
+    "pairwise_order_agreement_mean": -0.021257,
+    "model_usage_ratio_mean": 0.004831,
+    "cost_usd_mean": -0.000616,
+    "latency_seconds_mean": -15.201708
+  },
+  "lagging_datasets": [
+    {
+      "dataset": "internet_samples",
+      "students": 4,
+      "source_family": "unknown",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "unknown",
+      "candidate_vs_baseline_exact_delta": -0.5,
+      "candidate_vs_baseline_mae_delta": 1.2175,
+      "candidate_vs_baseline_kendall_delta": -1.0,
+      "candidate_vs_baseline_pairwise_delta": -0.5,
+      "pre_to_post_candidate_exact_delta": -0.25,
+      "pre_to_post_candidate_mae_delta": 0.3325
+    },
+    {
+      "dataset": "thoughtful_assessment_grade9_10_argument",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "same_rubric_family_cross_topic",
+      "candidate_vs_baseline_exact_delta": -0.25,
+      "candidate_vs_baseline_mae_delta": 5.375,
+      "candidate_vs_baseline_kendall_delta": -0.333333,
+      "candidate_vs_baseline_pairwise_delta": -0.166667,
+      "pre_to_post_candidate_exact_delta": 0.0,
+      "pre_to_post_candidate_mae_delta": 0.75
+    },
+    {
+      "dataset": "thoughtful_assessment_grade11_12_speech",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "same_rubric_family_cross_topic",
+      "candidate_vs_baseline_exact_delta": -0.25,
+      "candidate_vs_baseline_mae_delta": 0.25,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": -0.5,
+      "pre_to_post_candidate_mae_delta": 0.2925
+    },
+    {
+      "dataset": "naep_1998_g8_informative_tv_show",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "informative letter",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": -0.166666,
+      "candidate_vs_baseline_mae_delta": 0.373333,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": -0.333333,
+      "pre_to_post_candidate_mae_delta": -2.963334
+    },
+    {
+      "dataset": "naep_1998_g4_narrative_castle",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "narrative",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 4.051666,
+      "candidate_vs_baseline_kendall_delta": -0.133333,
+      "candidate_vs_baseline_pairwise_delta": -0.066667,
+      "pre_to_post_candidate_exact_delta": 0.166667,
+      "pre_to_post_candidate_mae_delta": 0.316666
+    },
+    {
+      "dataset": "naep_1998_g12_persuasive_one_vote",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "persuasive response",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 1.846667,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.333333,
+      "pre_to_post_candidate_mae_delta": -2.731666
+    },
+    {
+      "dataset": "thoughtful_assessment_grade6_8_instructions_hydrochloric",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "informational_report",
+      "cohort_shape": "same_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.515,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -0.3275
+    }
+  ]
+}

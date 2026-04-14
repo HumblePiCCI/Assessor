@@ -1,0 +1,326 @@
+{
+  "generated_at": "2026-04-09T17:47:47.527929+00:00",
+  "candidate_label": "gpt54_split",
+  "baseline_label": "gpt52_legacy",
+  "family_clusters": [
+    {
+      "family_key": "unknown | argumentative | unknown",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "internet_samples"
+      ],
+      "candidate_vs_baseline_exact_delta": -0.5,
+      "candidate_vs_baseline_mae_delta": 1.2175,
+      "candidate_vs_baseline_kendall_delta": -1.0,
+      "candidate_vs_baseline_pairwise_delta": -0.5,
+      "pre_to_post_candidate_exact_delta": -0.25,
+      "pre_to_post_candidate_mae_delta": 0.3325,
+      "pre_to_post_candidate_kendall_delta": -0.333333,
+      "pre_to_post_candidate_pairwise_delta": -0.166667
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | argumentative | same_rubric_family_cross_topic",
+      "students": 8,
+      "dataset_count": 2,
+      "datasets": [
+        "thoughtful_assessment_grade11_12_speech",
+        "thoughtful_assessment_grade9_10_argument"
+      ],
+      "candidate_vs_baseline_exact_delta": -0.25,
+      "candidate_vs_baseline_mae_delta": 2.8125,
+      "candidate_vs_baseline_kendall_delta": -0.166666,
+      "candidate_vs_baseline_pairwise_delta": -0.083334,
+      "pre_to_post_candidate_exact_delta": -0.25,
+      "pre_to_post_candidate_mae_delta": 0.52125,
+      "pre_to_post_candidate_kendall_delta": -0.166666,
+      "pre_to_post_candidate_pairwise_delta": -0.083334
+    },
+    {
+      "family_key": "NAEP / NCES | informative letter | single_prompt",
+      "students": 6,
+      "dataset_count": 1,
+      "datasets": [
+        "naep_1998_g8_informative_tv_show"
+      ],
+      "candidate_vs_baseline_exact_delta": -0.166666,
+      "candidate_vs_baseline_mae_delta": 0.373333,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": -0.333333,
+      "pre_to_post_candidate_mae_delta": -2.963334,
+      "pre_to_post_candidate_kendall_delta": -0.266667,
+      "pre_to_post_candidate_pairwise_delta": -0.133333
+    },
+    {
+      "family_key": "NAEP / NCES | narrative | single_prompt",
+      "students": 6,
+      "dataset_count": 1,
+      "datasets": [
+        "naep_1998_g4_narrative_castle"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 4.051666,
+      "candidate_vs_baseline_kendall_delta": -0.133333,
+      "candidate_vs_baseline_pairwise_delta": -0.066667,
+      "pre_to_post_candidate_exact_delta": 0.166667,
+      "pre_to_post_candidate_mae_delta": 0.316666,
+      "pre_to_post_candidate_kendall_delta": -0.133333,
+      "pre_to_post_candidate_pairwise_delta": -0.066667
+    },
+    {
+      "family_key": "NAEP / NCES | persuasive response | single_prompt",
+      "students": 6,
+      "dataset_count": 1,
+      "datasets": [
+        "naep_1998_g12_persuasive_one_vote"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 1.846667,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.333333,
+      "pre_to_post_candidate_mae_delta": -2.731666,
+      "pre_to_post_candidate_kendall_delta": 0.133334,
+      "pre_to_post_candidate_pairwise_delta": 0.066666
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | informational_report | same_prompt",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade6_8_instructions_hydrochloric"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.515,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -0.3275,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "EQAO ORQ | argumentative | single_prompt",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "internet_samples_eqao_orq"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.0,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -3.0,
+      "pre_to_post_candidate_kendall_delta": 0.666667,
+      "pre_to_post_candidate_pairwise_delta": 0.333333
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | narrative | same_rubric_family_cross_topic",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade3_personal_narrative"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.0,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.0,
+      "pre_to_post_candidate_mae_delta": 0.0,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | summary_report | same_prompt",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade6_8_summary_iron"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.0,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.0,
+      "pre_to_post_candidate_mae_delta": 0.0,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "unknown | opinion letter | unknown",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "internet_samples_thoughtful"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.0,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -0.3825,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "Standards and Testing Agency / GOV.UK | mixed writing portfolio | portfolio",
+      "students": 7,
+      "dataset_count": 2,
+      "datasets": [
+        "uk_sta_2018_ks1_writing_portfolios",
+        "uk_sta_2018_ks2_writing_portfolios"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.428572,
+      "candidate_vs_baseline_mae_delta": -1.95,
+      "candidate_vs_baseline_kendall_delta": -0.571429,
+      "candidate_vs_baseline_pairwise_delta": -0.285714,
+      "pre_to_post_candidate_exact_delta": 0.0,
+      "pre_to_post_candidate_mae_delta": -0.615714,
+      "pre_to_post_candidate_kendall_delta": -0.190476,
+      "pre_to_post_candidate_pairwise_delta": -0.095238
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | literary_analysis | same_rubric_family_cross_topic",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade2_book_review"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.5,
+      "candidate_vs_baseline_mae_delta": 1.385,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -1.25,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | opinion_letter | same_prompt",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade6_8_persuasive_letter"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.5,
+      "candidate_vs_baseline_mae_delta": -3.9275,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.75,
+      "pre_to_post_candidate_mae_delta": -9.0625,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    },
+    {
+      "family_key": "thoughtful_learning_assessment_models | informational_report | same_rubric_family_cross_topic",
+      "students": 4,
+      "dataset_count": 1,
+      "datasets": [
+        "thoughtful_assessment_grade4_5_research"
+      ],
+      "candidate_vs_baseline_exact_delta": 0.75,
+      "candidate_vs_baseline_mae_delta": -2.85,
+      "candidate_vs_baseline_kendall_delta": 0.333333,
+      "candidate_vs_baseline_pairwise_delta": 0.166667,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -0.2,
+      "pre_to_post_candidate_kendall_delta": 0.0,
+      "pre_to_post_candidate_pairwise_delta": 0.0
+    }
+  ],
+  "lagging_datasets": [
+    {
+      "dataset": "internet_samples",
+      "students": 4,
+      "source_family": "unknown",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "unknown",
+      "candidate_vs_baseline_exact_delta": -0.5,
+      "candidate_vs_baseline_mae_delta": 1.2175,
+      "candidate_vs_baseline_kendall_delta": -1.0,
+      "candidate_vs_baseline_pairwise_delta": -0.5,
+      "pre_to_post_candidate_exact_delta": -0.25,
+      "pre_to_post_candidate_mae_delta": 0.3325
+    },
+    {
+      "dataset": "thoughtful_assessment_grade9_10_argument",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "same_rubric_family_cross_topic",
+      "candidate_vs_baseline_exact_delta": -0.25,
+      "candidate_vs_baseline_mae_delta": 5.375,
+      "candidate_vs_baseline_kendall_delta": -0.333333,
+      "candidate_vs_baseline_pairwise_delta": -0.166667,
+      "pre_to_post_candidate_exact_delta": 0.0,
+      "pre_to_post_candidate_mae_delta": 0.75
+    },
+    {
+      "dataset": "thoughtful_assessment_grade11_12_speech",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "argumentative",
+      "cohort_shape": "same_rubric_family_cross_topic",
+      "candidate_vs_baseline_exact_delta": -0.25,
+      "candidate_vs_baseline_mae_delta": 0.25,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": -0.5,
+      "pre_to_post_candidate_mae_delta": 0.2925
+    },
+    {
+      "dataset": "naep_1998_g8_informative_tv_show",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "informative letter",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": -0.166666,
+      "candidate_vs_baseline_mae_delta": 0.373333,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": -0.333333,
+      "pre_to_post_candidate_mae_delta": -2.963334
+    },
+    {
+      "dataset": "naep_1998_g4_narrative_castle",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "narrative",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 4.051666,
+      "candidate_vs_baseline_kendall_delta": -0.133333,
+      "candidate_vs_baseline_pairwise_delta": -0.066667,
+      "pre_to_post_candidate_exact_delta": 0.166667,
+      "pre_to_post_candidate_mae_delta": 0.316666
+    },
+    {
+      "dataset": "naep_1998_g12_persuasive_one_vote",
+      "students": 6,
+      "source_family": "NAEP / NCES",
+      "assignment_genre": "persuasive response",
+      "cohort_shape": "single_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 1.846667,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.333333,
+      "pre_to_post_candidate_mae_delta": -2.731666
+    },
+    {
+      "dataset": "thoughtful_assessment_grade6_8_instructions_hydrochloric",
+      "students": 4,
+      "source_family": "thoughtful_learning_assessment_models",
+      "assignment_genre": "informational_report",
+      "cohort_shape": "same_prompt",
+      "candidate_vs_baseline_exact_delta": 0.0,
+      "candidate_vs_baseline_mae_delta": 0.515,
+      "candidate_vs_baseline_kendall_delta": 0.0,
+      "candidate_vs_baseline_pairwise_delta": 0.0,
+      "pre_to_post_candidate_exact_delta": 0.25,
+      "pre_to_post_candidate_mae_delta": -0.3275
+    }
+  ]
+}

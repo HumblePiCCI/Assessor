@@ -1,0 +1,33 @@
+{
+  "dataset_name": "naep_1998_g12_persuasive_one_vote",
+  "assessment_unit": "single_prompt",
+  "grade": "Grade 12",
+  "grade_numeric": 12,
+  "country": "United States",
+  "language": "English",
+  "genre_form": "persuasive response",
+  "source_family": "NAEP / NCES",
+  "rubric_family": "NAEP 1998 focused holistic writing scoring",
+  "prompt_shared": true,
+  "sample_count": 6,
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": [
+      "Unsatisfactory",
+      "Insufficient",
+      "Uneven",
+      "Sufficient",
+      "Skillful",
+      "Excellent"
+    ],
+    "numeric_mapping": {
+      "Unsatisfactory": 1,
+      "Insufficient": 2,
+      "Uneven": 3,
+      "Sufficient": 4,
+      "Skillful": 5,
+      "Excellent": 6
+    }
+  },
+  "license_note": "NCES publication. Unless specifically noted, NCES information is in the public domain."
+}

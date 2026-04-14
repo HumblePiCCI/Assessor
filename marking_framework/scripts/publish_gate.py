@@ -210,13 +210,67 @@ def benchmark_mode_summary(report: dict, preferred_mode: str = "") -> tuple[str,
     return "", {}
 
 
+def benchmark_weighted_summary(report: dict, preferred_mode: str = "") -> tuple[str, dict, int, int, int, int]:
+    if not isinstance(report, dict) or not report:
+        return "", {}, 0, 0, 0, 0
+    for key in ("comparison", "current_comparison"):
+        comparison = report.get(key, {})
+        if not isinstance(comparison, dict):
+            continue
+        summary = comparison.get("candidate_weighted_summary", {})
+        if not isinstance(summary, dict) or not summary:
+            continue
+        mode = str(comparison.get("candidate_mode", "") or preferred_mode).strip()
+        runs_attempted = int(report.get("runs_per_dataset_mode", summary.get("runs_attempted", 0)) or 0)
+        runs_successful = int(summary.get("runs_successful", runs_attempted) or 0)
+        failed_dataset_count = len(report.get("failed_datasets", [])) if isinstance(report.get("failed_datasets", []), list) else 0
+        dataset_count = int(report.get("dataset_count", len(report.get("datasets", [])) if isinstance(report.get("datasets", []), list) else 0) or 0)
+        return mode, summary, runs_successful, runs_attempted, failed_dataset_count, dataset_count
+    return "", {}, 0, 0, 0, 0
+
+
 def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
     report = load_json(report_path)
+    weighted_mode, weighted_summary, weighted_runs_successful, weighted_runs_attempted, failed_dataset_count, dataset_count = benchmark_weighted_summary(
+        report, preferred_mode
+    )
+    if weighted_summary:
+        return {
+            "present": True,
+            "mode": weighted_mode,
+            "runs_successful": weighted_runs_successful,
+            "runs_attempted": weighted_runs_attempted,
+            "exact_level_hit_rate": float(weighted_summary.get("exact_level_hit_rate_mean", weighted_summary.get("exact_level_hit_rate", 0.0)) or 0.0),
+            "within_one_level_hit_rate": float(
+                weighted_summary.get("within_one_level_hit_rate_mean", weighted_summary.get("within_one_level_hit_rate", 0.0)) or 0.0
+            ),
+            "score_band_mae": float(weighted_summary.get("score_band_mae_mean", weighted_summary.get("score_band_mae", 0.0)) or 0.0),
+            "mean_rank_displacement": float(
+                weighted_summary.get("mean_rank_displacement_mean", weighted_summary.get("mean_rank_displacement", 0.0)) or 0.0
+            ),
+            "kendall_tau": float(weighted_summary.get("kendall_tau_mean", weighted_summary.get("kendall_tau", 0.0)) or 0.0),
+            "pairwise_order_agreement": float(
+                weighted_summary.get("pairwise_order_agreement_mean", weighted_summary.get("pairwise_order_agreement", 0.0)) or 0.0
+            ),
+            "model_usage_ratio": float(weighted_summary.get("model_usage_ratio_mean", weighted_summary.get("model_usage_ratio", 0.0)) or 0.0),
+            "cost_usd": float(weighted_summary.get("cost_usd_mean", weighted_summary.get("cost_usd", 0.0)) or 0.0),
+            "latency_seconds": float(weighted_summary.get("latency_seconds_mean", weighted_summary.get("latency_seconds", 0.0)) or 0.0),
+            "mean_student_level_variance": 0.0,
+            "mean_student_rank_variance": 0.0,
+            "mean_student_score_variance": 0.0,
+            "mean_student_level_sd": 0.0,
+            "mean_student_rank_sd": 0.0,
+            "mean_student_score_sd": 0.0,
+            "failed_dataset_count": failed_dataset_count,
+            "dataset_count": dataset_count,
+        }
     label, summary = benchmark_mode_summary(report, preferred_mode)
     stability = summary.get("stability", {}) if isinstance(summary, dict) else {}
     level_variance = float(stability.get("mean_student_level_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
     rank_variance = float(stability.get("mean_student_rank_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
     score_variance = float(stability.get("mean_student_score_variance", 0.0) or 0.0) if isinstance(stability, dict) else 0.0
+    failed_dataset_count = len(report.get("failed_datasets", [])) if isinstance(report.get("failed_datasets", []), list) else 0
+    dataset_count = int(report.get("dataset_count", len(report.get("datasets", [])) if isinstance(report.get("datasets", []), list) else 0) or 0)
     return {
         "present": bool(summary),
         "mode": label,
@@ -237,6 +291,8 @@ def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
         "mean_student_level_sd": level_variance ** 0.5,
         "mean_student_rank_sd": rank_variance ** 0.5,
         "mean_student_score_sd": score_variance ** 0.5,
+        "failed_dataset_count": failed_dataset_count,
+        "dataset_count": dataset_count,
     }
 
 
@@ -364,6 +420,8 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     if metrics["benchmark_report_present"]:
         if metrics["benchmark_runs_successful"] < int(thresholds.get("benchmark_min_runs_successful", 0)):
             failures.append("benchmark_runs_successful_below_threshold")
+        if metrics.get("benchmark_failed_dataset_count", 0) > int(thresholds.get("benchmark_max_failed_datasets", 999999)):
+            failures.append("benchmark_failed_datasets_above_threshold")
         if metrics["benchmark_exact_level_hit_rate"] < float(thresholds.get("benchmark_min_exact_level_hit_rate", 0.0)):
             failures.append("benchmark_exact_level_hit_rate_below_threshold")
         if metrics["benchmark_within_one_level_hit_rate"] < float(thresholds.get("benchmark_min_within_one_level_hit_rate", 0.0)):
@@ -415,6 +473,8 @@ def build_profile_metrics(
             "benchmark_mode": benchmark.get("mode", ""),
             "benchmark_runs_successful": int(benchmark.get("runs_successful", 0) or 0),
             "benchmark_runs_attempted": int(benchmark.get("runs_attempted", 0) or 0),
+            "benchmark_failed_dataset_count": int(benchmark.get("failed_dataset_count", 0) or 0),
+            "benchmark_dataset_count": int(benchmark.get("dataset_count", 0) or 0),
             "benchmark_exact_level_hit_rate": float(benchmark.get("exact_level_hit_rate", 0.0) or 0.0),
             "benchmark_within_one_level_hit_rate": float(benchmark.get("within_one_level_hit_rate", 0.0) or 0.0),
             "benchmark_score_band_mae": float(benchmark.get("score_band_mae", 0.0) or 0.0),
@@ -496,6 +556,8 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "calibration_synthetic",
         "calibration_generated_age_hours",
         "benchmark_mode",
+        "benchmark_failed_dataset_count",
+        "benchmark_dataset_count",
         "benchmark_runs_successful",
         "benchmark_exact_level_hit_rate",
         "benchmark_within_one_level_hit_rate",

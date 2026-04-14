@@ -2,7 +2,6 @@
 import json
 from pathlib import Path
 
-from scripts.assessor_context import grade_band_for_level, normalize_genre
 from scripts.calibration_contract import (
     build_calibration_manifest,
     build_run_scope,
@@ -23,17 +22,19 @@ def _read_json(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _scope_from_metadata(metadata: dict) -> str:
-    grade_level = metadata.get("grade_level")
-    try:
-        grade_level = int(grade_level) if grade_level is not None else None
-    except (TypeError, ValueError):
-        grade_level = None
-    genre = normalize_genre(metadata.get("genre") or metadata.get("assignment_genre"))
-    band = grade_band_for_level(grade_level)
-    if band and genre:
-        return f"{band}|{genre}"
-    return "grade_6_7|literary_analysis"
+def _bootstrap_run_scope(root: Path, metadata: dict, rubric_manifest: dict | None = None) -> dict:
+    routing = load_json(root / "config" / "llm_routing.json")
+    manifest = rubric_manifest if isinstance(rubric_manifest, dict) else _read_json(root / "outputs" / "rubric_manifest.json")
+    scoped_metadata = dict(metadata or {})
+    if str(scoped_metadata.get("generated_by") or "").strip().lower() == "bootstrap":
+        scoped_metadata.pop("genre", None)
+        scoped_metadata.pop("assignment_genre", None)
+    return build_run_scope(
+        metadata=scoped_metadata,
+        routing=routing,
+        rubric_path=root / "inputs" / "rubric.md",
+        rubric_manifest=manifest,
+    )
 
 
 def ensure_class_metadata(inputs_dir: Path) -> dict:
@@ -53,9 +54,9 @@ def ensure_class_metadata(inputs_dir: Path) -> dict:
     return metadata
 
 
-def _bootstrap_manifest_payload(root: Path, metadata: dict, bias_payload: dict, synthetic: bool = True) -> dict:
+def _bootstrap_manifest_payload(root: Path, metadata: dict, bias_payload: dict, synthetic: bool = True, rubric_manifest: dict | None = None) -> dict:
     routing = load_json(root / "config" / "llm_routing.json")
-    run_scope = build_run_scope(metadata=metadata, routing=routing, rubric_path=root / "inputs" / "rubric.md")
+    run_scope = _bootstrap_run_scope(root, metadata, rubric_manifest=rubric_manifest)
     scope_coverage = infer_scope_coverage_from_bias(bias_payload, run_scope=run_scope, synthetic=synthetic)
     if not scope_coverage:
         samples = int((bias_payload.get("summary", {}) or {}).get("samples", 0) or 0)
@@ -73,9 +74,15 @@ def _bootstrap_manifest_payload(root: Path, metadata: dict, bias_payload: dict, 
     )
 
 
-def _write_manifest_for_bias(root: Path, bias_path: Path, bias_payload: dict, synthetic: bool = True) -> Path:
+def _write_manifest_for_bias(root: Path, bias_path: Path, bias_payload: dict, synthetic: bool = True, rubric_manifest: dict | None = None) -> Path:
     manifest_path = calibration_manifest_path(bias_path)
-    manifest = _bootstrap_manifest_payload(root, ensure_class_metadata(root / "inputs"), bias_payload, synthetic=synthetic)
+    manifest = _bootstrap_manifest_payload(
+        root,
+        ensure_class_metadata(root / "inputs"),
+        bias_payload,
+        synthetic=synthetic,
+        rubric_manifest=rubric_manifest,
+    )
     manifest["artifact_hashes"]["calibration_bias_sha256"] = file_sha256(bias_path)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest_path
@@ -87,14 +94,27 @@ def ensure_bootstrap_calibration(root: Path, metadata: dict, assessors: list[str
     outputs_dir.mkdir(parents=True, exist_ok=True)
     path = outputs_dir / "calibration_bias.json"
     manifest_path = calibration_manifest_path(path)
-    if path.exists() and manifest_path.exists():
-        return path
-    if path.exists() and not manifest_path.exists():
+    rubric_manifest = _read_json(root / "outputs" / "rubric_manifest.json")
+    run_scope = _bootstrap_run_scope(root, metadata, rubric_manifest=rubric_manifest)
+    scope = str(run_scope.get("key") or "grade_6_7|literary_analysis")
+    if path.exists():
         payload = _read_json(path)
         synthetic = bool(payload.get("synthetic", payload.get("method") == "bootstrap_neutral"))
-        _write_manifest_for_bias(root, path, payload, synthetic=synthetic)
-        return path
-    scope = _scope_from_metadata(metadata)
+        assessors_payload = payload.get("assessors", {}) if isinstance(payload.get("assessors"), dict) else {}
+        assessor_scope_match = bool(assessors_payload) and all(
+            isinstance(entry, dict) and scope in ((entry.get("scopes") or {}) if isinstance(entry.get("scopes"), dict) else {})
+            for entry in assessors_payload.values()
+        )
+        manifest_payload = _read_json(manifest_path) if manifest_path.exists() else {}
+        manifest_scope_match = any(
+            isinstance(entry, dict) and str(entry.get("key") or "") == scope
+            for entry in (manifest_payload.get("scope_coverage", []) if isinstance(manifest_payload.get("scope_coverage", []), list) else [])
+        )
+        if manifest_path.exists() and (not synthetic or (assessor_scope_match and manifest_scope_match)):
+            return path
+        if not manifest_path.exists() and synthetic and assessor_scope_match:
+            _write_manifest_for_bias(root, path, payload, synthetic=synthetic, rubric_manifest=rubric_manifest)
+            return path
     profile = {
         "bias": 0.0,
         "slope": 1.0,
@@ -125,5 +145,5 @@ def ensure_bootstrap_calibration(root: Path, metadata: dict, assessors: list[str
         payload["summary"]["samples"] += int(profile["samples"])
         payload["summary"]["scope_coverage"][scope] += int(profile["samples"])
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    _write_manifest_for_bias(root, path, payload, synthetic=True)
+    _write_manifest_for_bias(root, path, payload, synthetic=True, rubric_manifest=rubric_manifest)
     return path

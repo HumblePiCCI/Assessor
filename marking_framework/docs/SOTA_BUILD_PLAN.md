@@ -2,7 +2,7 @@
 
 Status
 - State: active working plan
-- Last updated: 2026-03-30
+- Last updated: 2026-03-31
 - Intended use: canonical continuation document for architecture, sequencing, and acceptance criteria across future sessions
 
 ## Purpose
@@ -31,8 +31,9 @@ The original eight implementation phases are now in the repo:
 - Phase 8: aggregate review learning governance
 - Phase 9: production hardening and launch contract
 - Phase 10: rubric ingestion, normalization, and verification
+- Phase 11: scope-native scoring and boundary calibration
 
-The planned in-repo implementation phases are now complete.
+The original production-foundation phases are complete in-repo. The next in-repo phase is accuracy refinement against the expanded external gold corpus.
 
 The production-hardening track is complete in-repo, including the rubric-contract layer that bounds rubric variability before scoring.
 
@@ -60,7 +61,11 @@ The remaining work before a real rollout is environmental and operational:
 - run the launch validator against the real release candidate
 - rehearse the rollback flow against the deployment environment
 
-The remaining in-repo work is no longer a missing product-quality phase; it is release execution against the production contract.
+The remaining in-repo work is now accuracy refinement and corpus-driven evaluation hardening:
+- broaden scoring context across earlier grades and more writing forms
+- reduce over-anchoring when exemplar scope is weak or cross-band
+- add boundary calibration so strong relative ordering produces stronger exact-level hit
+- extend benchmark and gate visibility by source family, grade band, and form
 
 ## Working Definition Of SOTA For This Repo
 
@@ -868,45 +873,109 @@ Test plan
 Exit condition
 - the runtime consumes a verified normalized rubric contract rather than raw rubric text alone
 
+### Phase 11: Scope-Native Scoring And Boundary Calibration
+
+Goal
+- improve exact leveling on the expanded external corpus without sacrificing ranking quality
+
+Primary files
+- `scripts/assessor_context.py`
+- `scripts/run_llm_assessors.py`
+- `scripts/pass1_guard.py`
+- `scripts/pass1_reconcile.py`
+- `scripts/aggregate_assessments.py`
+- `scripts/review_and_grade.py`
+- `config/rubric_criteria.json`
+- `config/llm_routing_benchmark.json`
+- benchmark reports under `docs/reports/`
+
+Build tasks
+
+1. Expand scope-native routing
+   - support earlier grade bands in scorer context
+   - normalize more real-world genres and forms
+   - prefer nearest valid exemplar scope instead of a hard-coded older-student fallback
+
+2. Thread genre into criterion scoring
+   - stop discarding resolved genre when building criteria prompts
+   - add form-specific criteria for common benchmark families:
+     - narrative
+     - book review
+     - informative letter
+     - summary
+     - instructions
+     - speech
+
+3. Reduce anchor dominance when scope match is weak
+   - treat the deterministic scorer as a sanity check, not the main shaper of pass-1 scores
+   - reduce or remove anchor blend when the resolved exemplar scope is cross-band, root-level, or missing
+
+4. Add boundary calibration
+   - separate good ordering from exact-level assignment
+   - calibrate final level decisions from score, pairwise support, confidence, grade band, genre, and rubric family
+
+5. Add family-aware evaluation
+   - report benchmark metrics by source family, grade band, and form
+   - track top-band compression rate and guard-clipping rate
+
+6. Add portfolio-aware handling
+   - detect multi-piece portfolio submissions
+   - score constituent pieces before aggregating the portfolio judgment
+
+Acceptance criteria
+- earlier-grade and non-essay benchmark families no longer route through a coarse secondary-only scorer path
+- resolved genre affects criterion prompting directly
+- weak exemplar matches cannot silently overrule strong model judgments through the pass-1 guard
+- exact-level hit improves on the external corpus without degrading pairwise agreement or rerun stability
+
+Test plan
+- early-grade and cross-band exemplar-routing tests
+- genre-aware prompt-construction tests
+- weak-scope guard-behavior tests
+- calibration regression tests on previously compressed top-band examples
+- family-level benchmark summary tests
+
+Exit condition
+- the scorer is scope-aware enough that remaining benchmark misses are mostly true judgment gaps, not routing or guard artifacts
+
 ## Sequencing
 
 The remaining implementation order is:
 
-1. Live rollout rehearsal against the production contract
-2. Phase 10: rubric ingestion, normalization, and verification
+1. Phase 11: scope-native scoring and boundary calibration
+2. Live rollout rehearsal against the production contract
 
 Why this order:
-- live rollout rehearsal closes the environment-specific deployment gap
-- Phase 10 closes the next major input-quality gap in the scoring pipeline
+- Phase 11 addresses the highest-value accuracy gap surfaced by the expanded explicit-gold corpus
+- live rollout rehearsal closes the environment-specific deployment gap after the scoring path is stronger
 
 ## Immediate Next Sprint
 
-The next sprint should start the rubric contract layer.
+The next sprint should start the highest-leverage slice of Phase 11.
 
 ### Sprint Goal
 
-Convert messy real teacher rubric uploads into a normalized, teacher-confirmed runtime rubric contract.
+Improve exact leveling on the expanded external corpus by fixing scope routing, threading genre into criteria, and reducing over-anchoring when exemplar scope is weak.
 
 ### Sprint Scope
 
-1. Add multi-format rubric extraction and OCR fallback
-2. Define the canonical normalized-rubric schema
-3. Emit validation and verification artifacts
-4. Add teacher confirm/edit UI for interpreted rubrics
-5. Feed confirmed rubric manifests into the queue, cache key, and assessor/calibration path
+1. Expand grade-band routing to include early grades and nearest-band fallback
+2. Add more real-world genre normalization and form-specific criteria
+3. Pass resolved genre into criterion prompting
+4. Make pass-1 guard scope-sensitive so weak exemplar matches do not dominate scoring
 
 ### Sprint Deliverables
 
-- normalized rubric schema and manifests
-- rubric verification summary and confirmation state
-- queue-integrated rubric manifest hashing
-- teacher-facing confirm/edit surface for interpreted rubrics
+- expanded scope-routing helpers and tests
+- genre-aware criteria prompts and form-specific criterion definitions
+- scope-sensitive pass-1 guard behavior
+- updated benchmark-ready architecture notes in this plan
 
 ### Sprint Exit Criteria
 
-- rubric variability is bounded before scoring begins
-- teacher confirmation is fast and low-friction
-- rubric interpretation is inspectable, versioned, and testable
+- early-grade and non-traditional forms no longer fall through to obviously poor scope matches
+- pass-1 no longer blends aggressively toward fallback anchors on cross-band scope
+- the scorer is ready for the next slice: explicit boundary calibration
 
 ## Engineering Rules While Executing This Plan
 
@@ -950,6 +1019,7 @@ Use this section as the running status checkpoint.
 - Phase 8: completed
 - Phase 9: completed
 - Phase 10: completed
+- Phase 11: in progress
 
 ### Latest Confirmed Improvements
 
@@ -967,12 +1037,15 @@ Use this section as the running status checkpoint.
 - aggregate review learning now enforces finalized-only anonymized eligibility, project-level collection policy, provenance/retention manifests, governed export and ingestion packages, and adjudication-required promotion staging for benchmark, boundary, and calibration candidates
 - production runtime now enforces strict identity-aware auth in staging/production, isolates projects and teacher workspaces, emits queue ops and retention reports, validates launch readiness, and generates rollback plans
 - rubric ingestion now supports multi-format extraction, normalized rubric manifests, verification artifacts, paused low-confidence confirmation, teacher edits, and runtime consumption of the verified rubric contract
+- Phase 11 has started with broader grade/genre routing, genre-aware criterion prompting, and scope-sensitive pass-1 guard behavior to reduce benchmark compression from weak exemplar matches
 
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
+- exemplar coverage is still thinner than the benchmark corpus for early grades, portfolios, and some specialized forms, so routing improvements will need to be followed by richer exemplar and calibration banks
+- exact-level calibration still lags ordering quality on parts of the public corpus, especially top-band cases
 
 ### Next Decision Point
 
-Run the production launch validator and release rehearsal against the live environment, including real rubric uploads across the supported file formats.
+Run the external corpus again after the Phase 11 slice lands, inspect remaining misses by source family and form, then decide whether the next implementation slice is boundary calibration, portfolio mode, or exemplar-bank expansion.

@@ -37,7 +37,18 @@ def estimate_cost(input_tokens: int, output_tokens: int, model: str, pricing: di
     return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
 
 
-def preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits, grade_context="", exemplars=""):
+def preflight_costs(
+    texts,
+    rubric,
+    outline,
+    summaries,
+    routing,
+    pricing,
+    limits,
+    grade_context="",
+    exemplars="",
+    student_count_override: int | None = None,
+):
     pass1_model = routing["tasks"]["pass1_assessor"]["model"]
     pass2_model = routing["tasks"]["pass2_ranker"]["model"]
     pass1_out_est = limits.get("estimates", {}).get("pass1_output_tokens", 300)
@@ -72,7 +83,7 @@ def preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits,
             "reason": f"Pass2 call exceeds per_call_max_tokens ({total_pass2_tokens} > {max_call_tokens}). Reduce summaries or raise limit."
         }
     pass2_cost = estimate_cost(pass2_input_tokens, pass2_out_est, pass2_model, pricing)
-    num_students = len(texts)
+    num_students = int(student_count_override or len(texts) or 0)
     per_student_cost = (sum(pass1_per_student_costs.values()) + pass2_cost) / max(1, num_students)
     total_cost = sum(pass1_per_student_costs.values()) + pass2_cost
     return {
@@ -88,7 +99,7 @@ def preflight_costs(texts, rubric, outline, summaries, routing, pricing, limits,
 
 def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: str, text: str,
                        grade_context: str = "", exemplars: str = "", criteria_block: str = "",
-                       evidence_reqs: dict | None = None) -> str:
+                       evidence_reqs: dict | None = None, notes_word_limit: int | None = None) -> str:
     context = ""
     if grade_context:
         context += grade_context.strip() + "\n\n"
@@ -98,6 +109,9 @@ def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: st
         context += criteria_block.strip() + "\n\n"
     evidence_note = ""
     evidence_field = ""
+    notes_note = ""
+    if isinstance(notes_word_limit, int) and notes_word_limit > 0:
+        notes_note = f'Keep "notes" under {notes_word_limit} words.\n'
     if evidence_reqs:
         min_words = evidence_reqs.get("rationale_min_words", 0)
         evidence_field = '  "criteria_evidence": [],\n'
@@ -125,9 +139,13 @@ Return ONLY valid JSON in this exact format:
 {{
   "student_id": "{student_id}",
   "rubric_total_points": <number 0-100 percent>,
-  "criteria_points": {{}},
+  "criteria_points": [
+    {{"criterion_id": "K1", "score": 75}},
+    {{"criterion_id": "K2", "score": 60}}
+  ],
 {evidence_field}  "notes": "short justification"
 }}
+{notes_note}Keep criteria_points compact and only include criterion rows you actually scored.
 {evidence_note}
 """
 
@@ -206,6 +224,7 @@ def _normalize_for_match(text: str) -> str:
 def parse_pass1_item(text: str, student_id: str, required_ids: list | None = None,
                      reqs: dict | None = None, essay_text: str = "", strict: bool = True) -> dict:
     lookup = criterion_lookup(required_ids)
+    expected_keys = ("student_id", "rubric_total_points", "criteria_points", "notes")
     try:
         item = json_from_text(text)
     except ValueError:
@@ -214,8 +233,17 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
         item = rescue_pass1_item(text, student_id, required_ids)
         if item.get("rubric_total_points") is None and not item.get("criteria_points"):
             raise ValueError("Unable to parse pass1 response.")
+    else:
+        if not isinstance(item, dict) or not any(key in item for key in expected_keys):
+            if strict:
+                raise ValueError("Unable to parse pass1 response.")
+            item = rescue_pass1_item(text, student_id, required_ids)
+        elif not strict and any(key not in item for key in expected_keys):
+            rescued = rescue_pass1_item(text, student_id, required_ids)
+            if rescued.get("rubric_total_points") is not None or rescued.get("criteria_points"):
+                item = rescued
     if strict:
-        missing = [k for k in ("student_id", "rubric_total_points", "criteria_points", "notes") if k not in item]
+        missing = [k for k in expected_keys if k not in item]
         if missing:
             raise ValueError(f"Pass1 response missing keys: {', '.join(missing)}")
     else:
@@ -296,7 +324,8 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
                     continue
                 errors.append(f"Quote not found for {entry.get('criterion_id')}")
         if errors:
-            if strict:
+            hard_fail = bool((reqs or {}).get("hard_fail_on_evidence_errors", False))
+            if strict or hard_fail:
                 raise ValueError("Pass1 evidence invalid: " + "; ".join(errors[:5]))
             item.setdefault("warnings", [])
             item["warnings"].extend(errors)
@@ -320,11 +349,34 @@ def parse_pass1_item(text: str, student_id: str, required_ids: list | None = Non
     return item
 
 
-def build_pass1_repair_prompt(student_id: str, raw: str, require_evidence: bool) -> str:
+def build_pass1_repair_prompt(
+    student_id: str,
+    raw: str,
+    require_evidence: bool,
+    context_prompt: str | None = None,
+    *,
+    error_hint: str = "",
+    notes_word_limit: int | None = None,
+) -> str:
     base = ("You returned invalid JSON. Return ONLY valid JSON with keys "
             "student_id, rubric_total_points, criteria_points, notes")
     if require_evidence:
         base += ", criteria_evidence"
+    base += '. "criteria_points" must be an array of {"criterion_id","score"} objects using 0-100 scores.'
+    if isinstance(notes_word_limit, int) and notes_word_limit > 0:
+        base += f' Keep "notes" under {notes_word_limit} words.'
+    if error_hint:
+        base += f" {error_hint.strip()}"
+    if context_prompt:
+        return (
+            base
+            + f'. Student ID must be "{student_id}".\n\n'
+            + "Re-score the same submission from scratch using the original context below.\n\n"
+            + context_prompt.rstrip()
+            + "\n\nPrevious invalid output:\n"
+            + raw
+            + "\n"
+        )
     return base + f'. Student ID must be "{student_id}".\n\nPrevious output:\n{raw}\n'
 
 

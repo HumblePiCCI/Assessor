@@ -3,6 +3,7 @@ import argparse
 import csv
 import json
 import math
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -330,6 +331,88 @@ def level_boundaries_from_config(config: dict) -> list[float]:
     return ordered[1:] if len(ordered) > 1 else [60.0, 70.0, 80.0, 90.0]
 
 
+def is_boundary_row(row: dict, boundaries: list[float], *, margin: float = 1.5) -> bool:
+    score = num(row.get("_rubric_after_penalty_percent"), num(row.get("rubric_after_penalty_percent"), 0.0))
+    return any(abs(score - edge) <= float(margin) for edge in boundaries)
+
+
+def pairwise_conflict_stats(rows: list[dict], comparisons: list[dict], boundaries: list[float], *, boundary_margin: float = 1.5) -> tuple[dict[str, dict], dict]:
+    rows_by_id = {row["student_id"]: row for row in rows}
+    per_student = {
+        sid: {
+            "conflict_pairs": 0,
+            "incident_pairs": 0,
+            "boundary_conflict_pairs": 0,
+            "pairwise_conflict_density": 0.0,
+        }
+        for sid in rows_by_id
+    }
+    total_pairs = 0
+    conflicting_pairs = 0
+    boundary_disagreements = 0
+    total_disagreements = 0
+    for item in comparisons:
+        left, right = item["pair"]
+        total_pairs += 1
+        left_over_right = float(item.get("left_over_right", 0.0) or 0.0)
+        right_over_left = float(item.get("right_over_left", 0.0) or 0.0)
+        has_conflict = left_over_right > 0.0 and right_over_left > 0.0
+        left_row = rows_by_id[left]
+        right_row = rows_by_id[right]
+        score_gap = abs(float(left_row["_rubric_after_penalty_percent"]) - float(right_row["_rubric_after_penalty_percent"]))
+        level_gap = abs(float(left_row["_level_order"]) - float(right_row["_level_order"]))
+        boundary_pair = (
+            level_gap <= 1.0
+            and (
+                score_gap <= 3.0
+                or is_boundary_row(left_row, boundaries, margin=boundary_margin)
+                or is_boundary_row(right_row, boundaries, margin=boundary_margin)
+            )
+        )
+        for sid in (left, right):
+            per_student[sid]["incident_pairs"] += 1
+        if has_conflict:
+            conflicting_pairs += 1
+            total_disagreements += 1
+            for sid in (left, right):
+                per_student[sid]["conflict_pairs"] += 1
+            if boundary_pair:
+                boundary_disagreements += 1
+                for sid in (left, right):
+                    per_student[sid]["boundary_conflict_pairs"] += 1
+    for sid, stats in per_student.items():
+        incidents = int(stats["incident_pairs"] or 0)
+        conflicts = int(stats["conflict_pairs"] or 0)
+        stats["pairwise_conflict_density"] = round((conflicts / incidents) if incidents else 0.0, 6)
+    summary = {
+        "comparison_count": total_pairs,
+        "conflicting_pairs": conflicting_pairs,
+        "pairwise_conflict_density": round((conflicting_pairs / total_pairs) if total_pairs else 0.0, 6),
+        "boundary_disagreements": boundary_disagreements,
+        "total_disagreements": total_disagreements,
+        "boundary_disagreement_concentration": round((boundary_disagreements / total_disagreements) if total_disagreements else 0.0, 6),
+    }
+    return per_student, summary
+
+
+def student_stability_penalty(row: dict, per_student: dict) -> float:
+    sid = row["student_id"]
+    metrics = per_student.get(sid, {}) if isinstance(per_student, dict) else {}
+    rubric_sd = num(row.get("rubric_sd_points"), 0.0)
+    rank_sd = num(row.get("rank_sd"), 0.0)
+    flags = {token.strip() for token in str(row.get("flags", "") or "").split(";") if token.strip()}
+    conflict_density = num(metrics.get("pairwise_conflict_density"), 0.0)
+    penalty = 0.0
+    penalty += min(0.35, rubric_sd / 10.0 * 0.35)
+    penalty += min(0.2, rank_sd / 3.0 * 0.2)
+    penalty += min(0.25, conflict_density * 0.25)
+    if "high_disagreement" in flags:
+        penalty += 0.1
+    if "boundary_case" in flags:
+        penalty += 0.05
+    return round(min(0.75, penalty), 6)
+
+
 def optimize_scores(
     student_ids: list[str],
     prior_scores: dict[str, float],
@@ -376,11 +459,16 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
     caps = {}
     for row in rows:
         sid = row["student_id"]
+        stability_penalty = student_stability_penalty(row, per_student)
         incident = float(per_student.get(sid, {}).get("incident_weight", 0.0) or 0.0)
-        if incident >= 2.5:
-            cap = min(count, max(1, int(high_cap)))
+        effective_incident = incident * max(0.25, 1.0 - stability_penalty)
+        if effective_incident >= 2.5:
+            high_cap_effective = min(count, max(1, int(high_cap)))
+            if stability_penalty >= 0.35:
+                high_cap_effective = min(high_cap_effective, max(int(medium_cap), 4))
+            cap = high_cap_effective
             label = "high_support"
-        elif incident >= 1.0:
+        elif effective_incident >= 1.0:
             cap = min(count, max(1, int(medium_cap)))
             label = "medium_support"
         else:
@@ -392,6 +480,8 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
             "label": label,
             "best_rank": max(1, seed_rank - cap),
             "worst_rank": min(count, seed_rank + cap),
+            "stability_penalty": stability_penalty,
+            "effective_incident_weight": round(effective_incident, 6),
         }
     return caps
 
@@ -495,6 +585,11 @@ def build_constraints(
                 continue
             if higher["_level_order"] <= lower["_level_order"]:
                 continue
+            stability_penalty = (
+                float(caps.get(lower["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
+                + float(caps.get(higher["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
+            ) / 2.0
+            dynamic_margin = float(min_crossing_margin) * (1.0 + stability_penalty)
             allowed, detail = crossing_allowed(
                 lower,
                 higher,
@@ -502,8 +597,10 @@ def build_constraints(
                 raw_scores,
                 max_cross_level_gap=max_cross_level_gap,
                 max_cross_rubric_gap=max_cross_rubric_gap,
-                min_crossing_margin=min_crossing_margin,
+                min_crossing_margin=dynamic_margin,
             )
+            detail["dynamic_margin"] = round(dynamic_margin, 6)
+            detail["stability_penalty"] = round(stability_penalty, 6)
             if allowed:
                 allowed_crossings.append(detail)
                 continue
@@ -736,15 +833,33 @@ def run_global_rerank(
     rows_by_id = {row["student_id"]: row for row in rows}
     raw_judgment_payload, judgments = load_judgments(judgments_path, rows_by_id)
     matrix, per_student, directional = build_pairwise_matrix(rows, judgments)
+    boundary_conflicts, conflict_summary = pairwise_conflict_stats(
+        rows,
+        matrix.get("comparisons", []),
+        level_boundaries_from_config(config if isinstance(config, dict) else {}),
+    )
+    for sid, stats in boundary_conflicts.items():
+        existing = per_student.setdefault(sid, {})
+        existing.update(stats)
     base_prior_scores = build_prior_scores(rows)
     local_prior_payload = load_json(local_prior_path)
-    teacher_adjustments, teacher_meta = compute_teacher_preference_adjustments(
-        rows,
-        per_student,
-        local_prior_payload,
-        current_scope=current_run_scope(scores_path),
-        boundaries=level_boundaries_from_config(config if isinstance(config, dict) else {}),
-    )
+    anchor_active = str(os.environ.get("ANCHOR_CALIBRATION_ACTIVE", "") or "").strip().lower() in {"1", "true", "yes"}
+    if anchor_active:
+        teacher_adjustments = {row["student_id"]: 0.0 for row in rows}
+        teacher_meta = {
+            "active": False,
+            "scope_match": True,
+            "reason": "suppressed_by_anchor_calibration",
+            "students": {},
+        }
+    else:
+        teacher_adjustments, teacher_meta = compute_teacher_preference_adjustments(
+            rows,
+            per_student,
+            local_prior_payload,
+            current_scope=current_run_scope(scores_path),
+            boundaries=level_boundaries_from_config(config if isinstance(config, dict) else {}),
+        )
     prior_scores = {
         sid: round(float(base_prior_scores.get(sid, 0.0) or 0.0) + float(teacher_adjustments.get(sid, 0.0) or 0.0), 6)
         for sid in base_prior_scores
@@ -789,6 +904,8 @@ def run_global_rerank(
     )
     final_rank_map = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
     agreement = pairwise_agreement(final_rank_map, judgments)
+    swap_count = sum(1 for judgment in judgments if judgment.get("decision") == "SWAP")
+    low_confidence_count = sum(1 for judgment in judgments if judgment.get("confidence") == "low")
     movements = [
         {
             "student_id": row["student_id"],
@@ -803,6 +920,9 @@ def run_global_rerank(
             "opposition_weight": row["rerank_opposition_weight"],
             "teacher_preference_adjustment": row["teacher_preference_adjustment"],
             "teacher_preference_uncertainty_gate": row["teacher_preference_uncertainty_gate"],
+            "pairwise_conflict_density": round(float(per_student.get(row["student_id"], {}).get("pairwise_conflict_density", 0.0) or 0.0), 6),
+            "boundary_conflict_pairs": int(per_student.get(row["student_id"], {}).get("boundary_conflict_pairs", 0) or 0),
+            "stability_penalty": round(float(caps.get(row["student_id"], {}).get("stability_penalty", 0.0) or 0.0), 6),
             "notes": row["rerank_notes"].split(";") if row["rerank_notes"] else [],
         }
         for row in final_rows
@@ -834,8 +954,13 @@ def run_global_rerank(
             "judgment_count": len(judgments),
             "comparison_count": matrix["comparison_count"],
             "pairwise_agreement_with_final_order": agreement,
+            "swap_rate": round((swap_count / len(judgments)) if judgments else 0.0, 6),
+            "low_confidence_rate": round((low_confidence_count / len(judgments)) if judgments else 0.0, 6),
             "max_displacement": max(abs(int(row["rerank_displacement"])) for row in final_rows),
             "mean_abs_displacement": round(sum(abs(int(row["rerank_displacement"])) for row in final_rows) / len(final_rows), 6),
+            "mean_stability_penalty": round(sum(float(caps[row["student_id"]]["stability_penalty"]) for row in rows) / len(rows), 6),
+            "pairwise_conflict_density": conflict_summary["pairwise_conflict_density"],
+            "boundary_disagreement_concentration": conflict_summary["boundary_disagreement_concentration"],
             "level_lock_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"] == "level_lock"),
             "strong_pairwise_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"] == "strong_pairwise_evidence"),
             "cap_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"].startswith("displacement_cap")),
@@ -851,6 +976,7 @@ def run_global_rerank(
             "reason": str(teacher_meta.get("reason", "") or "") if isinstance(teacher_meta, dict) else "",
             "weights": local_prior_payload.get("weights", {}) if isinstance(local_prior_payload, dict) else {},
             "support": local_prior_payload.get("support", {}) if isinstance(local_prior_payload, dict) else {},
+            "suppressed_by_anchor_calibration": anchor_active,
         },
         "raw_judgments": {
             "generated_at": raw_judgment_payload.get("generated_at", ""),

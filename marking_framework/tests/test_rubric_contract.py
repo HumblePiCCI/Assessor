@@ -66,6 +66,46 @@ def test_extract_document_text_supports_pdf_and_image_via_fallbacks(tmp_path, mo
     assert image_meta["methods"] == ["tesseract"]
 
 
+def test_pdf_extraction_rejects_raw_pdf_payload_and_uses_ghostscript(tmp_path, monkeypatch):
+    pdf = tmp_path / "rubric.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    def fake_which(cmd):
+        if cmd == "gs":
+            return "/opt/homebrew/bin/gs"
+        if cmd in {"pdftotext", "textutil", "mdls"}:
+            return f"/usr/bin/{cmd}"
+        return None
+
+    def fake_run_command(cmd, *, input_path=None):
+        joined = " ".join(cmd)
+        if "pdftotext" in joined:
+            return ""
+        if "gs" in joined:
+            return "Readable PDF text\nGrade 6: A Summary Report\nLevel 4"
+        if "textutil" in joined:
+            return "%PDF-1.4\n1 0 obj\n<< /Length 10 /Filter /LZWDecode >>\nstream\nraw\nendstream\nendobj"
+        if "mdls" in joined:
+            return "(null)"
+        return ""
+
+    monkeypatch.setattr(de.shutil, "which", fake_which)
+    monkeypatch.setattr(de, "_run_command", fake_run_command)
+
+    pdf_text, pdf_meta = rc.extract_document_text(pdf)
+
+    assert "Readable PDF text" in pdf_text
+    assert pdf_meta["methods"] == ["pdftotext", "ghostscript_txtwrite"]
+
+
+def test_pdf_raw_payload_detector_flags_embedded_pdf_bytes():
+    raw_pdf = "%PDF-1.4\n1 0 obj\n<< /Length 10 /Filter /LZWDecode >>\nstream\nraw\nendstream\nendobj\nxref\n%%EOF"
+    clean_text = "Grade 1 sample\nTeacher's Notes\nLevel 4"
+
+    assert de._looks_like_raw_pdf_payload(raw_pdf) is True
+    assert de._looks_like_raw_pdf_payload(clean_text) is False
+
+
 def test_build_rubric_artifacts_requires_confirmation_for_empty_rubric(tmp_path):
     rubric = tmp_path / "rubric.md"
     rubric.write_text("", encoding="utf-8")

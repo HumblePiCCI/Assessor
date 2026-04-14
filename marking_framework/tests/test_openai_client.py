@@ -52,6 +52,31 @@ def test_responses_create_and_extract(tmp_path, monkeypatch):
     assert captured["payload"]["text"]["format"] == fmt
 
 
+def test_responses_create_uses_low_verbosity_for_gpt54_mini_structured(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        return DummyResponse({"output": [{"type": "output_text", "text": "{\"ok\":true}"}], "usage": {"input_tokens": 1}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    fmt = {
+        "type": "json_schema",
+        "schema": {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        },
+    }
+    oc.responses_create("gpt-5.4-mini", [{"role": "user", "content": "hi"}], routing_path=str(route_path), text_format=fmt)
+    assert captured["payload"]["text"]["verbosity"] == "low"
+
+
 def test_responses_create_without_text_format(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
@@ -114,6 +139,51 @@ def test_openai_retries_without_temperature_on_unsupported_parameter(tmp_path, m
     )
     assert calls["count"] == 2
     assert oc.extract_usage(resp)["input_tokens"] == 1
+
+
+def test_openai_retries_transient_network_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    calls = {"count": 0}
+    sleeps = []
+
+    def fake_urlopen(req, timeout=None):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise oc.urllib.error.URLError("dns lookup failed")
+        return DummyResponse({"output": [{"type": "output_text", "text": "hello"}], "usage": {"input_tokens": 1}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(oc.time, "sleep", lambda seconds: sleeps.append(round(float(seconds), 2)))
+    resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert oc.extract_text(resp) == "hello"
+    assert calls["count"] == 3
+    assert len(sleeps) == 2
+
+
+def test_openai_retries_retryable_http_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    calls = {"count": 0}
+    sleeps = []
+
+    def fake_urlopen(req, timeout=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            body = {"error": {"message": "rate limited", "type": "rate_limit_error"}}
+            raise oc.urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", hdrs=None, fp=BytesIO(json.dumps(body).encode("utf-8")))
+        return DummyResponse({"output": [{"type": "output_text", "text": "ok"}], "usage": {"input_tokens": 1}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(oc.time, "sleep", lambda seconds: sleeps.append(round(float(seconds), 2)))
+    resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert oc.extract_text(resp) == "ok"
+    assert calls["count"] == 2
+    assert len(sleeps) == 1
 
 
 def test_responses_create_uses_cache_openai(tmp_path, monkeypatch):

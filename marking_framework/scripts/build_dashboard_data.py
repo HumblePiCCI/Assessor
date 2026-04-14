@@ -338,6 +338,13 @@ def main() -> int:
     local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
     local_teacher_prior = load_json(Path("outputs/local_teacher_prior.json"))
     aggregate_learning = load_json(Path("outputs/aggregate_learning_summary.json"))
+    scope_grounding = load_json(Path("outputs/scope_grounding.json"))
+    cohort_confidence = load_json(Path("outputs/cohort_confidence.json"))
+    anchor_candidates = load_json(Path("outputs/anchor_candidates.json"))
+    teacher_anchor_packet = load_json(Path("outputs/teacher_anchor_packet.json"))
+    anchor_calibration = load_json(Path("outputs/cohort_anchor_calibration.json"))
+    committee_consensus = load_json(Path("outputs/committee_consensus_report.json"))
+    engagement_signal = load_json(Path("outputs/engagement_signal.json"))
     normalized_rubric = load_json(Path("outputs/normalized_rubric.json"))
     rubric_manifest = load_json(Path("outputs/rubric_manifest.json"))
     rubric_validation_report = load_json(Path("outputs/rubric_validation_report.json"))
@@ -431,6 +438,13 @@ def main() -> int:
         "local_learning_profile": local_learning_profile,
         "local_teacher_prior": local_teacher_prior,
         "aggregate_learning": aggregate_learning,
+        "scope_grounding": scope_grounding,
+        "cohort_confidence": cohort_confidence,
+        "anchor_candidates": anchor_candidates,
+        "teacher_anchor_packet": teacher_anchor_packet,
+        "anchor_calibration": anchor_calibration,
+        "committee_consensus_report": committee_consensus,
+        "engagement_signal": engagement_signal,
         "normalized_rubric": normalized_rubric,
         "rubric_manifest": rubric_manifest,
         "rubric_validation_report": rubric_validation_report,

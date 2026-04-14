@@ -73,6 +73,328 @@ def test_aggregate_assessments_success(tmp_path, monkeypatch):
     assert irr_path.exists()
 
 
+def test_aggregate_assessments_boundary_calibration_report(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+    (tmp_path / "inputs").mkdir(parents=True)
+    (tmp_path / "config").mkdir(parents=True)
+
+    config = {
+        "weights": {"rubric": 0.7, "conventions": 0.15, "comparative": 0.15},
+        "consensus": {"rank_disagreement_threshold": 3, "rubric_sd_threshold": 0.8},
+        "rubric": {"points_possible": 100},
+        "conventions": {"mistake_rate_threshold": 0.15, "max_level_drop": 0.5, "missing_data_mistake_rate_percent": 100.0},
+        "boundary_calibration": {
+            "enabled": True,
+            "strong_rank_fraction": 0.5,
+            "strong_borda_min": 0.55,
+            "max_rank_sd": 1.5,
+            "max_rubric_sd_points": 8.0,
+            "max_score_adjustment_percent": 6.0,
+            "top_boundary_margin_percent": 4.0,
+            "severe_gap_levels": 2,
+            "severe_collapse_min_rubric_percent": 58.0,
+            "severe_collapse_target_floor_percent": 70.0,
+            "severe_collapse_max_adjustment_percent": 12.0,
+            "early_grade_narrative_boundary_bonus_percent": 2.0,
+            "portfolio_boundary_bonus_percent": 1.5,
+            "portfolio_min_rubric_percent": 62.0,
+            "portfolio_target_floor_percent": 70.0,
+        },
+        "levels": {
+            "bands": [
+                {"level": "1", "min": 50, "max": 59, "letter": "D"},
+                {"level": "2", "min": 60, "max": 69, "letter": "C"},
+                {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                {"level": "4", "min": 80, "max": 89, "letter": "A"},
+            ]
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    (tmp_path / "inputs/class_metadata.json").write_text(
+        json.dumps({"grade_level": 3, "assignment_genre": "narrative"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "config/grade_level_profiles.json").write_text(json.dumps({"grade_3": {}}), encoding="utf-8")
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    scores_a = [
+        {"student_id": "s1", "rubric_total_points": 70},
+        {"student_id": "s2", "rubric_total_points": 63},
+    ]
+    scores_b = [
+        {"student_id": "s1", "rubric_total_points": 71},
+        {"student_id": "s2", "rubric_total_points": 62},
+    ]
+    scores_c = [
+        {"student_id": "s1", "rubric_total_points": 69},
+        {"student_id": "s2", "rubric_total_points": 64},
+    ]
+    write_pass1(pass1_dir, "a", scores_a)
+    write_pass1(pass1_dir, "b", scores_b)
+    write_pass1(pass1_dir, "c", scores_c)
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["a", "b", "c"]:
+        write_pass2(pass2_dir, assessor, ["s1", "s2"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(
+        conv_path,
+        [
+            {"student_id": "s1", "word_count": 100, "mistake_rate_percent": 18.0},
+            {"student_id": "s2", "word_count": 100, "mistake_rate_percent": 1.0},
+        ],
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    report_path = tmp_path / "outputs/boundary_report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "agg",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--boundary-report",
+            str(report_path),
+        ],
+    )
+    assert agg.main() == 0
+
+    rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
+    s1 = next(row for row in rows if row["student_id"] == "s1")
+    assert s1["adjusted_level"] == "3"
+    assert "early_grade_narrative_boundary" in s1["boundary_calibration_reason"]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["movement_count"] == 1
+    assert report["scope"]["is_early_grade_narrative"] is True
+
+
+def test_aggregate_assessments_portfolio_mode_normalizes_scores(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+    (tmp_path / "inputs").mkdir(parents=True)
+    (tmp_path / "config").mkdir(parents=True)
+
+    config = {
+        "weights": {"rubric": 0.7, "conventions": 0.15, "comparative": 0.15},
+        "portfolio_mode": {
+            "enabled": True,
+            "note_clamp_threshold": 4.0,
+            "conventions_threshold_bonus_percent": 5.0,
+            "max_level_drop_scale": 0.35,
+            "weights": {"rubric": 0.78, "conventions": 0.17, "comparative": 0.05},
+        },
+        "consensus": {"rank_disagreement_threshold": 3, "rubric_sd_threshold": 0.8},
+        "rubric": {"points_possible": 100},
+        "conventions": {"mistake_rate_threshold": 0.15, "max_level_drop": 0.5, "missing_data_mistake_rate_percent": 100.0},
+        "boundary_calibration": {"enabled": False},
+        "levels": {
+            "bands": [
+                {"level": "1", "min": 50, "max": 59, "letter": "D"},
+                {"level": "2", "min": 60, "max": 69, "letter": "C"},
+                {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                {"level": "4", "min": 80, "max": 89, "letter": "A"},
+            ]
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    (tmp_path / "inputs/class_metadata.json").write_text(
+        json.dumps({"assessment_unit": "portfolio", "grade_numeric_equivalent": 2, "genre_form": "mixed writing portfolio"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "config/grade_level_profiles.json").write_text(json.dumps({"grade_2": {}}), encoding="utf-8")
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    for assessor, top_score in [("a", 39.15), ("b", 35.71), ("c", 38.52)]:
+        write_pass1(
+            pass1_dir,
+            assessor,
+            [
+                {
+                    "student_id": "s1",
+                    "rubric_total_points": top_score,
+                    "notes": "Overall working at/near greater depth: a strong portfolio showing varied purposes and above expected standard.",
+                },
+                {
+                    "student_id": "s2",
+                    "rubric_total_points": 63.33,
+                    "notes": "Overall working towards expected standard.",
+                },
+            ],
+        )
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["a", "b", "c"]:
+        write_pass2(pass2_dir, assessor, ["s1", "s2"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(
+        conv_path,
+        [
+            {"student_id": "s1", "word_count": 1000, "mistake_rate_percent": 8.0},
+            {"student_id": "s2", "word_count": 500, "mistake_rate_percent": 16.0},
+        ],
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    portfolio_report_path = tmp_path / "outputs/portfolio_mode_report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "agg",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--portfolio-report",
+            str(portfolio_report_path),
+        ],
+    )
+    assert agg.main() == 0
+
+    rows = list(csv.DictReader(out_path.open("r", encoding="utf-8")))
+    s1 = next(row for row in rows if row["student_id"] == "s1")
+    assert s1["adjusted_level"] == "4"
+    assert s1["portfolio_note_level"] == "4"
+    assert s1["portfolio_note_votes"] == "3"
+    report = json.loads(portfolio_report_path.read_text(encoding="utf-8"))
+    assert report["applied"] == 3
+    assert report["student_summaries"]["s1"]["note_canonical_level"] == "4"
+
+
+def test_aggregate_assessments_applies_small_ordinal_portfolio_scale_calibration(tmp_path, monkeypatch):
+    (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
+    (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)
+    (tmp_path / "processing").mkdir(parents=True)
+    (tmp_path / "inputs").mkdir(parents=True)
+    (tmp_path / "config").mkdir(parents=True)
+
+    config = {
+        "weights": {"rubric": 0.7, "conventions": 0.15, "comparative": 0.15},
+        "portfolio_mode": {
+            "enabled": True,
+            "note_clamp_threshold": 4.0,
+            "conventions_threshold_bonus_percent": 5.0,
+            "max_level_drop_scale": 0.35,
+            "ordinal_scale_calibration": {
+                "enabled": True,
+                "top_fraction": 0.25,
+                "bottom_fraction": 0.25,
+                "early_grade_top_min_percent": 72.0,
+                    "early_grade_middle_min_percent": 63.25,
+                "bottom_max_percent": 70.0,
+                "max_rank_sd": 1.5,
+                "band_floor_offset_percent": 1.5,
+            },
+            "weights": {"rubric": 0.78, "conventions": 0.17, "comparative": 0.05},
+        },
+        "consensus": {"rank_disagreement_threshold": 3, "rubric_sd_threshold": 0.8},
+        "rubric": {"points_possible": 100},
+        "conventions": {"mistake_rate_threshold": 0.15, "max_level_drop": 0.5, "missing_data_mistake_rate_percent": 100.0},
+        "boundary_calibration": {"enabled": False},
+        "levels": {
+            "bands": [
+                {"level": "1", "min": 50, "max": 59, "letter": "D"},
+                {"level": "2", "min": 60, "max": 69, "letter": "C"},
+                {"level": "3", "min": 70, "max": 79, "letter": "B"},
+                {"level": "4", "min": 80, "max": 89, "letter": "A"},
+            ]
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    (tmp_path / "inputs/class_metadata.json").write_text(
+        json.dumps(
+            {
+                "assessment_unit": "portfolio",
+                "grade_numeric_equivalent": 2,
+                "genre_form": "mixed writing portfolio",
+                "sample_count": 3,
+                "scoring_scale": {
+                    "type": "ordinal",
+                    "labels": [
+                        "Working towards the expected standard",
+                        "Working at the expected standard",
+                        "Working at greater depth within the expected standard",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config/grade_level_profiles.json").write_text(json.dumps({"grade_2": {}}), encoding="utf-8")
+
+    pass1_dir = tmp_path / "assessments/pass1_individual"
+    assessor_scores = [
+        ("a", {"s1": 73.48, "s2": 63.41, "s3": 62.58}),
+        ("b", {"s1": 73.26, "s2": 64.63, "s3": 63.02}),
+        ("c", {"s1": 73.53, "s2": 63.85, "s3": 64.34}),
+    ]
+    for assessor, scores in assessor_scores:
+        write_pass1(
+            pass1_dir,
+            assessor,
+            [
+                {
+                    "student_id": sid,
+                    "rubric_total_points": value,
+                    "portfolio_overall_level": "3" if sid == "s1" else "2",
+                    "portfolio_aggregation": {"overall_level": "3" if sid == "s1" else "2"},
+                }
+                for sid, value in scores.items()
+            ],
+        )
+
+    pass2_dir = tmp_path / "assessments/pass2_comparative"
+    for assessor in ["a", "b", "c"]:
+        write_pass2(pass2_dir, assessor, ["s1", "s2", "s3"])
+
+    conv_path = tmp_path / "processing/conventions_report.csv"
+    write_conventions(
+        conv_path,
+        [
+            {"student_id": "s1", "word_count": 1000, "mistake_rate_percent": 8.35},
+            {"student_id": "s2", "word_count": 700, "mistake_rate_percent": 15.41},
+            {"student_id": "s3", "word_count": 600, "mistake_rate_percent": 20.56},
+        ],
+    )
+
+    out_path = tmp_path / "outputs/consensus_scores.csv"
+    portfolio_report_path = tmp_path / "outputs/portfolio_mode_report.json"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "agg",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--portfolio-report",
+            str(portfolio_report_path),
+        ],
+    )
+    assert agg.main() == 0
+
+    rows = {row["student_id"]: row for row in csv.DictReader(out_path.open("r", encoding="utf-8"))}
+    assert rows["s1"]["adjusted_level"] == "4"
+    assert rows["s1"]["portfolio_scale_adjusted"] == "true"
+    assert rows["s2"]["adjusted_level"] == "3"
+    assert rows["s2"]["portfolio_scale_adjusted"] == "true"
+    assert rows["s3"]["adjusted_level"] == "2"
+    report = json.loads(portfolio_report_path.read_text(encoding="utf-8"))
+    assert report["scale_calibration"]["applied"] == 2
+
+
 def test_aggregate_assessments_missing_data(tmp_path, monkeypatch):
     (tmp_path / "assessments/pass1_individual").mkdir(parents=True)
     (tmp_path / "assessments/pass2_comparative").mkdir(parents=True)

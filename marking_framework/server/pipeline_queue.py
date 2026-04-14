@@ -8,15 +8,18 @@ import sqlite3
 import subprocess
 import threading
 import uuid
+import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.calibration_contract import build_run_scope, calibration_manifest_path, canonical_json_hash, load_json as load_contract_json
+from scripts.apply_anchor_calibration import normalize_teacher_scores
 from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
 from scripts.assessor_utils import resolve_input_path
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
-from server.runtime_context import identity_can_access, identity_token, launch_contract
+from server.runtime_context import identity_can_access, identity_token, launch_contract, strict_auth_enabled
 from server.step_runner import (
+    anchor_resume_steps,
     artifact_watch_roots,
     pipeline_step_graph_hash,
     pipeline_steps,
@@ -55,6 +58,12 @@ RUNTIME_SOURCE_PATHS = (
 )
 OPS_STATE_FILE = "pipeline_ops.json"
 RECENT_FAILURE_LIMIT = 20
+ANCHOR_SCORES_ARTIFACT = "outputs/teacher_anchor_scores.json"
+ANCHOR_CALIBRATION_ARTIFACT = "outputs/cohort_anchor_calibration.json"
+COHORT_CONFIDENCE_ARTIFACT = "outputs/cohort_confidence.json"
+ANCHOR_PACKET_ARTIFACT = "outputs/teacher_anchor_packet.json"
+CONSISTENCY_REPORT_ARTIFACT = "outputs/consistency_report.json"
+FINAL_ORDER_ARTIFACT = "outputs/final_order.csv"
 
 
 def now_iso() -> str:
@@ -467,6 +476,20 @@ class PipelineQueue:
     def _manifest_path(self, job_dir: Path) -> Path:
         return job_dir / "pipeline_manifest.json"
 
+    def _anchor_state_dir(self, job_dir: Path) -> Path:
+        path = job_dir / "anchor_state"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _pre_anchor_snapshot_dir(self, job_dir: Path) -> Path:
+        return self._anchor_state_dir(job_dir) / "pre_anchor_snapshot"
+
+    def _pre_anchor_metrics_path(self, job_dir: Path) -> Path:
+        return self._anchor_state_dir(job_dir) / "pre_anchor_metrics.json"
+
+    def _post_anchor_metrics_path(self, job_dir: Path) -> Path:
+        return self._anchor_state_dir(job_dir) / "post_anchor_metrics.json"
+
     def _tenant_token(self, tenant_id: str) -> str:
         return identity_token(tenant_id or "local-dev-tenant")
 
@@ -515,6 +538,83 @@ class PipelineQueue:
     def _write_json(self, path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _load_json_path(self, path: Path):
+        return _load_json(path)
+
+    def _load_csv_rows(self, path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    def _workspace_dashboard_path(self, workspace_dir: Path) -> Path:
+        return workspace_dir / "outputs" / "dashboard_data.json"
+
+    def _workspace_artifact_path(self, workspace_dir: Path) -> Path | None:
+        dashboard = self._workspace_dashboard_path(workspace_dir)
+        return dashboard if dashboard.exists() else None
+
+    def _load_cohort_confidence(self, workspace_dir: Path) -> dict:
+        return _load_json(workspace_dir / COHORT_CONFIDENCE_ARTIFACT)
+
+    def _should_pause_for_anchors(self, workspace_dir: Path) -> bool:
+        payload = self._load_cohort_confidence(workspace_dir)
+        if not payload:
+            return False
+        return bool(
+            payload.get("blocking_enabled", False)
+            and str(payload.get("effective_runtime_state", "") or "") == "anchor_calibration_required"
+        )
+
+    def _top_n_ids(self, workspace_dir: Path, limit: int = 5) -> list[str]:
+        rows = self._load_csv_rows(workspace_dir / FINAL_ORDER_ARTIFACT)
+        ordered = []
+        for row in rows:
+            sid = str(row.get("student_id", "") or "").strip()
+            if sid:
+                ordered.append(sid)
+        return ordered[: max(1, int(limit))]
+
+    def _anchor_hold_harmless_metrics(self, workspace_dir: Path) -> dict:
+        consistency = _load_json(workspace_dir / CONSISTENCY_REPORT_ARTIFACT)
+        summary = consistency.get("summary", {}) if isinstance(consistency, dict) else {}
+        return {
+            "swap_rate": float(summary.get("swap_rate", 0.0) or 0.0),
+            "boundary_disagreement_concentration": float(summary.get("boundary_disagreement_concentration", 0.0) or 0.0),
+            "top_5_ids": self._top_n_ids(workspace_dir, limit=5),
+        }
+
+    def _write_anchor_metrics(self, path: Path, workspace_dir: Path) -> dict:
+        payload = self._anchor_hold_harmless_metrics(workspace_dir)
+        self._write_json(path, payload)
+        return payload
+
+    def _anchor_patch_acceptance(self, pre_metrics: dict, post_metrics: dict) -> dict:
+        pre_top = list(pre_metrics.get("top_5_ids", []) or [])
+        post_top = list(post_metrics.get("top_5_ids", []) or [])
+        overlap = len(set(pre_top) & set(post_top))
+        comparison_size = min(len(pre_top), len(post_top))
+        required_overlap = max(0, comparison_size - (1 if comparison_size >= 5 else 0))
+        pre_boundary = float(pre_metrics.get("boundary_disagreement_concentration", 0.0) or 0.0)
+        post_boundary = float(post_metrics.get("boundary_disagreement_concentration", 0.0) or 0.0)
+        pre_swap = float(pre_metrics.get("swap_rate", 0.0) or 0.0)
+        post_swap = float(post_metrics.get("swap_rate", 0.0) or 0.0)
+        accepted = (
+            post_swap <= (pre_swap + 1e-9)
+            and post_boundary <= (pre_boundary + 1e-9)
+            and overlap >= required_overlap
+        )
+        reason = "" if accepted else "anchor_patch_not_helpful"
+        return {
+            "accepted": accepted,
+            "fallback_used": not accepted,
+            "fallback_reason": reason,
+            "pre_metrics": pre_metrics,
+            "post_metrics": post_metrics,
+            "top_5_overlap_count": overlap,
+            "required_top_5_overlap_count": required_overlap,
+        }
 
     def _load_ops_state(self) -> dict:
         payload = _load_json(self.ops_path)
@@ -910,6 +1010,11 @@ class PipelineQueue:
         if not requires_confirmation:
             cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
             if cached:
+                cached_job = self.get_job(cached["job_id"])
+                if cached_job:
+                    cached_workspace = Path(str(cached_job.get("workspace_dir", "") or ""))
+                    if cached_workspace.exists():
+                        self._sync_completed_project_state(cached_job, cached_workspace)
                 self._update_ops_state(lambda payload: payload.__setitem__("cache_hits", int(payload.get("cache_hits", 0) or 0) + 1))
                 return {
                     "job_id": cached["job_id"],
@@ -964,12 +1069,106 @@ class PipelineQueue:
 
     def load_dashboard_data(self, job_id: str, identity: dict | None = None) -> dict | None:
         job = self.get_job(job_id, identity=identity)
-        if not job or job["status"] != "completed" or not job.get("artifact_path"):
+        if not job:
             return None
-        artifact = Path(job["artifact_path"])
-        if not artifact.exists():
+        artifact = Path(job["artifact_path"]) if job.get("artifact_path") else None
+        if artifact is None or not artifact.exists():
+            workspace_artifact = self._workspace_artifact_path(Path(job["workspace_dir"]))
+            artifact = workspace_artifact if workspace_artifact and workspace_artifact.exists() else None
+        if artifact is None or not artifact.exists():
             return None
         return json.loads(artifact.read_text(encoding="utf-8"))
+
+    def anchor_status(self, job_id: str, identity: dict | None = None) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
+        if not job:
+            return None
+        workspace_dir = Path(job["workspace_dir"])
+        return {
+            "job_id": job_id,
+            "status": job.get("status", ""),
+            "cohort_confidence": self._load_cohort_confidence(workspace_dir),
+            "anchor_packet": _load_json(workspace_dir / ANCHOR_PACKET_ARTIFACT),
+            "anchor_calibration": _load_json(workspace_dir / ANCHOR_CALIBRATION_ARTIFACT),
+            "pre_anchor_metrics": _load_json(self._pre_anchor_metrics_path(Path(job["job_dir"]))),
+            "post_anchor_metrics": _load_json(self._post_anchor_metrics_path(Path(job["job_dir"]))),
+        }
+
+    def confirm_anchor_scores(
+        self,
+        job_id: str,
+        *,
+        teacher_scores: dict | None = None,
+        identity: dict | None = None,
+    ) -> dict | None:
+        job = self.get_job(job_id, identity=identity)
+        if not job:
+            return None
+        if str(job.get("status", "") or "") != "awaiting_anchor_scores":
+            return self.anchor_status(job_id, identity=identity)
+        job_dir = Path(job["job_dir"])
+        workspace_dir = Path(job["workspace_dir"])
+        config = _load_json(workspace_dir / "config" / "marking_config.json") or _load_json(self.root / "config" / "marking_config.json")
+        normalized_scores = normalize_teacher_scores(
+            {"anchors": list((teacher_scores or {}).get("anchors", []) or [])},
+            config,
+        )
+        scores_payload = {
+            "generated_at": now_iso(),
+            "anchors": normalized_scores.get("anchors", []),
+        }
+        self._write_json(job_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)
+        self._write_json(workspace_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)
+        env = os.environ.copy()
+        env["LLM_MODE"] = str(job.get("mode", "") or "")
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PIPELINE_MANIFEST_HASH"] = str(job.get("snapshot_hash", "") or "")
+        env["PIPELINE_WORKSPACE"] = str(workspace_dir)
+        env["PIPELINE_MANIFEST_PATH"] = str(workspace_dir / "pipeline_manifest.json")
+        env["ANCHOR_CALIBRATION_ACTIVE"] = "1"
+        pythonpath_parts = [str(workspace_dir), str(self.root)]
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            pythonpath_parts.append(existing_pythonpath)
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+        api_key = self.get_api_key()
+        if api_key:
+            env["OPENAI_API_KEY"] = api_key
+        self._append_event(job_dir, "anchor_resume", "Teacher anchor scores received", event="message")
+        self._update_job(job_id, "running", stage="anchor_resume", message="Applying anchor calibration", completed_at="")
+        apply_step = {
+            "id": "anchor_calibration",
+            "label": "Applying teacher anchor calibration",
+            "cmd": ["python3", "scripts/apply_anchor_calibration.py", "--rows", "outputs/consensus_scores.csv"],
+            "required": True,
+        }
+        if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, [apply_step], start_completed=0, tenant_id=str(job.get("tenant_id", "") or "")):
+            return self.anchor_status(job_id, identity=identity)
+        resume_steps = anchor_resume_steps()
+        if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, resume_steps, start_completed=1, tenant_id=str(job.get("tenant_id", "") or "")):
+            return self.anchor_status(job_id, identity=identity)
+        dashboard = self._workspace_dashboard_path(workspace_dir)
+        if not dashboard.exists():
+            self._update_job(job_id, "failed", error="Dashboard data not found after anchor resume", stage="dashboard", message="Failed: Dashboard output missing", completed_at=now_iso())
+            return self.anchor_status(job_id, identity=identity)
+        post_metrics = self._write_anchor_metrics(self._post_anchor_metrics_path(job_dir), workspace_dir)
+        pre_metrics = _load_json(self._pre_anchor_metrics_path(job_dir))
+        decision = self._anchor_patch_acceptance(pre_metrics, post_metrics)
+        patch_path = workspace_dir / ANCHOR_CALIBRATION_ARTIFACT
+        patch = _load_json(patch_path)
+        patch.update(decision)
+        self._write_json(patch_path, patch)
+        self._write_json(job_dir / ANCHOR_CALIBRATION_ARTIFACT, patch)
+        if not decision["accepted"]:
+            snapshot_dir = self._pre_anchor_snapshot_dir(job_dir)
+            if snapshot_dir.exists():
+                self._copy_runtime_state(snapshot_dir, workspace_dir)
+                self._write_json(workspace_dir / ANCHOR_CALIBRATION_ARTIFACT, patch)
+            self._append_event(job_dir, "anchor_reverted", "Anchor calibration reverted to pre-anchor snapshot", level="warning", event="message")
+        refreshed_job = self.get_job(job_id, identity=identity)
+        if refreshed_job:
+            self._publish_completed_workspace(refreshed_job, workspace_dir, _load_json(workspace_dir / "pipeline_manifest.json"), total_steps=1 + len(resume_steps))
+        return self.anchor_status(job_id, identity=identity)
 
     def rubric_status(self, job_id: str, identity: dict | None = None) -> dict | None:
         job = self.get_job(job_id, identity=identity)
@@ -1107,6 +1306,180 @@ class PipelineQueue:
                 items.append(str(item.relative_to(path)))
         return items
 
+    def _job_identity(self, tenant_id: str, teacher_id: str) -> dict:
+        teacher = str(teacher_id or "local-dev-teacher")
+        tenant = str(tenant_id or "local-dev-tenant")
+        return {
+            "tenant_id": tenant,
+            "teacher_id": teacher,
+            "role": "admin" if teacher == "local-dev-teacher" else "teacher",
+            "strict_auth": strict_auth_enabled(self.root),
+            "tenant_token": identity_token(tenant),
+            "teacher_token": identity_token(teacher),
+        }
+
+    def _copy_runtime_state(self, source_root: Path, target_root: Path):
+        self.reset_workspace(target_root)
+        for folder in ["inputs", "processing", "assessments", "outputs"]:
+            src = source_root / folder
+            if not src.exists():
+                continue
+            shutil.copytree(src, target_root / folder, dirs_exist_ok=True)
+        manifest = source_root / "pipeline_manifest.json"
+        if manifest.exists():
+            shutil.copy2(manifest, target_root / "pipeline_manifest.json")
+
+    def _sync_completed_project_state(self, job: dict, workspace_dir: Path):
+        tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
+        teacher_id = str(job.get("teacher_id", "") or "local-dev-teacher")
+        identity = self._job_identity(tenant_id, teacher_id)
+        active_root = self.root if not identity.get("strict_auth", False) else None
+        if active_root is None:
+            from server import projects as projectsmod
+
+            active_root = projectsmod.workspace_root(identity)
+        self._copy_runtime_state(workspace_dir, active_root)
+        project_id = str(job.get("project_id", "") or "").strip()
+        if not project_id:
+            return
+        from server import projects as projectsmod
+
+        current = projectsmod.get_current_project(identity)
+        if current and str(current.get("id", "") or "") != project_id:
+            current = None
+        if current is None:
+            meta_path = projectsmod.project_dir(project_id, identity) / "project.json"
+            if meta_path.exists():
+                current = projectsmod.normalize_project_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+        name = str((current or {}).get("name", "") or project_id)
+        aggregate_learning = (current or {}).get("aggregate_learning")
+        owner = (current or {}).get("owner")
+        meta = projectsmod.save_project_snapshot(
+            active_root,
+            project_id,
+            name,
+            aggregate_learning=aggregate_learning,
+            owner=owner,
+            identity=identity,
+        )
+        projectsmod.set_current_project(meta, identity)
+
+    def _publish_completed_workspace(self, job: dict, workspace_dir: Path, manifest: dict, *, total_steps: int):
+        artifact_dir = self._artifact_dir(job["snapshot_hash"], str(job.get("tenant_id", "") or "local-dev-tenant"))
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
+        artifact_outputs_dir = artifact_dir / "outputs"
+        artifact_outputs_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(workspace_dir / "outputs", artifact_outputs_dir)
+        self._write_json(artifact_dir / "pipeline_manifest.json", manifest)
+        artifact_path = artifact_outputs_dir / "dashboard_data.json"
+        gate_summary = self._gate_summary(workspace_dir)
+        published = self._artifact_listing(artifact_dir)
+        self._sync_completed_project_state(job, workspace_dir)
+        self._append_event(Path(job["job_dir"]), "completed", "Published artifacts", event="artifact", artifacts=published)
+        self._update_job(
+            str(job["id"]),
+            "completed",
+            artifact=artifact_path,
+            current=total_steps,
+            total=total_steps,
+            stage="completed",
+            message="Pipeline complete",
+            completed_at=now_iso(),
+            gate_summary=gate_summary,
+        )
+        self._record_gate_summary(str(job["id"]), gate_summary)
+        self._append_event(Path(job["job_dir"]), "completed", "Pipeline complete", event="complete")
+
+    def _pause_for_anchor_scores(self, job: dict, workspace_dir: Path, *, total_steps: int):
+        job_dir = Path(job["job_dir"])
+        snapshot_dir = self._pre_anchor_snapshot_dir(job_dir)
+        self._copy_runtime_state(workspace_dir, snapshot_dir)
+        metrics = self._write_anchor_metrics(self._pre_anchor_metrics_path(job_dir), workspace_dir)
+        self._sync_completed_project_state(job, workspace_dir)
+        artifact = self._workspace_artifact_path(workspace_dir)
+        self._update_job(
+            str(job["id"]),
+            "awaiting_anchor_scores",
+            artifact=artifact,
+            current=total_steps,
+            total=total_steps,
+            stage="anchor_wait",
+            message="Teacher anchor scores required",
+            gate_summary=self._gate_summary(workspace_dir),
+        )
+        self._append_event(
+            job_dir,
+            "anchor_wait",
+            "Cohort confidence requires teacher anchor scores before finalizing",
+            level="warning",
+            event="message",
+        )
+        self._append_event(
+            job_dir,
+            "anchor_wait",
+            "Stored pre-anchor snapshot",
+            event="artifact",
+            artifacts=[str(self._pre_anchor_snapshot_dir(job_dir).relative_to(job_dir))],
+        )
+        return metrics
+
+    def _run_pipeline_steps(self, job_id: str, job_dir: Path, workspace_dir: Path, env: dict, steps: list[dict], *, start_completed: int = 0, tenant_id: str = "") -> bool:
+        total = start_completed + len(steps)
+        run_id = job_id[:8]
+        for offset, step in enumerate(steps, start=1):
+            index = start_completed + offset
+            stage = step["id"]
+            label = step["label"]
+            self._update_job(job_id, "running", current=index - 1, total=total, stage=stage, message=label)
+            self._append_event(job_dir, stage, f"Starting: {label}", event="start")
+            self.log(self.root, run_id, f"QUEUE RUN step={stage}")
+            before = self._artifact_snapshot(workspace_dir)
+
+            def on_output(source, text):
+                self._append_event(
+                    job_dir,
+                    stage,
+                    text,
+                    source=source,
+                    level="warning" if source == "stderr" else "info",
+                    event="output",
+                )
+
+            code, stdout, stderr = run_step(self.run, step["cmd"], env, workspace_dir, on_output)
+            after = self._artifact_snapshot(workspace_dir)
+            produced = self._artifact_changes(before, after)
+            if produced:
+                self._append_event(job_dir, stage, "Produced artifacts", event="artifact", artifacts=produced)
+            if code != 0:
+                detail = (f"step={stage}\nstdout:\n{stdout}\n\nstderr:\n{stderr}").strip()
+                if step.get("required", True):
+                    self._append_event(job_dir, stage, f"Step failed: {label}", level="error", event="failed")
+                    self.log(self.root, run_id, f"QUEUE ERROR step {stage} failed", detail=detail[:8000])
+                    self._record_incident(
+                        "job_step_failed",
+                        f"Job {job_id} failed at step {stage}",
+                        extra={"job_id": job_id, "step": stage, "tenant_id": str(tenant_id or "")},
+                    )
+                    self._update_job(
+                        job_id,
+                        "failed",
+                        error=detail[:500],
+                        current=index - 1,
+                        total=total,
+                        stage=stage,
+                        message=f"Failed: {label}",
+                        completed_at=now_iso(),
+                    )
+                    return False
+                self._append_event(job_dir, stage, f"Non-blocking step failed: {label}", level="warning", event="failed")
+                self.log(self.root, run_id, f"QUEUE WARN step {stage} failed (non-blocking)", detail=detail[:8000])
+                self._update_job(job_id, "running", current=index, total=total, stage=stage, message=f"Skipped failed step: {label}")
+                continue
+            self._update_job(job_id, "running", current=index, total=total, stage=stage, message=f"Complete: {label}")
+            self._append_event(job_dir, stage, f"Completed: {label}", event="complete")
+        return True
+
     def _gate_summary(self, workspace_dir: Path) -> dict:
         publish_path = workspace_dir / "outputs" / "publish_gate.json"
         sota_path = workspace_dir / "outputs" / "sota_gate.json"
@@ -1147,6 +1520,12 @@ class PipelineQueue:
                     f"SELECT COUNT(*) FROM jobs {where} AND status='awaiting_rubric_confirmation'"
                     if where
                     else "SELECT COUNT(*) FROM jobs WHERE status='awaiting_rubric_confirmation'",
+                    tuple(params),
+                ).fetchone()[0],
+                "awaiting_anchor_scores": conn.execute(
+                    f"SELECT COUNT(*) FROM jobs {where} AND status='awaiting_anchor_scores'"
+                    if where
+                    else "SELECT COUNT(*) FROM jobs WHERE status='awaiting_anchor_scores'",
                     tuple(params),
                 ).fetchone()[0],
                 "completed": conn.execute(f"SELECT COUNT(*) FROM jobs {where} AND status='completed'" if where else "SELECT COUNT(*) FROM jobs WHERE status='completed'", tuple(params)).fetchone()[0],
@@ -1239,7 +1618,7 @@ class PipelineQueue:
         if not job or job["status"] != "queued":
             return
         run_id = job_id[:8]
-        mode = job["mode"]
+        mode = str(job["mode"] or "")
         job_dir = Path(job["job_dir"])
         tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
         workspace_dir = self._workspace_dir(job_id, tenant_id)
@@ -1300,69 +1679,8 @@ class PipelineQueue:
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
 
-            for index, step in enumerate(steps, start=1):
-                stage = step["id"]
-                label = step["label"]
-                self._update_job(job_id, "running", current=index - 1, total=len(steps), stage=stage, message=label)
-                self._append_event(job_dir, stage, f"Starting: {label}", event="start")
-                self.log(self.root, run_id, f"QUEUE RUN step={stage}")
-                before = self._artifact_snapshot(workspace_dir)
-
-                def on_output(source, text):
-                    self._append_event(
-                        job_dir,
-                        stage,
-                        text,
-                        source=source,
-                        level="warning" if source == "stderr" else "info",
-                        event="output",
-                    )
-
-                code, stdout, stderr = run_step(self.run, step["cmd"], env, workspace_dir, on_output)
-                after = self._artifact_snapshot(workspace_dir)
-                produced = self._artifact_changes(before, after)
-                if produced:
-                    self._append_event(job_dir, stage, "Produced artifacts", event="artifact", artifacts=produced)
-                if code != 0:
-                    detail = (f"step={stage}\nstdout:\n{stdout}\n\nstderr:\n{stderr}").strip()
-                    if step.get("required", True):
-                        self._append_event(job_dir, stage, f"Step failed: {label}", level="error", event="failed")
-                        self.log(self.root, run_id, f"QUEUE ERROR step {stage} failed", detail=detail[:8000])
-                        self._record_incident(
-                            "job_step_failed",
-                            f"Job {job_id} failed at step {stage}",
-                            extra={"job_id": job_id, "step": stage, "tenant_id": tenant_id},
-                        )
-                        self._update_job(
-                            job_id,
-                            "failed",
-                            error=detail[:500],
-                            current=index - 1,
-                            total=len(steps),
-                            stage=stage,
-                            message=f"Failed: {label}",
-                            completed_at=now_iso(),
-                        )
-                        return
-                    self._append_event(
-                        job_dir,
-                        stage,
-                        f"Non-blocking step failed: {label}",
-                        level="warning",
-                        event="failed",
-                    )
-                    self.log(self.root, run_id, f"QUEUE WARN step {stage} failed (non-blocking)", detail=detail[:8000])
-                    self._update_job(
-                        job_id,
-                        "running",
-                        current=index,
-                        total=len(steps),
-                        stage=stage,
-                        message=f"Skipped failed step: {label}",
-                    )
-                    continue
-                self._update_job(job_id, "running", current=index, total=len(steps), stage=stage, message=f"Complete: {label}")
-                self._append_event(job_dir, stage, f"Completed: {label}", event="complete")
+            if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, steps, start_completed=0, tenant_id=tenant_id):
+                return
 
             dashboard = workspace_dir / "outputs" / "dashboard_data.json"
             if not dashboard.exists():
@@ -1385,31 +1703,14 @@ class PipelineQueue:
                 )
                 return
 
-            artifact_dir = self._artifact_dir(job["snapshot_hash"], tenant_id)
-            if artifact_dir.exists():
-                shutil.rmtree(artifact_dir)
-            artifact_outputs_dir = artifact_dir / "outputs"
-            artifact_outputs_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(workspace_dir / "outputs", artifact_outputs_dir)
-            manifest_artifact = artifact_dir / "pipeline_manifest.json"
-            self._write_json(manifest_artifact, manifest)
-            artifact_path = artifact_outputs_dir / "dashboard_data.json"
-            gate_summary = self._gate_summary(workspace_dir)
-            published = self._artifact_listing(artifact_dir)
-            self._append_event(job_dir, "completed", "Published artifacts", event="artifact", artifacts=published)
-            self._update_job(
-                job_id,
-                "completed",
-                artifact=artifact_path,
-                current=len(steps),
-                total=len(steps),
-                stage="completed",
-                message="Pipeline complete",
-                completed_at=now_iso(),
-                gate_summary=gate_summary,
-            )
-            self._record_gate_summary(job_id, gate_summary)
-            self._append_event(job_dir, "completed", "Pipeline complete", event="complete")
+            if self._should_pause_for_anchors(workspace_dir):
+                self._pause_for_anchor_scores(job, workspace_dir, total_steps=len(steps))
+                self.log(self.root, run_id, "QUEUE PAUSED awaiting_anchor_scores")
+                return
+
+            refreshed_job = self.get_job(job_id)
+            if refreshed_job:
+                self._publish_completed_workspace(refreshed_job, workspace_dir, manifest, total_steps=len(steps))
             self.log(self.root, run_id, "QUEUE SUCCESS")
         except Exception as exc:  # pragma: no cover - defensive
             self._append_event(job_dir, "unhandled", f"Unhandled error: {exc}", level="error", event="failed")

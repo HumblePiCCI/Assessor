@@ -1,0 +1,103 @@
+{
+  "report_date": "2026-04-02",
+  "branch": "codex/stable-bell-curve",
+  "commit_sha": "3ceca85523cf2568cc790779530bcd535c8166c3",
+  "summary": {
+    "ks1_exact_level_hit_rate": 1.0,
+    "ks2_exact_level_hit_rate": 1.0,
+    "portfolio_validation_status": "validated"
+  },
+  "datasets": [
+    {
+      "dataset": "uk_sta_2018_ks1_writing_portfolios",
+      "validation_mode": "candidate_run_reaggregated_with_current_portfolio_calibration",
+      "exact_level_hit_rate": 1.0,
+      "within_one_level_hit_rate": 1.0,
+      "score_band_mae": 0.0,
+      "kendall_tau": 1.0,
+      "pairwise_order_agreement": 1.0,
+      "model_usage_ratio": 1.0,
+      "students": [
+        {
+          "student_id": "s001",
+          "display_name": "Ali",
+          "gold_canonical_level": "4",
+          "predicted_level": "4",
+          "predicted_score": 81.5,
+          "predicted_rank": 1
+        },
+        {
+          "student_id": "s002",
+          "display_name": "Kim",
+          "gold_canonical_level": "3",
+          "predicted_level": "3",
+          "predicted_score": 71.5,
+          "predicted_rank": 2
+        },
+        {
+          "student_id": "s003",
+          "display_name": "Jamie",
+          "gold_canonical_level": "2",
+          "predicted_level": "2",
+          "predicted_score": 62.97,
+          "predicted_rank": 3
+        }
+      ],
+      "notes": [
+        "KS1 validation re-used a completed candidate workspace from the prior portfolio-piece run and re-ran aggregation with the current ordinal portfolio calibration.",
+        "The final canonical mapping is 4 / 3 / 2 with exact rank agreement."
+      ]
+    },
+    {
+      "dataset": "uk_sta_2018_ks2_writing_portfolios",
+      "validation_mode": "fresh_candidate_only_run",
+      "exact_level_hit_rate": 1.0,
+      "within_one_level_hit_rate": 1.0,
+      "score_band_mae": 0.0,
+      "kendall_tau": 1.0,
+      "pairwise_order_agreement": 1.0,
+      "model_usage_ratio": 1.0,
+      "cost_usd": 1.003046,
+      "latency_seconds": 2672.205095,
+      "students": [
+        {
+          "student_id": "s001",
+          "display_name": "Frankie",
+          "gold_canonical_level": "4",
+          "predicted_level": "4",
+          "predicted_score": 81.5,
+          "predicted_rank": 1
+        },
+        {
+          "student_id": "s002",
+          "display_name": "Leigh",
+          "gold_canonical_level": "3",
+          "predicted_level": "3",
+          "predicted_score": 71.88,
+          "predicted_rank": 2
+        },
+        {
+          "student_id": "s003",
+          "display_name": "Morgan",
+          "gold_canonical_level": "3",
+          "predicted_level": "3",
+          "predicted_score": 71.5,
+          "predicted_rank": 3
+        },
+        {
+          "student_id": "s004",
+          "display_name": "Dani",
+          "gold_canonical_level": "2",
+          "predicted_level": "2",
+          "predicted_score": 62.54,
+          "predicted_rank": 4
+        }
+      ],
+      "notes": [
+        "KS2 validation was run end-to-end on the current branch with the candidate routing profile.",
+        "The candidate path completed cleanly with no observed llm_failures and perfect level/order agreement on the explicit-gold set."
+      ]
+    }
+  ],
+  "conclusion": "The piece-level portfolio scorer and ordinal portfolio calibration recover both UK STA portfolio datasets to exact 1.0 candidate alignment on canonical levels."
+}

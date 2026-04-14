@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.llm_assessors_core import looks_like_prompt_echo, parse_pass1_item
+from scripts.llm_assessors_core import looks_like_prompt_echo, parse_pass1_item, pass1_text_format
 
 
 def test_parse_pass1_item_rationale_min_words_notes_branch():
@@ -139,8 +139,37 @@ def test_parse_pass1_item_ignores_non_numeric_criteria_points_and_blank_evidence
     assert item["criteria_points"] == {}
 
 
+def test_parse_pass1_item_strict_false_rescues_truncated_outer_json():
+    raw = """{
+  "student_id": "s1",
+  "rubric_total_points": 59,
+  "criteria_points": [
+    {
+      "criterion_id": "K1",
+      "score": 3
+    },
+    {
+      "criterion_id": "K2",
+      "score": 2
+    }
+  ],
+  "notes": "truncated after this field"""
+    item = parse_pass1_item(raw, "s1", ["K1", "K2"], {"quote_validation": False, "rationale_min_words": 0}, "essay text", strict=False)
+    assert item["student_id"] == "s1"
+    assert item["rubric_total_points"] == 59.0
+    assert item["criteria_points"] == {}
+
+
 def test_looks_like_prompt_echo_detection():
     bad = "{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"USER: You are Assessor A\"}]}"
     assert looks_like_prompt_echo(bad, "s1") is True
     good = "{\"student_id\":\"s1\",\"rubric_total_points\":80,\"criteria_points\":{},\"notes\":\"ok\"}"
     assert looks_like_prompt_echo(good, "s1") is False
+
+
+def test_pass1_text_format_uses_compact_criteria_object():
+    fmt = pass1_text_format()
+    criteria = fmt["schema"]["properties"]["criteria_points"]
+    assert criteria["type"] == "array"
+    assert criteria["items"]["properties"]["criterion_id"]["type"] == "string"
+    assert criteria["items"]["properties"]["score"]["type"] == "number"

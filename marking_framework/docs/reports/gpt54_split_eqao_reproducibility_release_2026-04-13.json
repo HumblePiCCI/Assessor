@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "runs_compared": 3,
+    "manifest_identical": true,
+    "final_outputs_exact_match": true,
+    "within_tolerance": true,
+    "max_intermediate_metric_delta": 0.0,
+    "mismatched_manifest_artifacts": [],
+    "mismatched_final_artifacts": [],
+    "mismatched_intermediate_artifacts": []
+  }
+}

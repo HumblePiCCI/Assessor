@@ -3,7 +3,10 @@ from pathlib import Path
 
 from scripts.assessor_context import (
     build_grade_context,
+    choose_preferred_genre,
+    exemplar_genre_order,
     format_exemplars,
+    resolve_exemplar_selection,
     infer_genre_from_text,
     load_class_metadata,
     load_exemplars,
@@ -27,6 +30,8 @@ def test_load_class_metadata_missing(tmp_path):
 def test_select_grade_level():
     assert select_grade_level(7, {}) == 7
     assert select_grade_level(None, {"grade_level": "8"}) == 8
+    assert select_grade_level(None, {"grade_numeric_equivalent": "2"}) == 2
+    assert select_grade_level(None, {"grade_numeric": "4"}) == 4
     assert select_grade_level(None, {"grade_level": "bad"}) is None
 
 
@@ -49,12 +54,19 @@ def test_normalize_genre():
     assert normalize_genre("Literary Analysis") == "literary_analysis"
     assert normalize_genre("news report") == "news_report"
     assert normalize_genre("opinion letter") == "argumentative"
-    assert normalize_genre("summary report") == "informational_report"
+    assert normalize_genre("summary report") == "summary_report"
+    assert normalize_genre("book review") == "book_review"
+    assert normalize_genre("informative letter") == "informative_letter"
+    assert normalize_genre("speech") == "speech"
+    assert normalize_genre("persuasive response") == "argumentative"
     assert normalize_genre("custom genre") == "custom_genre"
     assert normalize_genre(None) is None
 
 
 def test_infer_genre_from_text():
+    assert infer_genre_from_text("Write clear instructions with materials and safety notes", "") == "instructions"
+    assert infer_genre_from_text("Write a summary of the article in your own words", "") == "summary_report"
+    assert infer_genre_from_text("Prepare a speech for your classmates", "") == "speech"
     assert infer_genre_from_text("Write a persuasive letter", "convince your principal") == "argumentative"
     assert infer_genre_from_text("Write a news report headline", "") == "news_report"
     assert infer_genre_from_text("Explain facts and details", "") == "informational_report"
@@ -62,11 +74,26 @@ def test_infer_genre_from_text():
     assert infer_genre_from_text("Free writing", "journal entry") is None
 
 
+def test_choose_preferred_genre_uses_more_specific_inference():
+    assert choose_preferred_genre("informational_report", "instructions") == "instructions"
+    assert choose_preferred_genre("argumentative", "informative_letter") == "informative_letter"
+    assert choose_preferred_genre("narrative", "narrative") == "narrative"
+    assert choose_preferred_genre(None, "summary report") == "summary_report"
+
+
 def test_grade_band_for_level():
+    assert grade_band_for_level(2) == "grade_1_3"
+    assert grade_band_for_level(5) == "grade_4_5"
     assert grade_band_for_level(6) == "grade_6_7"
     assert grade_band_for_level(9) == "grade_8_10"
     assert grade_band_for_level(12) == "grade_11_12"
-    assert grade_band_for_level(5) is None
+    assert grade_band_for_level(13) is None
+
+
+def test_exemplar_genre_order_prefers_mapped_bucket():
+    assert exemplar_genre_order("speech")[0] == "argumentative"
+    assert exemplar_genre_order("summary_report")[0] == "informational_report"
+    assert exemplar_genre_order("book_review")[0] == "literary_analysis"
 
 
 def test_resolve_exemplars_dir(tmp_path):
@@ -81,6 +108,18 @@ def test_resolve_exemplars_dir(tmp_path):
     assert resolve_exemplars_dir(base, 9, "argumentative") == base / "genres" / "argumentative"
     assert resolve_exemplars_dir(base, 6, "missing") == grade_dir
     assert resolve_exemplars_dir(base, None, None) == grade_dir
+
+
+def test_resolve_exemplar_selection_cross_band_for_early_grade(tmp_path):
+    base = tmp_path / "exemplars"
+    band_dir = base / "grade_6_7" / "informational_report"
+    band_dir.mkdir(parents=True)
+    (band_dir / "level_3.md").write_text("Level 3 sample", encoding="utf-8")
+    selection = resolve_exemplar_selection(base, 2, "informative_letter")
+    assert selection["path"] == band_dir
+    assert selection["selected_band"] == "grade_6_7"
+    assert selection["selected_genre"] == "informational_report"
+    assert selection["match_quality"] == "cross_band"
 
 
 def test_resolve_exemplars_dir_fallback_with_levels(tmp_path):

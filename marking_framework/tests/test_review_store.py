@@ -144,8 +144,10 @@ def test_review_store_saves_draft_without_creating_learning_signal_and_finalizes
     assert (tmp_path / "outputs" / "local_learning_profile.json").exists()
     assert (tmp_path / "outputs" / "local_teacher_prior.json").exists()
     assert (tmp_path / "outputs" / "review_delta_latest.json").exists()
+    assert (tmp_path / "outputs" / "engagement_signal.json").exists()
     assert bundle["aggregate_learning"]["mode"] == "opt_in"
     assert bundle["aggregate_learning"]["scope_record_count"] == 1
+    assert bundle["engagement_signal"]["retention_state"] == "aggregate_candidate"
     eligible_files = list((base_dir / "data" / "review_aggregate" / "eligible_reviews" / "project-a").glob("*.json"))
     assert len(eligible_files) == 1
     aggregate_text = eligible_files[0].read_text(encoding="utf-8")
