@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.levels import LEVEL_TO_PERCENT, normalize_level
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -53,6 +55,55 @@ def level_midpoints(config: dict) -> dict[str, float]:
     return mids
 
 
+def allowed_anchor_levels(config: dict) -> tuple[str, ...]:
+    mids = level_midpoints(config)
+    if mids:
+        return tuple(mids.keys())
+    return tuple(LEVEL_TO_PERCENT.keys())
+
+
+def normalize_teacher_scores(teacher_scores: dict, config: dict) -> dict:
+    allowed_levels = set(allowed_anchor_levels(config))
+    normalized = []
+    seen_ids = set()
+    raw_scores = teacher_scores.get("anchors", []) if isinstance(teacher_scores, dict) else []
+    for index, entry in enumerate(raw_scores if isinstance(raw_scores, list) else [], start=1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Anchor {index} must be an object.")
+        sid = str(entry.get("student_id", "") or "").strip()
+        if not sid:
+            raise ValueError(f"Anchor {index} is missing student_id.")
+        if sid in seen_ids:
+            raise ValueError(f"Anchor {sid} was submitted more than once.")
+        seen_ids.add(sid)
+        teacher_level_raw = entry.get("teacher_level", "")
+        teacher_level = normalize_level(teacher_level_raw)
+        if teacher_level_raw not in (None, "") and not teacher_level:
+            raise ValueError(f"Anchor {sid} has an invalid teacher_level '{teacher_level_raw}'.")
+        if teacher_level and teacher_level not in allowed_levels:
+            allowed = ", ".join(sorted(allowed_levels))
+            raise ValueError(f"Anchor {sid} level '{teacher_level}' is not allowed for this rubric ({allowed}).")
+        teacher_mark_raw = entry.get("teacher_mark")
+        teacher_mark = ""
+        if teacher_mark_raw not in (None, ""):
+            try:
+                teacher_mark = round(float(teacher_mark_raw), 4)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Anchor {sid} has an invalid teacher_mark '{teacher_mark_raw}'.") from exc
+            if teacher_mark < 0.0 or teacher_mark > 100.0:
+                raise ValueError(f"Anchor {sid} mark must be between 0 and 100.")
+        if not teacher_level and teacher_mark == "":
+            raise ValueError(f"Anchor {sid} must include a level or a mark.")
+        normalized.append(
+            {
+                "student_id": sid,
+                "teacher_level": teacher_level or "",
+                "teacher_mark": teacher_mark,
+            }
+        )
+    return {"anchors": normalized}
+
+
 def dedupe_points(points: list[dict]) -> list[dict]:
     ordered = sorted(points, key=lambda item: (float(item["x"]), float(item["y"])))
     result = []
@@ -70,7 +121,7 @@ def build_anchor_patch(*, rows: list[dict], teacher_scores: dict, config: dict) 
     anchors = []
     deltas = []
     points = []
-    scores = teacher_scores.get("anchors", []) if isinstance(teacher_scores, dict) else []
+    scores = normalize_teacher_scores(teacher_scores, config).get("anchors", [])
     for entry in scores if isinstance(scores, list) else []:
         if not isinstance(entry, dict):
             continue

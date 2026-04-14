@@ -344,11 +344,14 @@ async def pipeline_v2_anchor_status(job_id: str, request: Request):
 
 @app.post("/pipeline/v2/jobs/{job_id}/anchors")
 async def pipeline_v2_anchor_confirm(job_id: str, payload: AnchorConfirmationPayload, request: Request):
-    result = PIPELINE_QUEUE.confirm_anchor_scores(
-        job_id,
-        teacher_scores={"anchors": payload.anchors},
-        identity=request_identity(request),
-    )
+    try:
+        result = PIPELINE_QUEUE.confirm_anchor_scores(
+            job_id,
+            teacher_scores={"anchors": payload.anchors},
+            identity=request_identity(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return result

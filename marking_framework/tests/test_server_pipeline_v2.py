@@ -14,6 +14,7 @@ class FakeQueue:
         self.events = None
         self.rubric = None
         self.confirmed = None
+        self.anchor = None
 
     def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
         self.submitted = {
@@ -54,6 +55,17 @@ class FakeQueue:
             return None
         self.confirmed = {"action": action, "teacher_edits": teacher_edits or {}, "identity": dict(identity or {})}
         return self.rubric_status(job_id, identity=identity) | {"status": "queued"}
+
+    def anchor_status(self, job_id, identity=None):
+        if job_id != "j1":
+            return None
+        return self.anchor or {"job_id": job_id, "status": "awaiting_anchor_scores", "anchor_packet": {"anchors": []}}
+
+    def confirm_anchor_scores(self, job_id, teacher_scores=None, identity=None):
+        if job_id != "j1":
+            return None
+        self.confirmed = {"teacher_scores": teacher_scores or {}, "identity": dict(identity or {})}
+        return self.anchor_status(job_id, identity=identity) | {"status": "completed"}
 
 
 def _files():
@@ -158,3 +170,18 @@ def test_pipeline_v2_rubric_endpoints(monkeypatch):
     assert confirm.status_code == 200
     assert fake.confirmed["action"] == "edit"
     assert fake.confirmed["teacher_edits"]["genre"] == "argumentative"
+
+
+def test_pipeline_v2_anchor_confirm_validation(monkeypatch):
+    class RaisingQueue(FakeQueue):
+        def confirm_anchor_scores(self, job_id, teacher_scores=None, identity=None):
+            raise ValueError("Anchor s1 mark must be between 0 and 100.")
+
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", RaisingQueue())
+    client = TestClient(app)
+    confirm = client.post(
+        "/pipeline/v2/jobs/j1/anchors",
+        json={"anchors": [{"student_id": "s1", "teacher_level": "4", "teacher_mark": 150}]},
+    )
+    assert confirm.status_code == 400
+    assert "between 0 and 100" in confirm.json()["detail"]

@@ -82,7 +82,7 @@ Compared pre/post anchor:
 Current acceptance rule:
 - swap rate must not increase
 - boundary disagreement concentration must not increase
-- top-5 overlap must not decrease
+- top-5 overlap must preserve at least 4 of 5 students when both reruns have 5 ranked papers; smaller cohorts require full overlap
 
 The queue persists:
 - `anchor_state/pre_anchor_metrics.json`

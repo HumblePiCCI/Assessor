@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.calibration_contract import build_run_scope, calibration_manifest_path, canonical_json_hash, load_json as load_contract_json
+from scripts.apply_anchor_calibration import normalize_teacher_scores
 from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
 from scripts.assessor_utils import resolve_input_path
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
@@ -593,6 +594,8 @@ class PipelineQueue:
         pre_top = list(pre_metrics.get("top_5_ids", []) or [])
         post_top = list(post_metrics.get("top_5_ids", []) or [])
         overlap = len(set(pre_top) & set(post_top))
+        comparison_size = min(len(pre_top), len(post_top))
+        required_overlap = max(0, comparison_size - (1 if comparison_size >= 5 else 0))
         pre_boundary = float(pre_metrics.get("boundary_disagreement_concentration", 0.0) or 0.0)
         post_boundary = float(post_metrics.get("boundary_disagreement_concentration", 0.0) or 0.0)
         pre_swap = float(pre_metrics.get("swap_rate", 0.0) or 0.0)
@@ -600,7 +603,7 @@ class PipelineQueue:
         accepted = (
             post_swap <= (pre_swap + 1e-9)
             and post_boundary <= (pre_boundary + 1e-9)
-            and overlap >= min(len(pre_top), len(post_top))
+            and overlap >= required_overlap
         )
         reason = "" if accepted else "anchor_patch_not_helpful"
         return {
@@ -610,6 +613,7 @@ class PipelineQueue:
             "pre_metrics": pre_metrics,
             "post_metrics": post_metrics,
             "top_5_overlap_count": overlap,
+            "required_top_5_overlap_count": required_overlap,
         }
 
     def _load_ops_state(self) -> dict:
@@ -1104,9 +1108,14 @@ class PipelineQueue:
             return self.anchor_status(job_id, identity=identity)
         job_dir = Path(job["job_dir"])
         workspace_dir = Path(job["workspace_dir"])
+        config = _load_json(workspace_dir / "config" / "marking_config.json") or _load_json(self.root / "config" / "marking_config.json")
+        normalized_scores = normalize_teacher_scores(
+            {"anchors": list((teacher_scores or {}).get("anchors", []) or [])},
+            config,
+        )
         scores_payload = {
             "generated_at": now_iso(),
-            "anchors": list((teacher_scores or {}).get("anchors", []) or []),
+            "anchors": normalized_scores.get("anchors", []),
         }
         self._write_json(job_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)
         self._write_json(workspace_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)

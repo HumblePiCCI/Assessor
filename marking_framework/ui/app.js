@@ -580,6 +580,24 @@ function anchorPayload() {
     teacher_mark: (document.querySelector(`[data-anchor-mark="${idx}"]`)?.value || '').trim(),
   })).filter(item => item.teacher_level || item.teacher_mark);
 }
+function validateAnchorPayload(anchors) {
+  const byId = new Map(((anchorReview && anchorReview.anchor_packet && anchorReview.anchor_packet.anchors) || []).map(anchor => [anchor.student_id, anchor]));
+  const allowedLevels = new Set(['1', '2', '3', '4', '4+']);
+  for (const anchor of anchors) {
+    const label = byId.get(anchor.student_id)?.display_name || anchor.student_id;
+    if (anchor.teacher_level && !allowedLevels.has(anchor.teacher_level)) {
+      return `${label} has an invalid level.`;
+    }
+    if (anchor.teacher_mark) {
+      const mark = Number(anchor.teacher_mark);
+      if (!Number.isFinite(mark) || mark < 0 || mark > 100) {
+        return `${label} mark must be between 0 and 100.`;
+      }
+      anchor.teacher_mark = mark;
+    }
+  }
+  return '';
+}
 async function submitAnchorReview() {
   if (!activeJobId) return;
   const anchors = anchorPayload();
@@ -589,6 +607,11 @@ async function submitAnchorReview() {
     return;
   }
   const status = document.getElementById('anchorStatus');
+  const validationError = validateAnchorPayload(anchors);
+  if (validationError) {
+    if (status) status.textContent = validationError;
+    return;
+  }
   if (status) status.textContent = 'Applying anchor calibration...';
   try {
     const res = await fetch(apiUrl(`/pipeline/v2/jobs/${activeJobId}/anchors`), {
@@ -596,7 +619,16 @@ async function submitAnchorReview() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ anchors }),
     });
-    if (!res.ok) throw new Error('Anchor submission failed');
+    if (!res.ok) {
+      let detail = 'Anchor submission failed';
+      try {
+        const payload = await res.json();
+        detail = payload.detail || detail;
+      } catch (_) {
+        // keep default
+      }
+      throw new Error(detail);
+    }
     renderAnchorReview(await res.json());
     const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${activeJobId}/data`));
     if (!dataRes.ok) throw new Error('Dashboard data unavailable');

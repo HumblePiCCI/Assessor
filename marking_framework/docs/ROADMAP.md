@@ -446,7 +446,7 @@ Keep this simple:
 
 Anchor calibration is accepted only if:
 - swap rate does not increase
-- top-5 rerun overlap does not decrease
+- top-5 rerun overlap preserves at least 4 of 5 students when both reruns have a full top-5; smaller cohorts require full overlap
 - boundary disagreement concentration does not increase
 
 Reason:
