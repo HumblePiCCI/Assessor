@@ -606,6 +606,85 @@ def test_run_llm_assessors_uses_argumentative_seed_order_for_thoughtful_cross_to
         assert ranking == ["s1", "s2", "s3"]
 
 
+def test_run_llm_assessors_uses_literary_seed_order_when_scaffold_draft_is_over_scored(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text(
+        "Ghost- Final Essay\n\nConsequences Of Our Choices\n\n"
+        "Coach chose to forgive Ghost.\n"
+        "Explanation 1: Though Coach forgives him he makes him\n"
+        "Cite/Detail 2:\n"
+        "Reflect on the Theme:\n",
+        encoding="utf-8",
+    )
+    (texts_dir / "s2.txt").write_text(
+        "Ghost teaches that choices carry consequences. The essay explains how Brandon's bullying, "
+        "the stolen shoes, and Coach's response all push Ghost toward responsibility.",
+        encoding="utf-8",
+    )
+    write_config(
+        tmp_path / "routing.json",
+        {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}},
+    )
+    (tmp_path / "rubric.md").write_text("rubric", encoding="utf-8")
+    (tmp_path / "outline.md").write_text("outline", encoding="utf-8")
+    (tmp_path / "class_metadata.json").write_text(
+        json.dumps({"grade_level": 7, "genre": "literary_analysis", "generated_by": "bootstrap"}),
+        encoding="utf-8",
+    )
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, **kwargs):
+        prompt = messages[0]["content"]
+        if "Return ONLY valid JSON" in prompt:
+            student_id = prompt.split("Student ID: ", 1)[1].splitlines()[0].strip()
+            if student_id == "s1":
+                text = json.dumps(
+                    {
+                        "student_id": "s1",
+                        "rubric_total_points": 84,
+                        "criteria_points": {"LA1": 84, "LA2": 82, "LA3": 80, "C1": 78, "C3": 74},
+                        "notes": "Relevant theme, but incomplete structure and placeholder text remain.",
+                    }
+                )
+            else:
+                text = json.dumps(
+                    {
+                        "student_id": "s2",
+                        "rubric_total_points": 74,
+                        "criteria_points": {"LA1": 80, "LA2": 78, "LA3": 82, "C1": 78, "C3": 76},
+                        "notes": "Clear thematic thesis, specific textual evidence, and developed literary analysis.",
+                    }
+                )
+            return {"output": [{"type": "output_text", "text": text}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return {"output": [{"type": "output_text", "text": json.dumps({"ranking": ["s1", "s2"]})}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(rla, "responses_create", fake_create)
+    pass1_out = tmp_path / "pass1"
+    pass2_out = tmp_path / "pass2"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rla",
+            "--texts", str(texts_dir),
+            "--routing", str(tmp_path / "routing.json"),
+            "--rubric", str(tmp_path / "rubric.md"),
+            "--outline", str(tmp_path / "outline.md"),
+            "--class-metadata", str(tmp_path / "class_metadata.json"),
+            "--rubric-criteria", str(tmp_path / "no_criteria.json"),
+            "--pass1-out", str(pass1_out),
+            "--pass2-out", str(pass2_out),
+            "--assessors", "A,B,C",
+            "--ignore-cost-limits",
+        ],
+    )
+    assert rla.main() == 0
+    for assessor in ("A", "B", "C"):
+        ranking = (pass2_out / f"assessor_{assessor}.txt").read_text(encoding="utf-8").strip().splitlines()
+        assert ranking == ["s2", "s1"]
+
+
 def test_run_llm_assessors_pass2_repair_fallback(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test")

@@ -8,11 +8,13 @@ from pathlib import Path
 try:
     from scripts.assessor_utils import load_file_text, resolve_input_path
     from scripts.global_rerank import run_global_rerank
+    from scripts.llm_assessors_core import json_from_text
     from scripts.levels import normalize_level
     from scripts.openai_client import extract_text, responses_create
 except ImportError:  # pragma: no cover - Support running as script without package context
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
     from global_rerank import run_global_rerank  # pragma: no cover
+    from llm_assessors_core import json_from_text  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
     from openai_client import extract_text, responses_create  # pragma: no cover
 
@@ -101,13 +103,27 @@ Return ONLY JSON:
 
 def parse_json(text: str) -> dict:
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start : end + 1])
-    raise ValueError("Invalid JSON response")
+        payload = json_from_text(text)
+    except ValueError as exc:
+        raise ValueError("Invalid JSON response") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid JSON response")
+    return payload
+
+
+def build_repair_prompt(raw_text: str) -> str:
+    return f"""The prior response was supposed to be JSON but was malformed.
+
+Return ONLY valid JSON in this exact format:
+{{
+  "decision": "KEEP" | "SWAP",
+  "confidence": "low" | "medium" | "high",
+  "rationale": "short justification"
+}}
+
+Malformed response:
+{raw_text}
+"""
 
 
 def rank_key(rows: list[dict]) -> str:
@@ -199,7 +215,23 @@ def collect_judgments(
             max_output_tokens=max_output_tokens,
         )
         content = extract_text(response)
-        parsed = parse_json(content)
+        repair_used = False
+        try:
+            parsed = parse_json(content)
+        except ValueError:
+            repair_used = True
+            repair_response = responses_create(
+                model=model,
+                messages=[{"role": "user", "content": build_repair_prompt(content)}],
+                temperature=0.0,
+                reasoning="low",
+                routing_path=routing,
+                text_format=RESPONSE_FORMAT,
+                max_output_tokens=max_output_tokens,
+            )
+            content = extract_text(repair_response)
+            parsed = parse_json(content)
+            response = repair_response
         decision = normalize_decision(parsed.get("decision"))
         confidence = normalize_confidence(parsed.get("confidence"))
         rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip()
@@ -235,6 +267,7 @@ def collect_judgments(
                     "requested_model": model,
                     "response_model": response.get("model") or model,
                     "routing_path": routing,
+                    "repair_used": repair_used,
                     "reasoning": reasoning,
                     "temperature": 0.0,
                     "cached": bool(response.get("cached", False)),

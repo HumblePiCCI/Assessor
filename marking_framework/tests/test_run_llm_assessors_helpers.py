@@ -133,6 +133,7 @@ def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal()
     entries = rla.build_pass2_student_summaries(
         ["s1"],
         {"s1": "Raw student response excerpt"},
+        {"s1": "Raw student response excerpt"},
         {
             "s1": {
                 "student_id": "s1",
@@ -162,6 +163,7 @@ def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal()
 def test_build_pass2_student_summaries_uses_consensus_summary_signal_and_ignores_fallback_only_note():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "Raw student response excerpt"},
         {"s1": "Raw student response excerpt"},
         {
             "A": {
@@ -276,6 +278,33 @@ def test_build_argumentative_seed_order_prefers_claim_and_evidence_quality():
     assert order == ["s1", "s2", "s3", "s4"]
 
 
+def test_build_literary_analysis_seed_order_penalizes_incomplete_scaffold_drafts():
+    order = rla.build_literary_analysis_seed_order(
+        ["s1", "s2"],
+        {
+            "s1": "Explanation 1: unfinished analysis\nCite/Detail 2:\nReflect on the Theme:\n",
+            "s2": "A complete literary paragraph with a clear thesis, evidence, and analysis of Ghost's choices.",
+        },
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 82.0,
+                    "criteria_points": {"LA1": 82, "LA2": 80, "LA3": 78, "C1": 78, "C3": 74},
+                    "notes": "Relevant theme, but incomplete structure and placeholder text remain.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "rubric_total_points": 74.0,
+                    "criteria_points": {"LA1": 80, "LA2": 78, "LA3": 82, "C1": 78, "C3": 76},
+                    "notes": "Clear thematic thesis, specific textual evidence, and developed literary analysis.",
+                },
+            }
+        },
+    )
+    assert order == ["s2", "s1"]
+
+
 def test_build_instructions_seed_order_prefers_complete_safe_usable_procedure():
     order = rla.build_instructions_seed_order(
         ["s1", "s2", "s3", "s4"],
@@ -315,6 +344,7 @@ def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
         {"s1": "Opening the Fridge: raw snippet"},
+        {"s1": "Opening the Fridge: raw snippet"},
         {
             "s1": {
                 "student_id": "s1",
@@ -341,6 +371,7 @@ def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
 def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "A dramatic topic paragraph."},
         {"s1": "A dramatic topic paragraph."},
         {
             "A": {
@@ -376,6 +407,7 @@ def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
 def test_build_pass2_student_summaries_uses_instructions_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "Wear gloves and then add acid carefully."},
         {"s1": "Wear gloves and then add acid carefully."},
         {
             "A": {

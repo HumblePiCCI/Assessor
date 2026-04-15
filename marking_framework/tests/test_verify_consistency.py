@@ -72,6 +72,7 @@ def test_verify_consistency_collects_normalized_judgments(tmp_path, monkeypatch)
     assert data["checks"][0]["pair"] == ["s1", "s2"]
     assert data["checks"][0]["decision"] == "SWAP"
     assert data["checks"][0]["model_metadata"]["requested_model"] == "gpt-5.4-mini"
+    assert data["checks"][0]["model_metadata"]["repair_used"] is False
 
 
 def test_verify_consistency_apply_runs_global_reranker(tmp_path, monkeypatch):
@@ -169,6 +170,78 @@ def test_select_pairs_window():
     ]
     pairs = vc.select_pairs(rows, window=2)
     assert [(left["student_id"], right["student_id"]) for left, right in pairs] == [("s1", "s2"), ("s1", "s3"), ("s2", "s3")]
+
+
+def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch):
+    scores_path = tmp_path / "scores.csv"
+    rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": "1",
+            "consensus_rank": "1",
+            "adjusted_level": "4",
+            "rubric_after_penalty_percent": "82.0",
+            "composite_score": "0.81",
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": "2",
+            "consensus_rank": "2",
+            "adjusted_level": "4",
+            "rubric_after_penalty_percent": "84.0",
+            "composite_score": "0.79",
+        },
+    ]
+    write_scores(scores_path, rows)
+    texts_dir = tmp_path / "texts"
+    texts_dir.mkdir()
+    (texts_dir / "s1.txt").write_text("Essay one", encoding="utf-8")
+    (texts_dir / "s2.txt").write_text("Essay two", encoding="utf-8")
+    rubric = tmp_path / "rubric.md"
+    outline = tmp_path / "outline.md"
+    rubric.write_text("rubric", encoding="utf-8")
+    outline.write_text("outline", encoding="utf-8")
+    out_path = tmp_path / "checks.json"
+
+    responses = iter(
+        [
+            {"model": "gpt-5.4-mini", "output": [{"type": "output_text", "text": "decision=SWAP confidence=high"}]},
+            {
+                "model": "gpt-5.4-mini",
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps({"decision": "SWAP", "confidence": "high", "rationale": "Repair recovered valid JSON."}),
+                    }
+                ],
+            },
+        ]
+    )
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        return next(responses)
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "vc",
+            "--scores",
+            str(scores_path),
+            "--texts",
+            str(texts_dir),
+            "--rubric",
+            str(rubric),
+            "--outline",
+            str(outline),
+            "--output",
+            str(out_path),
+        ],
+    )
+    assert vc.main() == 0
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["checks"][0]["decision"] == "SWAP"
+    assert data["checks"][0]["model_metadata"]["repair_used"] is True
 
 
 def test_verify_consistency_missing_scores(tmp_path, monkeypatch):

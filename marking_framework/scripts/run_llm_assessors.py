@@ -23,6 +23,7 @@ from scripts.rubric_criteria import (
 )
 from scripts.assessor_utils import extract_docx_text, load_file_text, normalize_ranking_ids, resolve_input_path, summarize_text
 from scripts.rubric_contract import load_json as load_rubric_json, runtime_rubric_context
+from scripts.draft_quality import analyze_draft_quality, apply_draft_penalty
 from scripts.llm_assessors_core import (
     build_pass1_prompt, build_pass1_repair_prompt, build_pass2_prompt, ensure_dir, json_from_text, load_json, load_routing,
     load_texts, looks_like_prompt_echo, parse_pass1_item, pass1_text_format, preflight_costs,
@@ -370,6 +371,157 @@ def _summary_signal_bonus_penalty(note_text: str, word_count: int, median_word_c
     if median_word_count > 0 and word_count > median_word_count:
         length_penalty = min(10.0, (word_count - median_word_count) * 0.14)
     return bonus - penalty - length_penalty
+
+
+def _literary_analysis_signal_bonus_penalty(note_text: str) -> float:
+    lowered = str(note_text or "").lower()
+    bonus = 0.0
+    penalty = 0.0
+    if (
+        "clear thesis" in lowered
+        or "focused thesis" in lowered
+        or "clear central idea" in lowered
+        or "coherent theme" in lowered
+    ):
+        bonus += 5.0
+    if (
+        "relevant evidence" in lowered
+        or "specific evidence" in lowered
+        or "textual evidence" in lowered
+        or "multiple relevant examples" in lowered
+    ):
+        bonus += 5.0
+    if (
+        "insightful analysis" in lowered
+        or "strong analysis" in lowered
+        or "developed analysis" in lowered
+        or "clear analysis" in lowered
+    ):
+        bonus += 6.0
+    if "organized" in lowered or "cohesive" in lowered or "clear structure" in lowered:
+        bonus += 2.5
+
+    if (
+        "repetitive" in lowered
+        or "underdeveloped" in lowered
+        or "thin evidence" in lowered
+        or "weaker support" in lowered
+        or "weak support" in lowered
+    ):
+        penalty += 5.0
+    if (
+        "vague" in lowered
+        or "unsupported" in lowered
+        or "inaccurate" in lowered
+        or "factual vagueness" in lowered
+    ):
+        penalty += 4.0
+    if (
+        "fragmentary" in lowered
+        or "incomplete" in lowered
+        or "placeholder" in lowered
+        or "unfinished" in lowered
+    ):
+        penalty += 12.0
+    if "grammar" in lowered or "conventions" in lowered:
+        penalty += 1.5
+    return bonus - penalty
+
+
+def build_literary_analysis_seed_order(
+    known_ids: list[str],
+    texts: dict[str, str],
+    assessor_items: dict[str, dict],
+) -> list[str] | None:
+    if not known_ids:
+        return None
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "literary_analysis")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        thesis = float(criteria_points.get("LA1", criteria_points.get("AR1", criteria_points.get("K1", 0.0))) or 0.0)
+        evidence = float(criteria_points.get("LA2", criteria_points.get("AR2", criteria_points.get("T1", 0.0))) or 0.0)
+        analysis = float(criteria_points.get("LA3", criteria_points.get("AR3", criteria_points.get("T2", 0.0))) or 0.0)
+        organization = float(criteria_points.get("C1", 0.0) or 0.0)
+        expression = float(criteria_points.get("C3", criteria_points.get("C2", 0.0)) or 0.0)
+        weighted_components = []
+        total_weight = 0.0
+        for value, weight in (
+            (thesis, 0.18),
+            (evidence, 0.24),
+            (analysis, 0.28),
+            (organization, 0.15),
+            (expression, 0.15),
+        ):
+            if value > 0:
+                weighted_components.append(weight * value)
+                total_weight += weight
+        rubric_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+        base_signal = (sum(weighted_components) / total_weight) if total_weight > 0 else rubric_score
+        note_text = str(item.get("notes", "") or "")
+        draft_quality = analyze_draft_quality(texts.get(sid, ""), note_text)
+        note_signal = _literary_analysis_signal_bonus_penalty(note_text)
+        scores[sid] = round((0.68 * base_signal) + (0.32 * rubric_score) + note_signal - draft_quality["penalty_points"], 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
+def build_literary_analysis_report_ranking_summary(
+    item: dict,
+    fallback_summary: str,
+    text: str,
+    max_chars: int = 280,
+) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    thesis = float(criteria_points.get("LA1", criteria_points.get("AR1", criteria_points.get("K1", 0.0))) or 0.0)
+    evidence = float(criteria_points.get("LA2", criteria_points.get("AR2", criteria_points.get("T1", 0.0))) or 0.0)
+    analysis = float(criteria_points.get("LA3", criteria_points.get("AR3", criteria_points.get("T2", 0.0))) or 0.0)
+    organization = float(criteria_points.get("C1", 0.0) or 0.0)
+    expression = float(criteria_points.get("C3", criteria_points.get("C2", 0.0)) or 0.0)
+    parts = [f"Literary analysis score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("thesis", thesis),
+        ("evidence", evidence),
+        ("analysis", analysis),
+        ("organization", organization),
+        ("expression", expression),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    strengths = []
+    cautions = []
+    if thesis >= 80:
+        strengths.append("clear thematic thesis")
+    elif thesis and thesis < 68:
+        cautions.append("theme focus is weak")
+    if evidence >= 80:
+        strengths.append("specific textual support")
+    elif evidence and evidence < 68:
+        cautions.append("text support is thin")
+    if analysis >= 80:
+        strengths.append("developed literary analysis")
+    elif analysis and analysis < 68:
+        cautions.append("analysis stays basic")
+    draft_quality = analyze_draft_quality(text, str(item.get("notes", "") or fallback_summary))
+    if draft_quality["penalty_points"] > 0:
+        cautions.append("response still contains scaffold/incomplete draft sections")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(dict.fromkeys(cautions)) + ".")
+    note = _truncate_compact(str(item.get("notes", "") or fallback_summary), 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
 
 
 def build_summary_seed_order(
@@ -842,9 +994,28 @@ def use_summary_seed_order(metadata: dict, genre: str | None, portfolio_scope: b
     return "same_prompt" in cohort_shape
 
 
+def use_literary_analysis_seed_order(
+    metadata: dict,
+    genre: str | None,
+    portfolio_scope: bool,
+    texts: dict[str, str],
+    assessor_items: dict[str, dict],
+) -> bool:
+    if portfolio_scope or str(genre or "").strip().lower() != "literary_analysis":
+        return False
+    for sid, text in texts.items():
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "literary_analysis")
+        draft_quality = analyze_draft_quality(text, str(item.get("notes", "") or ""))
+        if draft_quality["penalty_points"] >= 8.0:
+            return True
+    generated_by = str((metadata or {}).get("generated_by") or "").strip().lower()
+    return generated_by == "bootstrap"
+
+
 def build_pass2_student_summaries(
     known_ids: list[str],
     raw_summaries: dict[str, str],
+    source_texts: dict[str, str],
     assessor_items: dict[str, dict],
     genre: str | None,
     portfolio_scope: bool,
@@ -855,6 +1026,7 @@ def build_pass2_student_summaries(
     normalized_genre = str(genre or "").strip().lower()
     argumentative_seed_mode_active = use_argumentative_seed_order(metadata or {}, genre, portfolio_scope)
     instructions_seed_mode = use_instructions_seed_order(metadata or {}, genre, portfolio_scope)
+    literary_seed_mode = use_literary_analysis_seed_order(metadata or {}, genre, portfolio_scope, source_texts, assessor_items)
     for sid in known_ids:
         raw_summary = raw_summaries.get(sid, "")
         item = _resolve_consensus_pass2_item(sid, assessor_items, genre)
@@ -866,6 +1038,8 @@ def build_pass2_student_summaries(
             summary = build_instructions_report_ranking_summary(item, raw_summary, max_chars=max_chars)
         elif normalized_genre == "argumentative" and argumentative_seed_mode_active:
             summary = build_argumentative_report_ranking_summary(item, raw_summary, max_chars=max_chars)
+        elif normalized_genre == "literary_analysis" and literary_seed_mode:
+            summary = build_literary_analysis_report_ranking_summary(item, raw_summary, source_texts.get(sid, ""), max_chars=max_chars)
         else:
             summary = raw_summary
         entries.append({"student_id": sid, "summary": summary or _truncate_compact(raw_summary, max_chars)})
@@ -1192,6 +1366,11 @@ def main() -> int:
                             piece_item = anchor_piece_item
                         else:
                             raise ValueError(f"Pass1 portfolio piece response invalid after retry. See {failure_log}.")
+                    piece_item, _draft_quality = apply_draft_penalty(
+                        piece_item,
+                        piece_text,
+                        str(piece_item.get("notes", "") or ""),
+                    )
                     piece_items.append(piece_item)
                 item, aggregation = aggregate_portfolio_piece_assessments(student_id, pieces, piece_items, assessor)
                 scores.append(item)
@@ -1300,6 +1479,11 @@ def main() -> int:
                     item = anchor_item
                 else:
                     raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
+            item, _draft_quality = apply_draft_penalty(
+                item,
+                text,
+                str(item.get("notes", "") or ""),
+            )
             if item_used_model:
                 model_successes += 1
             scores.append(item)
@@ -1324,6 +1508,7 @@ def main() -> int:
     summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
     instructions_seed_order = build_instructions_seed_order(known_ids, pass1_items_by_assessor) if use_instructions_seed_order(metadata, genre, portfolio_scope) else None
     argumentative_seed_order = build_argumentative_seed_order(known_ids, pass1_items_by_assessor) if use_argumentative_seed_order(metadata, genre, portfolio_scope) else None
+    literary_seed_order = build_literary_analysis_seed_order(known_ids, texts, pass1_items_by_assessor) if use_literary_analysis_seed_order(metadata, genre, portfolio_scope, texts, pass1_items_by_assessor) else None
     pass2_rankings_by_assessor = {}
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
@@ -1332,6 +1517,7 @@ def main() -> int:
         student_summaries = build_pass2_student_summaries(
             known_ids,
             raw_summary_map,
+            texts,
             summary_item_source,
             genre,
             portfolio_scope,
@@ -1428,6 +1614,8 @@ def main() -> int:
             lines = list(instructions_seed_order)
         elif argumentative_seed_order:
             lines = list(argumentative_seed_order)
+        elif literary_seed_order:
+            lines = list(literary_seed_order)
         pass2_rankings_by_assessor[assessor] = list(lines)
         out_path = Path(args.pass2_out) / f"assessor_{assessor}.txt"
         write_text_atomic(out_path, "\n".join(lines))
