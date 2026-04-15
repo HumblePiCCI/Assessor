@@ -95,11 +95,24 @@ def test_review_store_saves_draft_without_creating_learning_signal_and_finalizes
                     "rationale": "Student One should outrank Student Two on analysis.",
                 }
             ],
+            "curve_top": 96,
+            "curve_bottom": 64,
+            "assigned_marks": [
+                {"student_id": "s2", "mark": 96},
+                {"student_id": "s1", "mark": 88},
+            ],
+            "feedback_drafts": [
+                {"student_id": "s1", "star1": "Clear claim.", "star2": "Uses detail.", "wish": "Tighten conclusion."},
+            ],
             "review_notes": "Teacher override after manual inspection.",
         },
         stage="draft",
     )
     assert draft_bundle["draft_review"]["students"][0]["level_override"] == "4"
+    assert draft_bundle["draft_review"]["curve_top"] == 96.0
+    assert draft_bundle["draft_review"]["curve_bottom"] == 64.0
+    assert draft_bundle["draft_review"]["assigned_marks"][0]["mark"] == 96.0
+    assert draft_bundle["draft_review"]["feedback_drafts"][0]["wish"] == "Tighten conclusion."
     assert draft_bundle["latest_review"]["students"] == []
     assert draft_bundle["local_learning_profile"]["student_review_count"] == 0
     assert draft_bundle["aggregate_learning"]["scope_record_count"] == 0
@@ -127,6 +140,15 @@ def test_review_store_saves_draft_without_creating_learning_signal_and_finalizes
                     "rationale": "Student One should outrank Student Two on analysis.",
                 }
             ],
+            "curve_top": 96,
+            "curve_bottom": 64,
+            "assigned_marks": [
+                {"student_id": "s2", "mark": 96},
+                {"student_id": "s1", "mark": 88},
+            ],
+            "feedback_drafts": [
+                {"student_id": "s1", "star1": "Clear claim.", "star2": "Uses detail.", "wish": "Tighten conclusion."},
+            ],
             "review_notes": "Teacher override after manual inspection.",
         },
         stage="final",
@@ -135,6 +157,10 @@ def test_review_store_saves_draft_without_creating_learning_signal_and_finalizes
     assert latest["version_context"]["pipeline_manifest"]["manifest_hash"] == "manifest-123"
     assert latest["review_state"] == "final"
     assert latest["students"][0]["level_override"] == "4"
+    assert latest["curve_top"] == 96.0
+    assert latest["curve_bottom"] == 64.0
+    assert latest["assigned_marks"][1]["mark"] == 88.0
+    assert latest["feedback_drafts"][0]["star1"] == "Clear claim."
     assert latest["pairwise"][0]["reversed_machine_order"] is True
     assert latest["review_session"]["source_rank_artifact_hash"] != ""
     assert bundle["local_learning_profile"]["student_review_count"] == 1

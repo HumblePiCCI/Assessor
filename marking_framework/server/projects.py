@@ -35,6 +35,10 @@ class ProjectReviewPayload(BaseModel):
     students: list[dict] = Field(default_factory=list)
     pairwise: list[dict] = Field(default_factory=list)
     review_notes: str | None = None
+    curve_top: float | None = None
+    curve_bottom: float | None = None
+    assigned_marks: list[dict] = Field(default_factory=list)
+    feedback_drafts: list[dict] = Field(default_factory=list)
 
 
 def identity_context(request: Request | None) -> dict:

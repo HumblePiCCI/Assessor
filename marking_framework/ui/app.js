@@ -26,6 +26,20 @@ function pairReview(studentId, otherStudentId) {
   if (!reviewPairs[key]) reviewPairs[key] = { student_id: studentId, other_student_id: otherStudentId, preferred_student_id: '', confidence: 'teacher', rationale: '' };
   return reviewPairs[key];
 }
+function hasActiveReviewState(record) {
+  return !!(
+    record &&
+    (
+      (record.students && record.students.length) ||
+      (record.pairwise && record.pairwise.length) ||
+      record.review_notes ||
+      (record.assigned_marks && record.assigned_marks.length) ||
+      (record.feedback_drafts && record.feedback_drafts.length) ||
+      record.curve_top !== null && record.curve_top !== undefined ||
+      record.curve_bottom !== null && record.curve_bottom !== undefined
+    )
+  );
+}
 function compactLabel(text, max = 42) {
   const clean = String(text || '').trim();
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
@@ -679,7 +693,7 @@ function applyReviewBundle(bundle) {
   reviewPairs = {};
   const draft = (bundle && bundle.draft_review) ? bundle.draft_review : {};
   const latest = (bundle && bundle.latest_review) ? bundle.latest_review : {};
-  const active = (draft && ((draft.students && draft.students.length) || (draft.pairwise && draft.pairwise.length) || draft.review_notes)) ? draft : latest;
+  const active = hasActiveReviewState(draft) ? draft : latest;
   reviewSessionId = ((draft && draft.review_session && draft.review_session.session_id) || (latest && latest.review_session && latest.review_session.session_id) || '');
   (active.students || []).forEach(item => {
     reviewStudents[item.student_id] = {
@@ -722,6 +736,7 @@ function applyReviewBundle(bundle) {
     const aggregateMode = aggregate.mode || anon.mode || 'local_only';
     learningSummary.textContent = `Local learning: ${profile.review_count || 0} finalized reviews · ${profile.student_review_count || 0} essay decisions · ${profile.pairwise_adjudication_count || 0} pairwise calls · prior ${activeLabel} · aggregate mode ${aggregateMode}.`;
   }
+  applyPersistedReviewState(active);
 }
 async function loadReviewBundle() {
   ensureRubricPanel();
@@ -783,7 +798,21 @@ function renderReviewPanel(student) {
 function reviewPayload() {
   const students = Object.values(reviewStudents).filter(item => item.level_override || item.evidence_quality || item.evidence_comment || item.desired_rank !== '');
   const pairwise = Object.values(reviewPairs).filter(item => item.preferred_student_id);
-  return { students, pairwise, session_id: reviewSessionId };
+  const feedback = Object.entries(feedbackDrafts).map(([student_id, draft]) => ({
+    student_id,
+    star1: String(draft?.star1 || '').trim(),
+    star2: String(draft?.star2 || '').trim(),
+    wish: String(draft?.wish || '').trim(),
+  })).filter(item => item.star1 || item.star2 || item.wish);
+  return {
+    students,
+    pairwise,
+    session_id: reviewSessionId,
+    curve_top: num(document.getElementById('topGrade')?.value, null),
+    curve_bottom: num(document.getElementById('bottomGrade')?.value, null),
+    assigned_marks: currentCohortMarks(),
+    feedback_drafts: feedback,
+  };
 }
 async function saveReviewBundle(action = 'draft') {
   const reviewStatus = document.getElementById('reviewStatus');
@@ -846,6 +875,34 @@ function applyCurveBounds(top, bottom, preserveShape = true) {
       adj.overall = (scaledMarks[idx] ?? grades[idx] ?? 0) - (grades[idx] ?? 0);
     });
   }
+}
+function applyPersistedReviewState(record) {
+  feedbackDrafts = {};
+  (record?.feedback_drafts || []).forEach(item => {
+    if (!item?.student_id) return;
+    feedbackDrafts[item.student_id] = {
+      star1: String(item.star1 || '').trim(),
+      star2: String(item.star2 || '').trim(),
+      wish: String(item.wish || '').trim(),
+    };
+  });
+  if (!data?.students?.length) return;
+  adjustments = {};
+  overrides = {};
+  const topInput = document.getElementById('topGrade');
+  const bottomInput = document.getElementById('bottomGrade');
+  const top = num(record?.curve_top, num(topInput?.value, 92));
+  const bottom = num(record?.curve_bottom, num(bottomInput?.value, 58));
+  if (topInput) topInput.value = Math.round(top);
+  if (bottomInput) bottomInput.value = Math.round(bottom);
+  applyCurveBounds(top, bottom, false);
+  const markMap = new Map((record?.assigned_marks || []).map(item => [item.student_id, num(item.mark, null)]));
+  data.students.forEach((student, idx) => {
+    if (!markMap.has(student.student_id)) return;
+    const target = clamp(num(markMap.get(student.student_id), grades[idx] ?? 0), 0, 100);
+    const adj = getAdjustment(student.student_id);
+    adj.overall = target - (grades[idx] ?? 0);
+  });
 }
 function getGradeForIndex(idx) {
   if (!data || !data.students || !data.students.length) return '';

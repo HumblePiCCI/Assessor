@@ -274,6 +274,51 @@ def normalize_pairwise_adjudications(raw_pairs: list[dict], students: dict[str, 
     return normalized
 
 
+def normalize_curve_bound(value) -> float | None:
+    try:
+        mark = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= mark <= 100.0:
+        return None
+    return round(mark, 4)
+
+
+def normalize_assigned_marks(raw_marks: list[dict], students: dict[str, dict]) -> list[dict]:
+    normalized = []
+    seen = set()
+    for raw in raw_marks or []:
+        sid = str((raw or {}).get("student_id", "") or "").strip()
+        if not sid or sid in seen or sid not in students:
+            continue
+        try:
+            mark = float((raw or {}).get("mark"))
+        except (TypeError, ValueError):
+            continue
+        if not 0.0 <= mark <= 100.0:
+            continue
+        seen.add(sid)
+        normalized.append({"student_id": sid, "mark": round(mark, 4)})
+    return normalized
+
+
+def normalize_feedback_drafts(raw_feedback: list[dict], students: dict[str, dict]) -> list[dict]:
+    normalized = []
+    seen = set()
+    for raw in raw_feedback or []:
+        sid = str((raw or {}).get("student_id", "") or "").strip()
+        if not sid or sid in seen or sid not in students:
+            continue
+        star1 = str((raw or {}).get("star1", "") or "").strip()
+        star2 = str((raw or {}).get("star2", "") or "").strip()
+        wish = str((raw or {}).get("wish", "") or "").strip()
+        if not any([star1, star2, wish]):
+            continue
+        seen.add(sid)
+        normalized.append({"student_id": sid, "star1": star1, "star2": star2, "wish": wish})
+    return normalized
+
+
 def _safe_rank(value, fallback: int) -> int:
     try:
         return int(value)
@@ -518,6 +563,10 @@ def migrate_review_record(payload: dict) -> dict:
     record.setdefault("students", [])
     record.setdefault("pairwise", [])
     record.setdefault("review_notes", "")
+    record.setdefault("curve_top", None)
+    record.setdefault("curve_bottom", None)
+    record.setdefault("assigned_marks", [])
+    record.setdefault("feedback_drafts", [])
     record.setdefault("version_context", {})
     record.setdefault("review_session", {})
     record.setdefault("review_delta_summary", {})
@@ -1023,6 +1072,10 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
             "review_notes": "",
             "students": [],
             "pairwise": [],
+            "curve_top": None,
+            "curve_bottom": None,
+            "assigned_marks": [],
+            "feedback_drafts": [],
             "version_context": {},
             "review_session": {},
             "review_delta_summary": {},
@@ -1103,6 +1156,10 @@ def ensure_draft_review(base_dir: Path, root: Path, current_project: dict | None
         "review_notes": existing.get("review_notes", ""),
         "students": existing.get("students", []),
         "pairwise": existing.get("pairwise", []),
+        "curve_top": existing.get("curve_top"),
+        "curve_bottom": existing.get("curve_bottom"),
+        "assigned_marks": existing.get("assigned_marks", []),
+        "feedback_drafts": existing.get("feedback_drafts", []),
         "version_context": review_context(root, dashboard),
         "review_session": session,
         "review_delta_summary": {},
@@ -1120,6 +1177,10 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
     normalized_students = normalize_student_reviews((payload or {}).get("students", []), students)
     normalized_pairwise = normalize_pairwise_adjudications((payload or {}).get("pairwise", []), students)
     review_notes = str((payload or {}).get("review_notes", "") or "").strip()
+    curve_top = normalize_curve_bound((payload or {}).get("curve_top"))
+    curve_bottom = normalize_curve_bound((payload or {}).get("curve_bottom"))
+    assigned_marks = normalize_assigned_marks((payload or {}).get("assigned_marks", []), students)
+    feedback_drafts = normalize_feedback_drafts((payload or {}).get("feedback_drafts", []), students)
     record = {
         "review_state": "draft" if stage != "final" else "final",
         "review_id": uuid.uuid4().hex if stage == "final" else "",
@@ -1129,6 +1190,10 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
         "review_notes": review_notes,
         "students": normalized_students,
         "pairwise": normalized_pairwise,
+        "curve_top": curve_top,
+        "curve_bottom": curve_bottom,
+        "assigned_marks": assigned_marks,
+        "feedback_drafts": feedback_drafts,
         "version_context": review_context(root, dashboard),
         "review_session": session,
     }

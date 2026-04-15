@@ -405,12 +405,23 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
                     "rationale": "Student One should be above Student Two.",
                 }
             ],
+            "curve_top": 96,
+            "curve_bottom": 64,
+            "assigned_marks": [
+                {"student_id": "s2", "mark": 96},
+                {"student_id": "s1", "mark": 88},
+            ],
+            "feedback_drafts": [
+                {"student_id": "s1", "star1": "Clear claim.", "star2": "Uses detail.", "wish": "Tighten conclusion."},
+            ],
         },
     )
     assert review_resp.status_code == 200
     payload = review_resp.json()
     assert payload["scope_id"] == project_id
     assert payload["draft_review"]["students"][0]["level_override"] == "4"
+    assert payload["draft_review"]["curve_top"] == 96.0
+    assert payload["draft_review"]["assigned_marks"][0]["mark"] == 96.0
     assert payload["latest_review"]["students"] == []
     assert payload["aggregate_learning"]["mode"] == "opt_in"
     get_resp = client.get("/projects/review")
@@ -439,11 +450,22 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
                     "rationale": "Student One should be above Student Two.",
                 }
             ],
+            "curve_top": 96,
+            "curve_bottom": 64,
+            "assigned_marks": [
+                {"student_id": "s2", "mark": 96},
+                {"student_id": "s1", "mark": 88},
+            ],
+            "feedback_drafts": [
+                {"student_id": "s1", "star1": "Clear claim.", "star2": "Uses detail.", "wish": "Tighten conclusion."},
+            ],
         },
     )
     assert finalize_resp.status_code == 200
     finalize_payload = finalize_resp.json()
     assert finalize_payload["latest_review"]["students"][0]["level_override"] == "4"
+    assert finalize_payload["latest_review"]["curve_bottom"] == 64.0
+    assert finalize_payload["latest_review"]["feedback_drafts"][0]["wish"] == "Tighten conclusion."
     assert finalize_payload["replay_exports"]["benchmark_gold_count"] == 2
     assert finalize_payload["latest_delta"]["summary"]["rank_movement_count"] >= 1
     assert finalize_payload["aggregate_learning"]["scope_record_count"] == 1
