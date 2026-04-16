@@ -117,6 +117,10 @@ def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
     result_two, *_ = run_rerank(tmp_path / "run2", seed_rows, checks)
     assert [row["student_id"] for row in result_one["final_rows"]] == [row["student_id"] for row in result_two["final_rows"]]
     assert result_one["report"]["summary"] == result_two["report"]["summary"]
+    diagnostics = result_one["report"]["direct_edge_diagnostics"]
+    assert diagnostics["direct_edge_violation_count"] >= 1
+    assert result_one["report"]["summary"]["high_confidence_direct_edge_violations"] >= 1
+    assert diagnostics["violations"][0]["confidence"] == "high"
 
 
 def test_global_rerank_preserves_level_lock_without_justified_crossing(tmp_path):

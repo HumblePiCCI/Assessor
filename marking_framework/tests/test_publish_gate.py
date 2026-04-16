@@ -391,6 +391,27 @@ def test_publish_gate_helper_branches(tmp_path):
     assert corpus_bench["failed_dataset_count"] == 1
     assert corpus_bench["dataset_count"] == 3
     assert corpus_bench["exact_level_hit_rate"] == 0.84
+    assert pg.pairwise_eval_metrics(tmp_path / "missing-pairwise-eval.json")["present"] is False
+    (tmp_path / "pairwise_eval.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "pair_count": 4,
+                    "evaluated_count": 3,
+                    "accuracy": 0.67,
+                    "coverage": 0.75,
+                    "critical_accuracy": 0.5,
+                    "failures": ["accuracy_below_threshold"],
+                },
+                "polish_bias_risks": [{"id": "p1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pairwise_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval.json")
+    assert pairwise_eval["present"] is True
+    assert pairwise_eval["polish_bias_risk_count"] == 1
+    assert pairwise_eval["failures"] == ["accuracy_below_threshold"]
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():
@@ -426,6 +447,12 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_mean_student_level_sd": 4.0,
         "benchmark_mean_student_rank_sd": 4.0,
         "benchmark_mean_student_score_sd": 4.0,
+        "pairwise_eval_present": True,
+        "pairwise_eval_accuracy": 0.5,
+        "pairwise_eval_critical_accuracy": 0.5,
+        "pairwise_eval_coverage": 0.5,
+        "pairwise_eval_polish_bias_risk_count": 2,
+        "pairwise_eval_failures": ["accuracy_below_threshold"],
     }
     thresholds = {
         "min_rank_kendall_w": 0.7,
@@ -457,6 +484,12 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_max_mean_student_level_sd": 0.5,
         "benchmark_max_mean_student_rank_sd": 0.5,
         "benchmark_max_mean_student_score_sd": 1.0,
+        "require_pairwise_eval_report": True,
+        "pairwise_eval_min_accuracy": 0.9,
+        "pairwise_eval_min_critical_accuracy": 1.0,
+        "pairwise_eval_min_coverage": 1.0,
+        "pairwise_eval_max_polish_bias_risks": 0,
+        "pairwise_eval_fail_on_report_failures": True,
     }
     failures = pg.evaluate(metrics, thresholds)
     assert "kendall_w_below_threshold" in failures
@@ -488,6 +521,33 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "benchmark_student_level_sd_above_threshold" in failures
     assert "benchmark_student_rank_sd_above_threshold" in failures
     assert "benchmark_student_score_sd_above_threshold" in failures
+    assert "pairwise_eval_accuracy_below_threshold" in failures
+    assert "pairwise_eval_critical_accuracy_below_threshold" in failures
+    assert "pairwise_eval_coverage_below_threshold" in failures
+    assert "pairwise_eval_polish_bias_risks_above_threshold" in failures
+    assert "pairwise_eval_report_failures_present" in failures
+
+
+def test_publish_gate_evaluate_requires_pairwise_eval_report():
+    metrics = {
+        "irr_rank_kendalls_w": 1.0,
+        "irr_mean_rubric_sd": 0.0,
+        "model_coverage": 1.0,
+        "boundary_count": 0,
+        "anchors_total": 0,
+        "cal_missing_assessors": [],
+        "calibration_scope_samples": 0,
+        "calibration_scope_observations": 0,
+        "cal_level_hit_rate": 1.0,
+        "cal_mae": 0.0,
+        "cal_pairwise_order": 1.0,
+        "cal_repeat_consistency": 1.0,
+        "cal_abs_bias": 0.0,
+        "benchmark_report_present": False,
+        "pairwise_eval_present": False,
+    }
+    failures = pg.evaluate(metrics, {"require_pairwise_eval_report": True})
+    assert "pairwise_eval_report_missing" in failures
 
 
 def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):

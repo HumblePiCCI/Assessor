@@ -39,6 +39,7 @@ Quick Start
    - Or via Hero Path: `python3 scripts/hero_path.py --verify-consistency --apply-consistency`
    - The consistency pass expands post-seam coverage by default: it fully compares the top pack, checks band-seam/aggregate movers against that pack, and writes an audit report.
    - Pairwise judgments include genre-aware criterion notes so reviewers can see whether the model preferred meaning, evidence, genre requirements, organization, or language control.
+   - Hard-pair adjudicator evals can be run with `python3 scripts/evaluate_pairwise_adjudicator.py --judgments outputs/consistency_checks.json`; the default gold set targets the Ghost literary-analysis failure mode.
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`
@@ -68,6 +69,7 @@ Key Outputs
 - `outputs/pairwise_matrix.json` (normalized pairwise evidence and support/opposition weights)
 - `outputs/consistency_report.json` (rerank diagnostics, movements, and uncertainty details)
 - `outputs/post_seam_pair_expansion.json` (top-pack and large-mover pair coverage audit)
+- `outputs/pairwise_adjudicator_eval.json` (hard-pair accuracy report for the pairwise adjudicator)
 - `outputs/final_order.csv` (post global rerank order)
 - `outputs/feedback_summaries/` (two stars and a wish with validated quotes)
 - `outputs/dashboard_data.json` (UI data)

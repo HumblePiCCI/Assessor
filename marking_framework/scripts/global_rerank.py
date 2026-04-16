@@ -932,6 +932,69 @@ def pairwise_agreement(final_rank_map: dict[str, int], judgments: list[dict]) ->
     return round((agree / total) if total else 1.0, 6)
 
 
+def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict], constraints: dict | None = None) -> dict:
+    constraints = constraints if isinstance(constraints, dict) else {}
+    added_edges = {
+        (str(item.get("src", "")), str(item.get("dst", "")), str(item.get("kind", "")))
+        for item in constraints.get("added_edges", [])
+        if isinstance(item, dict)
+    }
+    dropped_edges = {
+        (str(item.get("src", "")), str(item.get("dst", "")), str(item.get("kind", "")))
+        for item in constraints.get("dropped_edges", [])
+        if isinstance(item, dict)
+    }
+    violations = []
+    satisfied = 0
+    total_weight = 0.0
+    violated_weight = 0.0
+    high_confidence_violations = 0
+    for judgment in judgments:
+        winner = str(judgment.get("winner", "") or "").strip()
+        loser = str(judgment.get("loser", "") or "").strip()
+        if winner not in final_rank_map or loser not in final_rank_map or winner == loser:
+            continue
+        weight = float(judgment.get("weight", 0.0) or 0.0)
+        total_weight += weight
+        winner_rank = int(final_rank_map[winner])
+        loser_rank = int(final_rank_map[loser])
+        if winner_rank < loser_rank:
+            satisfied += 1
+            continue
+        violated_weight += weight
+        if normalize_confidence(judgment.get("confidence")) == "high":
+            high_confidence_violations += 1
+        violations.append(
+            {
+                "pair": list(judgment.get("pair", [])),
+                "winner": winner,
+                "loser": loser,
+                "winner_final_rank": winner_rank,
+                "loser_final_rank": loser_rank,
+                "confidence": normalize_confidence(judgment.get("confidence")),
+                "weight": round(weight, 6),
+                "decision": normalize_decision(judgment.get("decision")),
+                "decision_basis": str(judgment.get("decision_basis", "") or ""),
+                "cautions_applied": list(judgment.get("cautions_applied", [])) if isinstance(judgment.get("cautions_applied"), list) else [],
+                "rationale": str(judgment.get("rationale", "") or "").strip(),
+                "strong_pairwise_edge_added": (winner, loser, "strong_pairwise_evidence") in added_edges,
+                "strong_pairwise_edge_dropped": (winner, loser, "strong_pairwise_evidence") in dropped_edges,
+            }
+        )
+    total = satisfied + len(violations)
+    return {
+        "direct_edge_count": total,
+        "direct_edge_satisfied_count": satisfied,
+        "direct_edge_violation_count": len(violations),
+        "high_confidence_direct_edge_violation_count": high_confidence_violations,
+        "direct_edge_violation_weight": round(violated_weight, 6),
+        "direct_edge_weight": round(total_weight, 6),
+        "direct_edge_violation_rate": round((len(violations) / total) if total else 0.0, 6),
+        "direct_edge_weighted_violation_rate": round((violated_weight / total_weight) if total_weight else 0.0, 6),
+        "violations": violations,
+    }
+
+
 def write_csv(path: Path, rows: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -1043,6 +1106,7 @@ def run_global_rerank(
     )
     final_rank_map = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
     agreement = pairwise_agreement(final_rank_map, judgments)
+    direct_edges = direct_edge_diagnostics(final_rank_map, judgments, constraint_meta)
     swap_count = sum(1 for judgment in judgments if judgment.get("decision") == "SWAP")
     low_confidence_count = sum(1 for judgment in judgments if judgment.get("confidence") == "low")
     movements = [
@@ -1106,8 +1170,12 @@ def run_global_rerank(
             "dropped_edges": len(constraint_meta["dropped_edges"]),
             "allowed_crossings": len(constraint_meta["allowed_crossings"]),
             "blocked_crossings": len(constraint_meta["blocked_crossings"]),
+            "direct_edge_violations": direct_edges["direct_edge_violation_count"],
+            "high_confidence_direct_edge_violations": direct_edges["high_confidence_direct_edge_violation_count"],
+            "direct_edge_weighted_violation_rate": direct_edges["direct_edge_weighted_violation_rate"],
         },
         "constraints": constraint_meta,
+        "direct_edge_diagnostics": direct_edges,
         "movements": movements,
         "teacher_prior": {
             "active": bool(teacher_meta.get("active", False)) if isinstance(teacher_meta, dict) else False,

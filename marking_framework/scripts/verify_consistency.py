@@ -79,6 +79,7 @@ RESPONSE_FORMAT = {
 
 DEFAULT_BAND_SEAM_REPORT = "outputs/band_seam_report.json"
 DEFAULT_EXPANSION_REPORT = "outputs/post_seam_pair_expansion.json"
+DEFAULT_PAIRWISE_ANCHOR_DIR = Path(__file__).resolve().parents[1] / "inputs" / "pairwise_anchors"
 DECISION_BASIS_VALUES = {
     "task_alignment",
     "content_reasoning",
@@ -373,7 +374,61 @@ def format_numbered(items: list[str]) -> str:
     return "\n".join(f"{idx}. {item}" for idx, item in enumerate(items, start=1))
 
 
-def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None) -> str:
+def canonical_anchor_genre(genre: str) -> str:
+    normalized = normalize_genre(genre) or ""
+    if normalized == "research_report":
+        return "informational_report"
+    if normalized == "persuasive_response":
+        return "argumentative"
+    return normalized or "generic"
+
+
+def load_pairwise_anchor_payload(genre: str, anchor_dir: str | Path | None = None) -> dict:
+    base_dir = Path(anchor_dir) if anchor_dir else DEFAULT_PAIRWISE_ANCHOR_DIR
+    normalized = canonical_anchor_genre(genre)
+    candidates = [base_dir / f"{normalized}.json"]
+    if normalized != "generic":
+        candidates.append(base_dir / "generic.json")
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def format_pairwise_anchor_block(genre: str, anchor_dir: str | Path | None = None) -> str:
+    payload = load_pairwise_anchor_payload(genre, anchor_dir)
+    if not payload:
+        return ""
+    lines = ["Pairwise calibration anchors:"]
+    anchors = payload.get("anchors", [])
+    for item in anchors if isinstance(anchors, list) else []:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "") or "").strip()
+        decision_rule = str(item.get("decision_rule", "") or "").strip()
+        if title and decision_rule:
+            lines.append(f"- {title}: {decision_rule}")
+        elif decision_rule:
+            lines.append(f"- {decision_rule}")
+    caution_checks = payload.get("caution_checks", [])
+    if isinstance(caution_checks, list) and caution_checks:
+        lines.append("Before choosing a winner, explicitly check:")
+        for item in caution_checks:
+            text = str(item or "").strip()
+            if text:
+                lines.append(f"- {text}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
+
+
+def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None, anchor_dir: str | Path | None = None) -> str:
     metadata = metadata if isinstance(metadata, dict) else {}
     rules = pairwise_genre_rules(genre)
     lines = [
@@ -388,6 +443,9 @@ def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None) -
         lines.append(
             "This is a cold-start classroom cohort. Be conservative about structure-only wins; prefer essays with clearer task-specific meaning, evidence, and explanation."
         )
+    anchor_block = format_pairwise_anchor_block(genre, anchor_dir)
+    if anchor_block:
+        lines.extend(["", anchor_block])
     return "\n".join(lines).strip()
 
 
@@ -532,8 +590,9 @@ def build_prompt(
     metadata: dict | None = None,
     selection_reasons: list[str] | None = None,
     selection_details: list[str] | None = None,
+    anchor_dir: str | Path | None = None,
 ) -> str:
-    extra_guidance = genre_specific_pairwise_guidance(genre, metadata)
+    extra_guidance = genre_specific_pairwise_guidance(genre, metadata, anchor_dir)
     guidance_block = f"\nAdditional ranking guidance:\n{extra_guidance}\n" if extra_guidance else ""
     reason_text = ", ".join(selection_reasons or []) or "seed_window"
     details = "\n".join(f"- {detail}" for detail in (selection_details or []) if detail)
@@ -679,6 +738,124 @@ def normalize_cautions(value) -> list[str]:
         if token in CAUTION_VALUES and token not in cautions:
             cautions.append(token)
     return cautions
+
+
+def pair_winner_from_decision(higher: dict, lower: dict, decision: str) -> str:
+    return lower["student_id"] if normalize_decision(decision) == "SWAP" else higher["student_id"]
+
+
+def pair_loser_from_decision(higher: dict, lower: dict, decision: str) -> str:
+    return higher["student_id"] if normalize_decision(decision) == "SWAP" else lower["student_id"]
+
+
+def pair_seed_features(row: dict) -> dict:
+    return {
+        "student_id": row["student_id"],
+        "seed_rank": int(row["seed_rank"]),
+        "level": row["level"],
+        "rubric_after_penalty_percent": round(float(row["rubric_after_penalty_percent"]), 6),
+        "composite_score": round(float(row["composite_score"]), 6),
+        "borda_percent": round(float(row["borda_percent"]), 6),
+    }
+
+
+def judge_pair(
+    rubric: str,
+    outline: str,
+    higher: dict,
+    lower: dict,
+    higher_text: str,
+    lower_text: str,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    genre: str = "",
+    metadata: dict | None = None,
+    selection_reasons: list[str] | None = None,
+    selection_details: list[str] | None = None,
+    anchor_dir: str | Path | None = None,
+) -> dict:
+    prompt = build_prompt(
+        rubric,
+        outline,
+        higher,
+        lower,
+        higher_text,
+        lower_text,
+        genre=genre,
+        metadata=metadata,
+        selection_reasons=selection_reasons,
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+    )
+    response = responses_create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        reasoning=reasoning,
+        routing_path=routing,
+        text_format=RESPONSE_FORMAT,
+        max_output_tokens=max_output_tokens,
+    )
+    content = extract_text(response)
+    repair_used = False
+    try:
+        parsed = parse_json(content)
+    except ValueError:
+        repair_used = True
+        repair_response = responses_create(
+            model=model,
+            messages=[{"role": "user", "content": build_repair_prompt(content)}],
+            temperature=0.0,
+            reasoning="low",
+            routing_path=routing,
+            text_format=RESPONSE_FORMAT,
+            max_output_tokens=max_output_tokens,
+        )
+        content = extract_text(repair_response)
+        parsed = parse_json(content)
+        response = repair_response
+    decision = normalize_decision(parsed.get("decision"))
+    confidence = normalize_confidence(parsed.get("confidence"))
+    rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip()
+    criterion_notes = normalize_criterion_notes(parsed.get("criterion_notes"))
+    decision_basis = normalize_decision_basis(parsed.get("decision_basis"))
+    cautions_applied = normalize_cautions(parsed.get("cautions_applied"))
+    return {
+        "pair": [higher["student_id"], lower["student_id"]],
+        "seed_order": {
+            "higher": higher["student_id"],
+            "lower": lower["student_id"],
+            "higher_rank": int(higher["seed_rank"]),
+            "lower_rank": int(lower["seed_rank"]),
+        },
+        "seed_features": {
+            "higher": pair_seed_features(higher),
+            "lower": pair_seed_features(lower),
+        },
+        "selection_reasons": list(selection_reasons or []),
+        "selection_details": list(selection_details or []),
+        "decision": decision,
+        "winner": pair_winner_from_decision(higher, lower, decision),
+        "loser": pair_loser_from_decision(higher, lower, decision),
+        "confidence": confidence,
+        "rationale": rationale,
+        "criterion_notes": criterion_notes,
+        "decision_basis": decision_basis,
+        "cautions_applied": cautions_applied,
+        "model_metadata": {
+            "requested_model": model,
+            "response_model": response.get("model") or model,
+            "routing_path": routing,
+            "repair_used": repair_used,
+            "reasoning": reasoning,
+            "temperature": 0.0,
+            "cached": bool(response.get("cached", False)),
+            "usage": response.get("usage", {}),
+        },
+    }
 
 
 def rank_key(rows: list[dict]) -> str:
@@ -844,6 +1021,7 @@ def collect_judgments(
     large_mover_window: int = 0,
     band_seam_report: dict | None = None,
     large_mover_divergence: float = 0.35,
+    anchor_dir: str | Path | None = None,
 ) -> list[dict]:
     judgments = []
     genre = resolve_pairwise_genre(metadata)
@@ -859,98 +1037,24 @@ def collect_judgments(
     for spec in pair_specs:
         higher = spec["higher"]
         lower = spec["lower"]
-        prompt = build_prompt(
+        judgment = judge_pair(
             rubric,
             outline,
             higher,
             lower,
             texts.get(higher["student_id"], ""),
             texts.get(lower["student_id"], ""),
+            model=model,
+            routing=routing,
+            reasoning=reasoning,
+            max_output_tokens=max_output_tokens,
             genre=genre,
             metadata=metadata,
             selection_reasons=spec.get("selection_reasons", []),
             selection_details=spec.get("selection_details", []),
+            anchor_dir=anchor_dir,
         )
-        response = responses_create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            reasoning=reasoning,
-            routing_path=routing,
-            text_format=RESPONSE_FORMAT,
-            max_output_tokens=max_output_tokens,
-        )
-        content = extract_text(response)
-        repair_used = False
-        try:
-            parsed = parse_json(content)
-        except ValueError:
-            repair_used = True
-            repair_response = responses_create(
-                model=model,
-                messages=[{"role": "user", "content": build_repair_prompt(content)}],
-                temperature=0.0,
-                reasoning="low",
-                routing_path=routing,
-                text_format=RESPONSE_FORMAT,
-                max_output_tokens=max_output_tokens,
-            )
-            content = extract_text(repair_response)
-            parsed = parse_json(content)
-            response = repair_response
-        decision = normalize_decision(parsed.get("decision"))
-        confidence = normalize_confidence(parsed.get("confidence"))
-        rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip()
-        criterion_notes = normalize_criterion_notes(parsed.get("criterion_notes"))
-        decision_basis = normalize_decision_basis(parsed.get("decision_basis"))
-        cautions_applied = normalize_cautions(parsed.get("cautions_applied"))
-        judgments.append(
-            {
-                "pair": [higher["student_id"], lower["student_id"]],
-                "seed_order": {
-                    "higher": higher["student_id"],
-                    "lower": lower["student_id"],
-                    "higher_rank": int(higher["seed_rank"]),
-                    "lower_rank": int(lower["seed_rank"]),
-                },
-                "seed_features": {
-                    "higher": {
-                        "student_id": higher["student_id"],
-                        "seed_rank": int(higher["seed_rank"]),
-                        "level": higher["level"],
-                        "rubric_after_penalty_percent": round(float(higher["rubric_after_penalty_percent"]), 6),
-                        "composite_score": round(float(higher["composite_score"]), 6),
-                        "borda_percent": round(float(higher["borda_percent"]), 6),
-                    },
-                    "lower": {
-                        "student_id": lower["student_id"],
-                        "seed_rank": int(lower["seed_rank"]),
-                        "level": lower["level"],
-                        "rubric_after_penalty_percent": round(float(lower["rubric_after_penalty_percent"]), 6),
-                        "composite_score": round(float(lower["composite_score"]), 6),
-                        "borda_percent": round(float(lower["borda_percent"]), 6),
-                    },
-                },
-                "selection_reasons": list(spec.get("selection_reasons", [])),
-                "selection_details": list(spec.get("selection_details", [])),
-                "decision": decision,
-                "confidence": confidence,
-                "rationale": rationale,
-                "criterion_notes": criterion_notes,
-                "decision_basis": decision_basis,
-                "cautions_applied": cautions_applied,
-                "model_metadata": {
-                    "requested_model": model,
-                    "response_model": response.get("model") or model,
-                    "routing_path": routing,
-                    "repair_used": repair_used,
-                    "reasoning": reasoning,
-                    "temperature": 0.0,
-                    "cached": bool(response.get("cached", False)),
-                    "usage": response.get("usage", {}),
-                },
-            }
-        )
+        judgments.append(judgment)
     return judgments
 
 
@@ -1052,6 +1156,7 @@ def main() -> int:
     parser.add_argument("--band-seam-report", default=DEFAULT_BAND_SEAM_REPORT, help="Band seam report used for post-seam pair expansion")
     parser.add_argument("--expansion-report", default=DEFAULT_EXPANSION_REPORT, help="Pair expansion audit artifact JSON")
     parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
+    parser.add_argument("--anchor-dir", default=str(DEFAULT_PAIRWISE_ANCHOR_DIR), help="Directory of genre-specific pairwise calibration anchor JSON files")
     parser.add_argument("--max-output-tokens", type=int, default=600, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
     parser.add_argument("--apply", action="store_true", help="Compatibility mode: collect evidence, then run the global reranker")
@@ -1102,6 +1207,7 @@ def main() -> int:
         large_mover_window=large_mover_window,
         band_seam_report=band_seam_report,
         large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
+        anchor_dir=args.anchor_dir,
     )
     out_path = Path(args.output)
     expansion_report_path = Path(args.expansion_report)

@@ -296,6 +296,34 @@ def benchmark_metrics(report_path: Path, preferred_mode: str = "") -> dict:
     }
 
 
+def pairwise_eval_metrics(report_path: Path) -> dict:
+    report = load_json(report_path)
+    if not report:
+        return {
+            "present": False,
+            "pair_count": 0,
+            "evaluated_count": 0,
+            "accuracy": 0.0,
+            "coverage": 0.0,
+            "critical_accuracy": 0.0,
+            "polish_bias_risk_count": 0,
+            "failures": [],
+        }
+    summary = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
+    polish_bias_risks = report.get("polish_bias_risks", []) if isinstance(report.get("polish_bias_risks"), list) else []
+    failures = summary.get("failures", []) if isinstance(summary.get("failures"), list) else []
+    return {
+        "present": True,
+        "pair_count": int(summary.get("pair_count", 0) or 0),
+        "evaluated_count": int(summary.get("evaluated_count", 0) or 0),
+        "accuracy": float(summary.get("accuracy", 0.0) or 0.0),
+        "coverage": float(summary.get("coverage", 0.0) or 0.0),
+        "critical_accuracy": float(summary.get("critical_accuracy", 0.0) or 0.0),
+        "polish_bias_risk_count": len(polish_bias_risks),
+        "failures": [str(item) for item in failures],
+    }
+
+
 def reproducibility_metrics(report_path: Path) -> dict:
     report = load_json(report_path)
     if not report:
@@ -452,6 +480,19 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             failures.append("benchmark_student_rank_sd_above_threshold")
         if metrics.get("benchmark_mean_student_score_sd", 0.0) > float(thresholds.get("benchmark_max_mean_student_score_sd", 999999.0)):
             failures.append("benchmark_student_score_sd_above_threshold")
+    if thresholds.get("require_pairwise_eval_report", False) and not metrics.get("pairwise_eval_present", False):
+        failures.append("pairwise_eval_report_missing")
+    if metrics.get("pairwise_eval_present", False):
+        if metrics.get("pairwise_eval_accuracy", 0.0) < float(thresholds.get("pairwise_eval_min_accuracy", 0.0)):
+            failures.append("pairwise_eval_accuracy_below_threshold")
+        if metrics.get("pairwise_eval_critical_accuracy", 0.0) < float(thresholds.get("pairwise_eval_min_critical_accuracy", 0.0)):
+            failures.append("pairwise_eval_critical_accuracy_below_threshold")
+        if metrics.get("pairwise_eval_coverage", 0.0) < float(thresholds.get("pairwise_eval_min_coverage", 0.0)):
+            failures.append("pairwise_eval_coverage_below_threshold")
+        if metrics.get("pairwise_eval_polish_bias_risk_count", 0) > int(thresholds.get("pairwise_eval_max_polish_bias_risks", 999999)):
+            failures.append("pairwise_eval_polish_bias_risks_above_threshold")
+        if thresholds.get("pairwise_eval_fail_on_report_failures", False) and metrics.get("pairwise_eval_failures", []):
+            failures.append("pairwise_eval_report_failures_present")
     return failures
 
 
@@ -462,10 +503,12 @@ def build_profile_metrics(
     rows: list[dict],
     level_bands: list[dict],
     benchmark_report_path: Path,
+    pairwise_eval_report_path: Path,
 ) -> dict:
     metrics = dict(base_metrics)
     boundary_margin = float(thresholds.get("boundary_margin_percent", 1.0) or 1.0)
     benchmark = benchmark_metrics(benchmark_report_path, str(thresholds.get("benchmark_mode", "")).strip())
+    pairwise_eval = pairwise_eval_metrics(pairwise_eval_report_path)
     metrics.update(
         {
             "boundary_count": boundary_count(rows, level_bands, boundary_margin),
@@ -490,6 +533,14 @@ def build_profile_metrics(
             "benchmark_mean_student_level_sd": float(benchmark.get("mean_student_level_sd", 0.0) or 0.0),
             "benchmark_mean_student_rank_sd": float(benchmark.get("mean_student_rank_sd", 0.0) or 0.0),
             "benchmark_mean_student_score_sd": float(benchmark.get("mean_student_score_sd", 0.0) or 0.0),
+            "pairwise_eval_present": bool(pairwise_eval.get("present", False)),
+            "pairwise_eval_pair_count": int(pairwise_eval.get("pair_count", 0) or 0),
+            "pairwise_eval_evaluated_count": int(pairwise_eval.get("evaluated_count", 0) or 0),
+            "pairwise_eval_accuracy": float(pairwise_eval.get("accuracy", 0.0) or 0.0),
+            "pairwise_eval_coverage": float(pairwise_eval.get("coverage", 0.0) or 0.0),
+            "pairwise_eval_critical_accuracy": float(pairwise_eval.get("critical_accuracy", 0.0) or 0.0),
+            "pairwise_eval_polish_bias_risk_count": int(pairwise_eval.get("polish_bias_risk_count", 0) or 0),
+            "pairwise_eval_failures": list(pairwise_eval.get("failures", [])),
         }
     )
     return metrics
@@ -502,6 +553,7 @@ def evaluate_profiles(
     rows: list[dict],
     level_bands: list[dict],
     benchmark_report_path: Path,
+    pairwise_eval_report_path: Path,
 ) -> tuple[list[str], str, dict[str, dict]]:
     order, target_profile, profiles = resolve_gate_profiles(gate_cfg, fallback_profile="dev")
     results = {}
@@ -513,6 +565,7 @@ def evaluate_profiles(
             rows=rows,
             level_bands=level_bands,
             benchmark_report_path=benchmark_report_path,
+            pairwise_eval_report_path=pairwise_eval_report_path,
         )
         failures = evaluate(metrics, thresholds)
         results[name] = {
@@ -574,6 +627,13 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "benchmark_mean_student_level_sd",
         "benchmark_mean_student_rank_sd",
         "benchmark_mean_student_score_sd",
+        "pairwise_eval_present",
+        "pairwise_eval_pair_count",
+        "pairwise_eval_evaluated_count",
+        "pairwise_eval_accuracy",
+        "pairwise_eval_coverage",
+        "pairwise_eval_critical_accuracy",
+        "pairwise_eval_polish_bias_risk_count",
         "reproducibility_report_present",
         "reproducibility_runs_compared",
         "reproducibility_manifest_identical",
@@ -605,6 +665,7 @@ def main() -> int:
     parser.add_argument("--exemplars", default="inputs/exemplars", help="Exemplars root")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Accuracy gate JSON config")
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
+    parser.add_argument("--pairwise-eval-report", default="outputs/pairwise_adjudicator_eval.json", help="Optional hard-pair pairwise adjudicator eval JSON")
     parser.add_argument("--reproducibility-report", default="outputs/reproducibility_report.json", help="Optional reproducibility report JSON")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--output", default="outputs/publish_gate.json", help="Gate result JSON")
@@ -689,6 +750,7 @@ def main() -> int:
         rows=rows,
         level_bands=bands,
         benchmark_report_path=Path(args.benchmark_report),
+        pairwise_eval_report_path=Path(args.pairwise_eval_report),
     )
     highest_profile = highest_passing_profile(profile_order, profile_results)
     target_result = profile_results.get(

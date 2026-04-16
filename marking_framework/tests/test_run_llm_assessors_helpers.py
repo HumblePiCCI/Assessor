@@ -129,6 +129,14 @@ def test_resolve_pass1_contract_for_summary_report_prioritizes_summary_quality()
     assert contract["reqs"]["rationale_min_words"] == 10
 
 
+def test_build_pass1_genre_guidance_prioritizes_literary_interpretation():
+    guidance = rla.build_pass1_genre_guidance("literary_analysis")
+    assert "Score literary interpretation before generic essay polish" in guidance
+    assert "Separate plot recall from analysis" in guidance
+    assert "five-paragraph formula" in guidance
+    assert "conventions and organization after task alignment" in guidance
+
+
 def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],

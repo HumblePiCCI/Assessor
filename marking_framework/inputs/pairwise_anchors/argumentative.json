@@ -1,0 +1,22 @@
+{
+  "genre": "argumentative",
+  "anchors": [
+    {
+      "title": "Reasoning beats confident tone",
+      "decision_rule": "Prefer the argument with a clearer claim, better reasons, and evidence that is explained, even if the other paper sounds more polished."
+    },
+    {
+      "title": "Unsupported persuasion is thin",
+      "decision_rule": "A fluent paper with broad opinion statements should lose to a rougher paper that gives specific support and connects it to the claim."
+    },
+    {
+      "title": "Counterargument matters only when assigned",
+      "decision_rule": "Treat counterargument handling as decisive when the prompt asks for it; otherwise use it as supporting evidence of argumentative control."
+    }
+  ],
+  "caution_checks": [
+    "Which essay proves the claim rather than merely repeating it?",
+    "Are examples specific enough to support the argument?",
+    "Is tone being overvalued against stronger reasoning?"
+  ]
+}

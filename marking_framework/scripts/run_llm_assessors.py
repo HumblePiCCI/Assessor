@@ -199,6 +199,39 @@ def build_scope_grounding_context(scope_grounding: dict | None) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
+def build_pass1_genre_guidance(genre: str | None) -> str:
+    normalized = normalize_genre(genre)
+    if normalized == "literary_analysis":
+        return "\n".join(
+            [
+                "PASS 1 LITERARY-ANALYSIS SCORING GUARDRAILS:",
+                "- Score literary interpretation before generic essay polish.",
+                "- Separate plot recall from analysis: named events help only when the student explains how they support a theme, character claim, conflict, consequence, or author choice.",
+                "- Reward a rougher but intelligible essay when it sustains stronger meaning-making across the response.",
+                "- Do not over-reward five-paragraph formula, length, tidy transitions, or repeated topic sentences when the explanation is thin.",
+                "- Penalize list-like event coverage, mostly summary, or speculative claims that are not tied back to the text.",
+                "- Use conventions and organization after task alignment, interpretation, evidence selection, and evidence explanation unless errors block meaning.",
+            ]
+        )
+    if normalized == "argumentative":
+        return "\n".join(
+            [
+                "PASS 1 ARGUMENT SCORING GUARDRAILS:",
+                "- Score claim, reasons, evidence, and reasoning before persuasive tone or polish.",
+                "- Do not over-reward fluent opinion if the support is vague or disconnected from the claim.",
+            ]
+        )
+    if normalized == "summary_report":
+        return "\n".join(
+            [
+                "PASS 1 SUMMARY SCORING GUARDRAILS:",
+                "- Score accuracy, essential idea selection, concision, and paraphrase before length or fluency.",
+                "- Do not over-reward copied wording or exhaustive detail when the summary misses the main idea.",
+            ]
+        )
+    return ""
+
+
 def _rank_positions(order: list[str]) -> dict[str, int]:
     return {sid: idx for idx, sid in enumerate(order, start=1)}
 
@@ -1215,6 +1248,9 @@ def main() -> int:
     grounding_context = build_scope_grounding_context(scope_grounding)
     if grounding_context:
         grade_context = f"{grade_context}\n\n{grounding_context}".strip() if grade_context else grounding_context
+    genre_guidance = build_pass1_genre_guidance(genre)
+    if genre_guidance:
+        grade_context = f"{grade_context}\n\n{genre_guidance}".strip() if grade_context else genre_guidance
     gate_error = calibration_gate_error(
         routing,
         assessors,

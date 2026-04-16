@@ -1,0 +1,22 @@
+{
+  "genre": "informational_report",
+  "anchors": [
+    {
+      "title": "Information quality wins",
+      "decision_rule": "Prefer accurate, relevant, sufficient information over fluent filler or generic structure."
+    },
+    {
+      "title": "Examples need purpose",
+      "decision_rule": "Facts and examples matter most when they explain the assigned topic for the intended audience."
+    },
+    {
+      "title": "Organization supports usability",
+      "decision_rule": "Headings, sections, and transitions help, but they should not outrank accuracy and completeness."
+    }
+  ],
+  "caution_checks": [
+    "Is the content accurate and relevant?",
+    "Does the paper explain enough for the assigned purpose?",
+    "Is surface fluency masking thin information?"
+  ]
+}

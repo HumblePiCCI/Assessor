@@ -1,0 +1,22 @@
+{
+  "genre": "narrative",
+  "anchors": [
+    {
+      "title": "Story development beats essay shape",
+      "decision_rule": "Prefer stronger development of events, character, setting, conflict, voice, or reflection over a tidy but flat sequence."
+    },
+    {
+      "title": "Narrative purpose matters",
+      "decision_rule": "A rougher story with clearer meaning, tension, or character change can outrank a cleaner story with little effect."
+    },
+    {
+      "title": "Conventions matter when readability breaks",
+      "decision_rule": "Surface errors are decisive only when they interfere with following the story or when development is otherwise close."
+    }
+  ],
+  "caution_checks": [
+    "Which narrative creates a clearer experience for the reader?",
+    "Is the cleaner story underdeveloped or merely a sequence of events?",
+    "Does the rougher story remain understandable?"
+  ]
+}

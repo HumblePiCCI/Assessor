@@ -1,0 +1,26 @@
+{
+  "genre": "literary_analysis",
+  "anchors": [
+    {
+      "title": "Rougher interpretation can win",
+      "decision_rule": "A rougher essay with a clearer interpretive claim, stronger explanation of theme or character, and more meaningful use of evidence should beat a polished plot summary."
+    },
+    {
+      "title": "Formula is not analysis",
+      "decision_rule": "Do not reward five-paragraph control, repeated topic sentences, or tidy transitions over actual literary reasoning about how the text creates meaning."
+    },
+    {
+      "title": "Evidence must be explained",
+      "decision_rule": "Specific events or quotations count most when the student explains how they support the interpretation; named events without explanation are weaker."
+    },
+    {
+      "title": "Mechanics are secondary until meaning breaks",
+      "decision_rule": "Conventions should not bury a paper with substantially stronger interpretation unless the errors make the analysis hard to understand."
+    }
+  ],
+  "caution_checks": [
+    "Which essay explains why the character, conflict, theme, or author choice matters?",
+    "Is the cleaner essay mostly retelling events without a literary claim?",
+    "Is the rougher essay still intelligible enough that its stronger interpretation should count?"
+  ]
+}
