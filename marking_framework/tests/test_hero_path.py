@@ -283,6 +283,7 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("run_llm_assessors.py" in str(part) for call in calls for part in call)
     assert any("boundary_recheck.py" in str(part) for call in calls for part in call)
+    assert any("band_seam_adjudication.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
@@ -336,6 +337,48 @@ def test_hero_path_boundary_recheck_flow(tmp_path, monkeypatch):
     assert "--margin" in flat and "1.5" in flat
     assert "--replicates" in flat and "4" in flat
     assert "--max-students" in flat and "3" in flat
+    assert not any("band_seam_adjudication.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_band_seam_adjudication_flow(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--band-seam-adjudication",
+    ])
+    assert hp.main() == 0
+    aggregate_idx = next(idx for idx, call in enumerate(calls) if any("aggregate_assessments.py" in str(part) for part in call))
+    seam_idx = next(idx for idx, call in enumerate(calls) if any("band_seam_adjudication.py" in str(part) for part in call))
+    assert aggregate_idx < seam_idx
+
+
+def test_hero_path_band_seam_adjudication_fail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+
+    def fake_run(cmd):
+        if any("band_seam_adjudication.py" in str(part) for part in cmd):
+            return 1
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--band-seam-adjudication",
+    ])
+    assert hp.main() == 1
 
 
 def test_hero_path_boundary_recheck_fail(tmp_path, monkeypatch):

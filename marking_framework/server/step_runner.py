@@ -19,6 +19,7 @@ FULL_PIPELINE_STEP_IDS = (
     "aggregate_1",
     "boundary",
     "aggregate_2",
+    "band_seam",
     "consistency",
     "rerank",
     "quality_gate",
@@ -33,6 +34,7 @@ ANCHOR_RESUME_STEP_IDS = (
     "aggregate_1",
     "boundary",
     "aggregate_2",
+    "band_seam",
     "consistency",
     "rerank",
     "quality_gate",
@@ -97,6 +99,7 @@ def pipeline_steps() -> list[dict]:
         {"id": "aggregate_1", "label": "Building consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
         {"id": "boundary", "label": "Rechecking boundary essays", "cmd": ["python3", "scripts/boundary_recheck.py"]},
         {"id": "aggregate_2", "label": "Rebuilding consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
+        {"id": "band_seam", "label": "Adjudicating band seams", "cmd": ["python3", "scripts/band_seam_adjudication.py"]},
         {"id": "consistency", "label": "Collecting pairwise consistency evidence", "cmd": ["python3", "scripts/verify_consistency.py"]},
         {"id": "rerank", "label": "Applying global reranker", "cmd": ["python3", "scripts/global_rerank.py"]},
         {

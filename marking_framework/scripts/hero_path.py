@@ -38,6 +38,7 @@ def main() -> int:
     parser.add_argument("--boundary-margin", type=float, default=1.0, help="Boundary recheck margin in percentage points")
     parser.add_argument("--boundary-replicates", type=int, default=3, help="Boundary recheck replicate attempts")
     parser.add_argument("--boundary-max-students", type=int, default=8, help="Boundary recheck max students")
+    parser.add_argument("--band-seam-adjudication", action="store_true", help="Adjudicate adjacent level seams before consistency reranking")
     parser.add_argument("--skip-grading", action="store_true", help="Skip automatic non-interactive grade curve generation")
     parser.add_argument("--publish-gate", action="store_true", help="Run publish quality gate")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Publish gate config JSON")
@@ -59,6 +60,7 @@ def main() -> int:
         args.calibrate = True
         args.llm_assessors = True
         args.boundary_recheck = True
+        args.band_seam_adjudication = True
         args.verify_consistency = True
         args.apply_consistency = True
         args.publish_gate = True
@@ -123,6 +125,9 @@ def main() -> int:
             if args.allow_missing_data:
                 cmd.append("--allow-missing-data")
             if run(cmd) != 0:
+                return 1
+        if args.band_seam_adjudication:
+            if run(step_cmd("band_seam", ["python3", "scripts/band_seam_adjudication.py"])) != 0:
                 return 1
 
     if args.generate_pairs:
