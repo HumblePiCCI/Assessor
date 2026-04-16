@@ -50,6 +50,10 @@ def num(value, default=0.0) -> float:
         return float(default)
 
 
+def clamp01(value, default=0.0) -> float:
+    return max(0.0, min(1.0, num(value, default)))
+
+
 def load_texts(text_dir: Path) -> dict[str, str]:
     texts = {}
     if not text_dir.exists():
@@ -120,6 +124,32 @@ def effective_window(requested_window: int, metadata: dict | None = None) -> int
     if str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap" and genre == "literary_analysis":
         return max(requested, 4)
     return requested
+
+
+def seed_percentile(seed_rank: int, student_count: int) -> float:
+    if student_count <= 1:
+        return 1.0
+    return max(0.0, min(1.0, 1.0 - ((int(seed_rank) - 1) / max(student_count - 1, 1))))
+
+
+def comparison_reach(row: dict, requested_window: int, student_count: int, metadata: dict | None = None) -> int:
+    base = effective_window(requested_window, metadata)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    genre = resolve_pairwise_genre(metadata)
+    if str(metadata.get("generated_by", "") or "").strip().lower() != "bootstrap" or genre != "literary_analysis":
+        return base
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    borda_pct = clamp01(row.get("borda_percent"), seed_pct)
+    composite_pct = clamp01(row.get("composite_score"), seed_pct)
+    divergence = max(abs(seed_pct - borda_pct), abs(seed_pct - composite_pct))
+    extra = 0
+    if divergence >= 0.6:
+        extra = 6
+    elif divergence >= 0.4:
+        extra = 4
+    elif divergence >= 0.25:
+        extra = 2
+    return min(max(1, student_count - 1), base + extra)
 
 
 def build_prompt(
@@ -221,6 +251,7 @@ def prepare_rows(rows: list[dict]) -> list[dict]:
                     row.get("rubric_after_penalty_percent"),
                     num(row.get("rubric_mean_percent"), 0.0),
                 ),
+                "borda_percent": clamp01(row.get("borda_percent"), 0.0),
                 "composite_score": num(row.get("composite_score"), 0.0),
                 "source": dict(row),
             }
@@ -228,17 +259,22 @@ def prepare_rows(rows: list[dict]) -> list[dict]:
     return prepared
 
 
-def select_pairs(rows: list[dict], window: int) -> list[tuple[dict, dict]]:
+def select_pairs(rows: list[dict], window: int, metadata: dict | None = None) -> list[tuple[dict, dict]]:
     ordered = list(rows)
     pairs = []
     seen = set()
     width = max(1, int(window))
+    count = len(ordered)
+    reach = {
+        row["student_id"]: comparison_reach(row, width, count, metadata)
+        for row in ordered
+    }
     for idx, higher in enumerate(ordered):
-        for offset in range(1, width + 1):
-            lower_idx = idx + offset
-            if lower_idx >= len(ordered):
-                break
+        for lower_idx in range(idx + 1, len(ordered)):
             lower = ordered[lower_idx]
+            gap = lower_idx - idx
+            if gap > max(reach.get(higher["student_id"], width), reach.get(lower["student_id"], width)):
+                continue
             token = (higher["student_id"], lower["student_id"])
             if token in seen:
                 continue
@@ -262,7 +298,7 @@ def collect_judgments(
 ) -> list[dict]:
     judgments = []
     genre = resolve_pairwise_genre(metadata)
-    for higher, lower in select_pairs(rows, effective_window(window, metadata)):
+    for higher, lower in select_pairs(rows, window, metadata):
         prompt = build_prompt(
             rubric,
             outline,

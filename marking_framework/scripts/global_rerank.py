@@ -123,6 +123,16 @@ def normalize_feature(values: dict[str, float]) -> dict[str, float]:
     return {key: (value - lo) / scale for key, value in values.items()}
 
 
+def clamp01(value, default=0.0) -> float:
+    return max(0.0, min(1.0, num(value, default)))
+
+
+def seed_percentile(seed_rank: int, student_count: int) -> float:
+    if student_count <= 1:
+        return 1.0
+    return max(0.0, min(1.0, 1.0 - ((int(seed_rank) - 1) / max(student_count - 1, 1))))
+
+
 def load_seed_rows(path: Path, config: dict) -> list[dict]:
     rows = load_rows(path)
     if not rows:
@@ -475,24 +485,52 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
         sid = row["student_id"]
         stability_penalty = student_stability_penalty(row, per_student)
         incident = float(per_student.get(sid, {}).get("incident_weight", 0.0) or 0.0)
+        support = float(per_student.get(sid, {}).get("support_weight", 0.0) or 0.0)
+        opposition = float(per_student.get(sid, {}).get("opposition_weight", 0.0) or 0.0)
         effective_incident = incident * max(0.25, 1.0 - stability_penalty)
-        if effective_incident >= 2.5:
-            high_cap_effective = min(count, max(1, int(high_cap)))
-            if stability_penalty >= 0.35:
-                high_cap_effective = min(high_cap_effective, max(int(medium_cap), 4))
-            cap = high_cap_effective
+        effective_support = support * max(0.25, 1.0 - stability_penalty)
+        effective_opposition = opposition * max(0.25, 1.0 - stability_penalty)
+        high_cap_effective = min(count, max(1, int(high_cap)))
+        if stability_penalty >= 0.35:
+            high_cap_effective = min(high_cap_effective, max(int(medium_cap), 4))
+        if effective_support >= 2.5:
+            up_cap = high_cap_effective
+        elif effective_support >= 1.0:
+            up_cap = min(count, max(1, int(medium_cap)))
+        else:
+            up_cap = min(count, max(1, int(low_cap)))
+
+        if effective_opposition >= 6.0:
+            down_cap = min(count, max(high_cap_effective * 3, 10))
+        elif effective_opposition >= 3.0:
+            down_cap = min(count, max(int(medium_cap) * 2, 6))
+        elif effective_opposition >= 1.0:
+            down_cap = min(count, max(int(medium_cap), 4))
+        else:
+            down_cap = min(count, max(1, int(low_cap)))
+
+        seed_pct = seed_percentile(int(row["seed_rank"]), count)
+        borda_pct = clamp01(row.get("_borda_feature"), seed_pct)
+        divergence = abs(seed_pct - borda_pct)
+        if borda_pct + 0.35 < seed_pct and effective_opposition >= effective_support + 2.0:
+            down_cap = max(down_cap, min(count, 8))
+        if borda_pct + 0.5 < seed_pct and effective_opposition >= effective_support + 4.0:
+            down_cap = max(down_cap, min(count, 12))
+
+        cap = max(up_cap, down_cap)
+        if effective_opposition >= effective_support + 2.0 and down_cap > up_cap:
+            label = "high_opposition"
+        elif effective_support >= 2.5:
             label = "high_support"
         elif effective_incident >= 1.0:
-            cap = min(count, max(1, int(medium_cap)))
-            label = "medium_support"
+            label = "mixed_evidence"
         else:
-            cap = min(count, max(1, int(low_cap)))
             label = "low_support"
         seed_rank = int(row["seed_rank"])
         draft_floor_lock = bool(row.get("_draft_completion_floor_applied"))
         severe_collapse_rescue = bool(row.get("_severe_collapse_rescue"))
         rescue_best_rank = max(1, seed_rank - (2 if num(row.get("_pre_boundary_calibration_percent"), 0.0) < 67.0 else 3))
-        best_rank = seed_rank if draft_floor_lock else max(1, seed_rank - cap)
+        best_rank = seed_rank if draft_floor_lock else max(1, seed_rank - up_cap)
         rescue_cap_active = severe_collapse_rescue and not draft_floor_lock and rescue_best_rank > best_rank
         if rescue_cap_active:
             best_rank = rescue_best_rank
@@ -500,9 +538,16 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
             "cap": cap,
             "label": "completion_floor_lock" if draft_floor_lock else label,
             "best_rank": best_rank,
-            "worst_rank": min(count, seed_rank + cap),
+            "worst_rank": min(count, seed_rank + down_cap),
+            "up_cap": up_cap,
+            "down_cap": down_cap,
             "stability_penalty": stability_penalty,
             "effective_incident_weight": round(effective_incident, 6),
+            "effective_support_weight": round(effective_support, 6),
+            "effective_opposition_weight": round(effective_opposition, 6),
+            "seed_percentile": round(seed_pct, 6),
+            "borda_percentile": round(borda_pct, 6),
+            "borda_seed_divergence": round(divergence, 6),
             "draft_completion_floor_lock": draft_floor_lock,
             "severe_collapse_rescue_cap": rescue_cap_active,
         }
@@ -603,51 +648,6 @@ def build_constraints(
     blocked_crossings = []
     overridden_crossings = []
 
-    for higher in rows:
-        for lower in rows:
-            if higher["student_id"] == lower["student_id"]:
-                continue
-            if higher["_level_order"] <= lower["_level_order"]:
-                continue
-            stability_penalty = (
-                float(caps.get(lower["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
-                + float(caps.get(higher["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
-            ) / 2.0
-            dynamic_margin = float(min_crossing_margin) * (1.0 + stability_penalty)
-            allowed, detail = crossing_allowed(
-                lower,
-                higher,
-                direction,
-                raw_scores,
-                max_cross_level_gap=max_cross_level_gap,
-                max_cross_rubric_gap=max_cross_rubric_gap,
-                min_crossing_margin=dynamic_margin,
-            )
-            detail["dynamic_margin"] = round(dynamic_margin, 6)
-            detail["stability_penalty"] = round(stability_penalty, 6)
-            if allowed:
-                allowed_crossings.append(detail)
-                continue
-            blocked_crossings.append(detail)
-            reverse_margin = direct_weight(direction, lower["student_id"], higher["student_id"]) - direct_weight(direction, higher["student_id"], lower["student_id"])
-            direct_pairwise_override = (
-                int(detail.get("level_gap", 99)) <= 1
-                and abs(float(detail.get("rubric_gap", 999.0))) <= max(float(max_cross_rubric_gap), 2.0) + 4.0
-                and reverse_margin >= float(hard_evidence_margin)
-            )
-            if direct_pairwise_override:
-                overridden_crossings.append(
-                    {
-                        **detail,
-                        "reason": "direct_high_confidence_pairwise_override",
-                        "reverse_margin": round(reverse_margin, 6),
-                    }
-                )
-                continue
-            note = {"kind": "level_lock", "src": higher["student_id"], "dst": lower["student_id"], "detail": detail}
-            if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
-                dropped_edges.append({**note, "reason": "cycle_avoided"})
-
     draft_floor_rows = [row for row in rows if row.get("_draft_completion_floor_applied")]
     complete_rows = [row for row in rows if not row.get("_draft_completion_floor_applied")]
     for incomplete in draft_floor_rows:
@@ -708,6 +708,51 @@ def build_constraints(
         }
         if not add_edge(adjacency, indegree, added_edges, src, dst, note):
             dropped_edges.append({**note, "reason": "cycle_avoided"})
+
+    for higher in rows:
+        for lower in rows:
+            if higher["student_id"] == lower["student_id"]:
+                continue
+            if higher["_level_order"] <= lower["_level_order"]:
+                continue
+            stability_penalty = (
+                float(caps.get(lower["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
+                + float(caps.get(higher["student_id"], {}).get("stability_penalty", 0.0) or 0.0)
+            ) / 2.0
+            dynamic_margin = float(min_crossing_margin) * (1.0 + stability_penalty)
+            allowed, detail = crossing_allowed(
+                lower,
+                higher,
+                direction,
+                raw_scores,
+                max_cross_level_gap=max_cross_level_gap,
+                max_cross_rubric_gap=max_cross_rubric_gap,
+                min_crossing_margin=dynamic_margin,
+            )
+            detail["dynamic_margin"] = round(dynamic_margin, 6)
+            detail["stability_penalty"] = round(stability_penalty, 6)
+            if allowed:
+                allowed_crossings.append(detail)
+                continue
+            blocked_crossings.append(detail)
+            reverse_margin = direct_weight(direction, lower["student_id"], higher["student_id"]) - direct_weight(direction, higher["student_id"], lower["student_id"])
+            direct_pairwise_override = (
+                int(detail.get("level_gap", 99)) <= 1
+                and abs(float(detail.get("rubric_gap", 999.0))) <= max(float(max_cross_rubric_gap), 2.0) + 4.0
+                and reverse_margin >= float(hard_evidence_margin)
+            )
+            if direct_pairwise_override:
+                overridden_crossings.append(
+                    {
+                        **detail,
+                        "reason": "direct_high_confidence_pairwise_override",
+                        "reverse_margin": round(reverse_margin, 6),
+                    }
+                )
+                continue
+            note = {"kind": "level_lock", "src": higher["student_id"], "dst": lower["student_id"], "detail": detail}
+            if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
+                dropped_edges.append({**note, "reason": "cycle_avoided"})
 
     for row in sorted(rows, key=lambda item: (caps[item["student_id"]]["cap"], item["seed_rank"], item["student_id"])):
         sid = row["student_id"]
@@ -833,6 +878,10 @@ def build_final_rows(
         base_row["rerank_displacement"] = displacement
         base_row["rerank_displacement_cap"] = int(cap_info["cap"])
         base_row["rerank_displacement_cap_label"] = cap_info["label"]
+        base_row["rerank_best_rank"] = int(cap_info["best_rank"])
+        base_row["rerank_worst_rank"] = int(cap_info["worst_rank"])
+        base_row["rerank_up_cap"] = int(cap_info.get("up_cap", cap_info["cap"]))
+        base_row["rerank_down_cap"] = int(cap_info.get("down_cap", cap_info["cap"]))
         base_row["rerank_notes"] = ";".join(notes)
         final_rows.append(base_row)
         score_rows.append(

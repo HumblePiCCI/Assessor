@@ -168,7 +168,7 @@ def test_select_pairs_window():
         {"student_id": "s2", "seed_rank": 2},
         {"student_id": "s3", "seed_rank": 3},
     ]
-    pairs = vc.select_pairs(rows, window=2)
+    pairs = vc.select_pairs(rows, window=2, metadata={})
     assert [(left["student_id"], right["student_id"]) for left, right in pairs] == [("s1", "s2"), ("s1", "s3"), ("s2", "s3")]
 
 
@@ -176,6 +176,20 @@ def test_verify_consistency_uses_bootstrap_literary_window():
     metadata = {"generated_by": "bootstrap", "assignment_genre": "literary_analysis"}
     assert vc.effective_window(2, metadata) == 4
     assert vc.effective_window(4, metadata) == 4
+
+
+def test_select_pairs_expands_for_bootstrap_divergence_outliers():
+    rows = [
+        {"student_id": "s1", "seed_rank": 1, "borda_percent": 0.95, "composite_score": 0.9},
+        {"student_id": "s2", "seed_rank": 2, "borda_percent": 0.75, "composite_score": 0.8},
+        {"student_id": "s3", "seed_rank": 3, "borda_percent": 0.95, "composite_score": 0.9},
+        {"student_id": "s4", "seed_rank": 4, "borda_percent": 0.1, "composite_score": 0.2},
+    ]
+    metadata = {"generated_by": "bootstrap", "assignment_genre": "literary_analysis"}
+    pairs = vc.select_pairs(rows, window=1, metadata=metadata)
+    tokens = [(left["student_id"], right["student_id"]) for left, right in pairs]
+    assert ("s1", "s3") in tokens
+    assert ("s1", "s4") in tokens
 
 
 def test_verify_consistency_build_prompt_includes_literary_guidance():

@@ -123,6 +123,24 @@ def test_global_rerank_allows_direct_high_confidence_override_for_adjacent_level
     assert report_payload["constraints"]["overridden_crossings"]
 
 
+def test_global_rerank_prioritizes_strong_pairwise_edges_before_generic_level_locks(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "74", "composite_score": "0.80"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "73", "composite_score": "0.79"},
+        {"student_id": "s3", "seed_rank": "3", "consensus_rank": "3", "adjusted_level": "2", "rubric_after_penalty_percent": "68", "composite_score": "0.76"},
+    ]
+    checks = [
+        {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s3 interprets the text better."},
+        {"pair": ["s2", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s3 interprets the text better."},
+    ]
+    result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s3", "s1", "s2"]
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    added_kinds = [item["kind"] for item in report_payload["constraints"]["added_edges"]]
+    assert "strong_pairwise_evidence" in added_kinds
+
+
 def test_global_rerank_caps_low_confidence_displacement(tmp_path):
     seed_rows = [
         {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "89", "composite_score": "0.95"},
@@ -136,6 +154,31 @@ def test_global_rerank_caps_low_confidence_displacement(tmp_path):
     result, *_ = run_rerank(tmp_path, seed_rows, checks)
     row = next(item for item in result["final_rows"] if item["student_id"] == "s4")
     assert abs(int(row["rerank_displacement"])) <= int(row["rerank_displacement_cap"])
+
+
+def test_global_rerank_allows_large_downward_move_for_strong_opposition_outlier(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "74", "composite_score": "0.74", "borda_percent": "0.05"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "73", "composite_score": "0.73", "borda_percent": "0.90"},
+        {"student_id": "s3", "seed_rank": "3", "consensus_rank": "3", "adjusted_level": "3", "rubric_after_penalty_percent": "72", "composite_score": "0.72", "borda_percent": "0.88"},
+        {"student_id": "s4", "seed_rank": "4", "consensus_rank": "4", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.71", "borda_percent": "0.86"},
+        {"student_id": "s5", "seed_rank": "5", "consensus_rank": "5", "adjusted_level": "3", "rubric_after_penalty_percent": "70", "composite_score": "0.70", "borda_percent": "0.84"},
+        {"student_id": "s6", "seed_rank": "6", "consensus_rank": "6", "adjusted_level": "3", "rubric_after_penalty_percent": "69", "composite_score": "0.69", "borda_percent": "0.82"},
+        {"student_id": "s7", "seed_rank": "7", "consensus_rank": "7", "adjusted_level": "3", "rubric_after_penalty_percent": "68", "composite_score": "0.68", "borda_percent": "0.80"},
+    ]
+    checks = [
+        {"pair": ["s1", "s2"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s5"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s6"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s7"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+    ]
+    result, *_ = run_rerank(tmp_path, seed_rows, checks)
+    row = next(item for item in result["final_rows"] if item["student_id"] == "s1")
+    assert int(row["final_rank"]) >= 6
+    assert row["rerank_displacement_cap_label"] == "high_opposition"
+    assert int(row["rerank_worst_rank"]) >= 6
 
 
 def test_global_rerank_local_teacher_prior_is_gated_on_clear_cases(tmp_path):
