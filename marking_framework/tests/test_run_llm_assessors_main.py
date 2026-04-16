@@ -681,6 +681,11 @@ def test_run_llm_assessors_uses_literary_seed_order_when_scaffold_draft_is_over_
     )
     assert rla.main() == 0
     for assessor in ("A", "B", "C"):
+        payload = json.loads((pass1_out / f"assessor_{assessor}.json").read_text(encoding="utf-8"))
+        scores = {item["student_id"]: item for item in payload["scores"]}
+        assert scores["s1"]["draft_completion_floor_applied"] is True
+        assert scores["s1"]["rubric_total_points"] < scores["s2"]["rubric_total_points"]
+    for assessor in ("A", "B", "C"):
         ranking = (pass2_out / f"assessor_{assessor}.txt").read_text(encoding="utf-8").strip().splitlines()
         assert ranking == ["s2", "s1"]
 

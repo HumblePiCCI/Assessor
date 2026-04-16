@@ -174,3 +174,45 @@ def test_global_rerank_suppresses_local_prior_during_anchor_calibration(tmp_path
     assert rows["s1"]["teacher_preference_adjustment"] == 0.0
     assert rows["s2"]["teacher_preference_adjustment"] == 0.0
     assert result["report"]["teacher_prior"]["suppressed_by_anchor_calibration"] is True
+
+
+def test_global_rerank_keeps_draft_completion_floor_rows_from_moving_up(tmp_path):
+    seed_rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": "1",
+            "consensus_rank": "1",
+            "adjusted_level": "2",
+            "rubric_after_penalty_percent": "60",
+            "composite_score": "0.60",
+            "draft_completion_floor_applied": "false",
+            "flags": "",
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": "2",
+            "consensus_rank": "2",
+            "adjusted_level": "1",
+            "rubric_after_penalty_percent": "35",
+            "composite_score": "0.35",
+            "draft_completion_floor_applied": "true",
+            "flags": "draft_completion_penalty;draft_completion_floor",
+        },
+        {
+            "student_id": "s3",
+            "seed_rank": "3",
+            "consensus_rank": "3",
+            "adjusted_level": "1",
+            "rubric_after_penalty_percent": "40",
+            "composite_score": "0.40",
+            "draft_completion_floor_applied": "false",
+            "flags": "",
+        },
+    ]
+    checks = [
+        {"pair": ["s2", "s3"], "decision": "KEEP", "confidence": "high", "rationale": "Noisy pairwise check prefers unfinished draft."},
+    ]
+    result, *_ = run_rerank(tmp_path, seed_rows, checks)
+    rows = {row["student_id"]: row for row in result["final_rows"]}
+    assert rows["s2"]["final_rank"] == 3
+    assert rows["s2"]["rerank_notes"].find("draft_completion_floor_lock") >= 0

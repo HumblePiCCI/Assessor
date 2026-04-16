@@ -435,7 +435,7 @@ def build_literary_analysis_seed_order(
 ) -> list[str] | None:
     if not known_ids:
         return None
-    scores = {}
+    ranking_payload = {}
     for sid in known_ids:
         item = _resolve_consensus_pass2_item(sid, assessor_items, "literary_analysis")
         if not item:
@@ -463,10 +463,39 @@ def build_literary_analysis_seed_order(
         note_text = str(item.get("notes", "") or "")
         draft_quality = analyze_draft_quality(texts.get(sid, ""), note_text)
         note_signal = _literary_analysis_signal_bonus_penalty(note_text)
-        scores[sid] = round((0.68 * base_signal) + (0.32 * rubric_score) + note_signal - draft_quality["penalty_points"], 4)
-    if len(scores) != len(known_ids):
+        completion_bucket = 0 if draft_quality.get("hard_floor_incomplete") else 1
+        completion_floor_penalty = 18.0 if draft_quality.get("hard_floor_incomplete") else 0.0
+        final_signal = round(
+            (0.68 * base_signal)
+            + (0.32 * rubric_score)
+            + note_signal
+            - draft_quality["penalty_points"]
+            - completion_floor_penalty,
+            4,
+        )
+        ranking_payload[sid] = {
+            "completion_bucket": completion_bucket,
+            "signal": final_signal,
+            "analysis": analysis,
+            "evidence": evidence,
+            "rubric_score": rubric_score,
+        }
+    if len(ranking_payload) != len(known_ids):
         return None
-    return ranking_from_scores(scores, known_ids)
+    index_lookup = {sid: idx for idx, sid in enumerate(known_ids)}
+    ordered = sorted(
+        known_ids,
+        key=lambda sid: (
+            int(ranking_payload[sid]["completion_bucket"]),
+            float(ranking_payload[sid]["signal"]),
+            float(ranking_payload[sid]["analysis"]),
+            float(ranking_payload[sid]["evidence"]),
+            float(ranking_payload[sid]["rubric_score"]),
+            -index_lookup[sid],
+        ),
+        reverse=True,
+    )
+    return ordered
 
 
 def build_literary_analysis_report_ranking_summary(
@@ -513,7 +542,9 @@ def build_literary_analysis_report_ranking_summary(
         cautions.append("analysis stays basic")
     draft_quality = analyze_draft_quality(text, str(item.get("notes", "") or fallback_summary))
     if draft_quality["penalty_points"] > 0:
-        cautions.append("response still contains scaffold/incomplete draft sections")
+        cautions.append("response is unfinished and still contains scaffold/organizer residue")
+    if draft_quality.get("hard_floor_incomplete"):
+        cautions.append("completion-integrity floor applied because the draft is visibly unfinished")
     if strengths:
         parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
     if cautions:

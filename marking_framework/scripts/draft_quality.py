@@ -22,9 +22,16 @@ INCOMPLETE_NOTE_TOKENS = (
     "underdeveloped structure",
 )
 
+TRAILING_SENTENCE_PUNCTUATION = (".", "!", "?", '"', "'", "”", "’", "…")
+
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"[A-Za-z0-9']+", str(text or "")))
+
+
+def _ends_with_terminal_punctuation(text: str) -> bool:
+    stripped = str(text or "").strip()
+    return bool(stripped) and stripped.endswith(TRAILING_SENTENCE_PUNCTUATION)
 
 
 def analyze_draft_quality(text: str, notes: str = "") -> dict:
@@ -32,6 +39,7 @@ def analyze_draft_quality(text: str, notes: str = "") -> dict:
     placeholder_lines = []
     blank_placeholder_lines = []
     partial_placeholder_lines = []
+    unfinished_placeholder_clauses = []
 
     for line in lines:
         match = SCAFFOLD_HEADING_RE.match(line)
@@ -44,6 +52,8 @@ def analyze_draft_quality(text: str, notes: str = "") -> dict:
             blank_placeholder_lines.append(line)
         elif tail_words <= 6:
             partial_placeholder_lines.append(line)
+        if tail and tail_words <= 8 and not _ends_with_terminal_punctuation(tail):
+            unfinished_placeholder_clauses.append(line)
 
     note_text = str(notes or "").strip().lower()
     note_incomplete = any(token in note_text for token in INCOMPLETE_NOTE_TOKENS)
@@ -51,16 +61,27 @@ def analyze_draft_quality(text: str, notes: str = "") -> dict:
     abrupt_placeholder_ending = bool(last_line and SCAFFOLD_HEADING_RE.match(last_line))
 
     penalty = 0.0
-    penalty += 2.5 * len(placeholder_lines)
-    penalty += 3.5 * len(blank_placeholder_lines)
-    penalty += 2.0 * len(partial_placeholder_lines)
+    penalty += 3.0 * len(placeholder_lines)
+    penalty += 5.0 * len(blank_placeholder_lines)
+    penalty += 3.0 * len(partial_placeholder_lines)
+    penalty += 4.0 * len(unfinished_placeholder_clauses)
     if len(placeholder_lines) >= 3:
-        penalty += 4.0
+        penalty += 6.0
     if note_incomplete:
         penalty += 4.0
     if abrupt_placeholder_ending:
-        penalty += 2.5
-    penalty = min(24.0, penalty)
+        penalty += 6.0
+    hard_floor_incomplete = (
+        len(placeholder_lines) >= 3
+        and (
+            bool(blank_placeholder_lines)
+            or bool(unfinished_placeholder_clauses)
+            or abrupt_placeholder_ending
+        )
+    )
+    if hard_floor_incomplete:
+        penalty = max(penalty, 34.0)
+    penalty = min(40.0, penalty)
 
     reasons = []
     if placeholder_lines:
@@ -69,10 +90,14 @@ def analyze_draft_quality(text: str, notes: str = "") -> dict:
         reasons.append(f"blank scaffold prompts ({len(blank_placeholder_lines)})")
     if partial_placeholder_lines:
         reasons.append(f"unfinished scaffold responses ({len(partial_placeholder_lines)})")
+    if unfinished_placeholder_clauses:
+        reasons.append(f"broken scaffold clauses ({len(unfinished_placeholder_clauses)})")
     if note_incomplete:
         reasons.append("assessor notes already describe the draft as incomplete/fragmentary")
     if abrupt_placeholder_ending:
         reasons.append("response ends on an unfinished scaffold prompt")
+    if hard_floor_incomplete:
+        reasons.append("incomplete scaffold draft triggers completion-integrity floor")
 
     if penalty >= 16.0:
         severity = "high"
@@ -89,8 +114,10 @@ def analyze_draft_quality(text: str, notes: str = "") -> dict:
         "placeholder_line_count": len(placeholder_lines),
         "blank_placeholder_count": len(blank_placeholder_lines),
         "partial_placeholder_count": len(partial_placeholder_lines),
+        "unfinished_placeholder_clause_count": len(unfinished_placeholder_clauses),
         "note_incomplete": note_incomplete,
         "abrupt_placeholder_ending": abrupt_placeholder_ending,
+        "hard_floor_incomplete": hard_floor_incomplete,
         "reasons": reasons,
         "placeholder_lines": placeholder_lines[:8],
     }
@@ -134,4 +161,5 @@ def apply_draft_penalty(item: dict, text: str, notes: str = "") -> tuple[dict, d
     updated["notes"] = f"{note_text} | {note_suffix}" if note_text else note_suffix
     updated["draft_completion_penalty_points"] = round(penalty, 2)
     updated["draft_completion_severity"] = signals.get("severity", "none")
+    updated["draft_completion_floor_applied"] = bool(signals.get("hard_floor_incomplete"))
     return updated, signals

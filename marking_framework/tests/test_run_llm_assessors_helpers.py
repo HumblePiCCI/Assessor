@@ -305,6 +305,42 @@ def test_build_literary_analysis_seed_order_penalizes_incomplete_scaffold_drafts
     assert order == ["s2", "s1"]
 
 
+def test_build_literary_analysis_seed_order_prefers_completed_weak_essay_over_unfinished_scaffold_draft():
+    order = rla.build_literary_analysis_seed_order(
+        ["s1", "s2"],
+        {
+            "s1": (
+                "Ghost- Final Essay\n"
+                "Explanation 1: Though Coach forgives him he makes him\n"
+                "Cite/Detail 2:\n"
+                "Explanation 2:\n"
+                "Reflect on the Theme:\n"
+            ),
+            "s2": (
+                "People can change when they are given second chances. "
+                "This essay is summary-heavy, but it is complete and stays structurally coherent."
+            ),
+        },
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 78.0,
+                    "criteria_points": {"LA1": 78, "LA2": 76, "LA3": 74, "C1": 72, "C3": 70},
+                    "notes": "Relevant theme, but incomplete structure and placeholder text remain.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "rubric_total_points": 58.0,
+                    "criteria_points": {"LA1": 58, "LA2": 54, "LA3": 50, "C1": 62, "C3": 60},
+                    "notes": "Mostly summary, but it is a complete essay with a clear beginning, middle, and end.",
+                },
+            }
+        },
+    )
+    assert order == ["s2", "s1"]
+
+
 def test_build_instructions_seed_order_prefers_complete_safe_usable_procedure():
     order = rla.build_instructions_seed_order(
         ["s1", "s2", "s3", "s4"],

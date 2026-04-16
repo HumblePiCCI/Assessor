@@ -59,6 +59,13 @@ def num(value, default=0.0) -> float:
         return float(default)
 
 
+def truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    return token in {"1", "true", "yes", "y"}
+
+
 def normalize_confidence(value) -> str:
     token = str(value or "").strip().lower()
     if token in {"high"}:
@@ -145,6 +152,8 @@ def load_seed_rows(path: Path, config: dict) -> list[dict]:
         )
         item["_composite_score"] = num(row.get("composite_score"), 0.0)
         item["_borda_feature"] = num(row.get("borda_percent"), num(row.get("borda_points"), 0.0))
+        flags = {token.strip() for token in str(row.get("flags", "") or "").split(";") if token.strip()}
+        item["_draft_completion_floor_applied"] = truthy(row.get("draft_completion_floor_applied")) or ("draft_completion_floor" in flags)
         normalized.append(item)
     return normalized
 
@@ -475,13 +484,15 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
             cap = min(count, max(1, int(low_cap)))
             label = "low_support"
         seed_rank = int(row["seed_rank"])
+        draft_floor_lock = bool(row.get("_draft_completion_floor_applied"))
         caps[sid] = {
             "cap": cap,
-            "label": label,
-            "best_rank": max(1, seed_rank - cap),
+            "label": "completion_floor_lock" if draft_floor_lock else label,
+            "best_rank": seed_rank if draft_floor_lock else max(1, seed_rank - cap),
             "worst_rank": min(count, seed_rank + cap),
             "stability_penalty": stability_penalty,
             "effective_incident_weight": round(effective_incident, 6),
+            "draft_completion_floor_lock": draft_floor_lock,
         }
     return caps
 
@@ -609,6 +620,23 @@ def build_constraints(
             if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
 
+    draft_floor_rows = [row for row in rows if row.get("_draft_completion_floor_applied")]
+    complete_rows = [row for row in rows if not row.get("_draft_completion_floor_applied")]
+    for incomplete in draft_floor_rows:
+        for complete in complete_rows:
+            note = {
+                "kind": "completion_floor",
+                "src": complete["student_id"],
+                "dst": incomplete["student_id"],
+                "detail": {
+                    "complete_student_id": complete["student_id"],
+                    "incomplete_student_id": incomplete["student_id"],
+                    "reason": "completed essays outrank hard-floor incomplete scaffold drafts",
+                },
+            }
+            if not add_edge(adjacency, indegree, added_edges, complete["student_id"], incomplete["student_id"], note):
+                dropped_edges.append({**note, "reason": "cycle_avoided"})
+
     seen_pairs = set()
     for (winner, loser), weight in sorted(direction.items()):
         reverse = direct_weight(direction, loser, winner)
@@ -734,6 +762,8 @@ def build_final_rows(
             notes.append("held_seed_position")
         if abs(displacement) > int(cap_info["cap"]):
             notes.append("cap_relaxed_for_hard_constraints")
+        if cap_info.get("draft_completion_floor_lock"):
+            notes.append("draft_completion_floor_lock")
         if per_student_metrics.get("support_weight", 0.0) > per_student_metrics.get("opposition_weight", 0.0):
             notes.append("net_pairwise_support")
         elif per_student_metrics.get("opposition_weight", 0.0) > per_student_metrics.get("support_weight", 0.0):

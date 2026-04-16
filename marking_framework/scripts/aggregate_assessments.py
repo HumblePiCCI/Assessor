@@ -76,6 +76,13 @@ def _safe_float(value, default=0.0):
         return float(default)
 
 
+def _safe_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    return token in {"1", "true", "yes", "y"}
+
+
 def load_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -237,6 +244,10 @@ def main() -> int:
     rubric_by_student = {sid: [] for sid in student_ids}
     rubric_weights_by_student = {sid: [] for sid in student_ids}
     assessor_weights = {}
+    draft_penalties_by_student = {sid: [] for sid in student_ids}
+    draft_floor_by_student = {sid: False for sid in student_ids}
+    draft_severity_by_student = {sid: "none" for sid in student_ids}
+    severity_order = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
     for assessor in pass1:
         points_possible = assessor.get("rubric_points_possible") or rubric_points_possible
@@ -258,6 +269,14 @@ def main() -> int:
             sid = score["student_id"]
             rubric_by_student[sid].append(float(total))
             rubric_weights_by_student[sid].append(assessor_weight)
+            draft_penalty = _safe_float(score.get("draft_completion_penalty_points"), 0.0)
+            if draft_penalty > 0.0:
+                draft_penalties_by_student[sid].append(draft_penalty)
+            if _safe_bool(score.get("draft_completion_floor_applied")):
+                draft_floor_by_student[sid] = True
+            severity = str(score.get("draft_completion_severity") or "none").strip().lower()
+            if severity_order.get(severity, 0) > severity_order.get(draft_severity_by_student[sid], 0):
+                draft_severity_by_student[sid] = severity
 
     if rubric_points_possible is None:
         all_scores = [v for values in rubric_by_student.values() for v in values]
@@ -389,6 +408,13 @@ def main() -> int:
             flags.append("portfolio_mode")
         if conventions_penalty_applied:
             flags.append("conventions_penalty")
+        draft_penalty_points = max(draft_penalties_by_student.get(sid, []) or [0.0])
+        draft_floor_applied = bool(draft_floor_by_student.get(sid, False))
+        draft_severity = str(draft_severity_by_student.get(sid, "none") or "none")
+        if draft_penalty_points > 0.0:
+            flags.append("draft_completion_penalty")
+        if draft_floor_applied:
+            flags.append("draft_completion_floor")
 
         adjusted_band = get_level_band(rubric_after_penalty, level_bands)
         adjusted_level = adjusted_band["level"] if adjusted_band else ""
@@ -429,6 +455,9 @@ def main() -> int:
                 "portfolio_piece_top70_mean": portfolio_summary.get("piece_top70_mean", ""),
                 "portfolio_piece_top80_mean": portfolio_summary.get("piece_top80_mean", ""),
                 "portfolio_piece_lt60_mean": portfolio_summary.get("piece_lt60_mean", ""),
+                "draft_completion_penalty_points": round(draft_penalty_points, 2),
+                "draft_completion_floor_applied": "true" if draft_floor_applied else "false",
+                "draft_completion_severity": draft_severity,
                 "anchor_adjustment_points": 0.0,
                 "anchor_calibration_active": "false",
                 "flags": ";".join(flags),

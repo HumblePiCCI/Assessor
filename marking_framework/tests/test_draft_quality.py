@@ -15,10 +15,12 @@ def test_analyze_draft_quality_detects_scaffold_placeholders():
     Reflect on the Theme:
     """
     signals = dq.analyze_draft_quality(text, "Basic argument with incomplete structure and limited evidence.")
-    assert signals["penalty_points"] >= 16.0
+    assert signals["penalty_points"] >= 34.0
     assert signals["severity"] == "high"
     assert signals["placeholder_line_count"] >= 5
     assert signals["blank_placeholder_count"] >= 2
+    assert signals["unfinished_placeholder_clause_count"] >= 1
+    assert signals["hard_floor_incomplete"] is True
     assert any("scaffold" in reason for reason in signals["reasons"])
 
 
@@ -36,3 +38,4 @@ def test_apply_draft_penalty_reduces_score_and_marks_warning():
     assert updated["criteria_points"]["LA1"] < 80.0
     assert "incomplete_scaffold_draft" in updated["warnings"]
     assert "Deterministic draft-completion penalty applied" in updated["notes"]
+    assert updated["draft_completion_floor_applied"] is True
