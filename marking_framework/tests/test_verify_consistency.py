@@ -172,6 +172,27 @@ def test_select_pairs_window():
     assert [(left["student_id"], right["student_id"]) for left, right in pairs] == [("s1", "s2"), ("s1", "s3"), ("s2", "s3")]
 
 
+def test_verify_consistency_uses_bootstrap_literary_window():
+    metadata = {"generated_by": "bootstrap", "assignment_genre": "literary_analysis"}
+    assert vc.effective_window(2, metadata) == 4
+    assert vc.effective_window(4, metadata) == 4
+
+
+def test_verify_consistency_build_prompt_includes_literary_guidance():
+    prompt = vc.build_prompt(
+        "rubric",
+        "outline",
+        {"student_id": "s1", "seed_rank": 1, "level": "3", "rubric_after_penalty_percent": 70.0},
+        {"student_id": "s2", "seed_rank": 2, "level": "3", "rubric_after_penalty_percent": 68.0},
+        "Essay one",
+        "Essay two",
+        genre="literary_analysis",
+        metadata={"generated_by": "bootstrap", "assignment_genre": "literary_analysis"},
+    )
+    assert "Do not over-reward rigid five-paragraph structure" in prompt
+    assert "cold-start classroom cohort" in prompt
+
+
 def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch):
     scores_path = tmp_path / "scores.csv"
     rows = [

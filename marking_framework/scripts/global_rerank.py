@@ -154,6 +154,11 @@ def load_seed_rows(path: Path, config: dict) -> list[dict]:
         item["_borda_feature"] = num(row.get("borda_percent"), num(row.get("borda_points"), 0.0))
         flags = {token.strip() for token in str(row.get("flags", "") or "").split(";") if token.strip()}
         item["_draft_completion_floor_applied"] = truthy(row.get("draft_completion_floor_applied")) or ("draft_completion_floor" in flags)
+        item["_severe_collapse_rescue"] = "severe_collapse_rescue" in flags
+        item["_pre_boundary_calibration_percent"] = num(
+            row.get("pre_boundary_calibration_percent"),
+            item["_rubric_after_penalty_percent"],
+        )
         normalized.append(item)
     return normalized
 
@@ -485,14 +490,21 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
             label = "low_support"
         seed_rank = int(row["seed_rank"])
         draft_floor_lock = bool(row.get("_draft_completion_floor_applied"))
+        severe_collapse_rescue = bool(row.get("_severe_collapse_rescue"))
+        rescue_best_rank = max(1, seed_rank - (2 if num(row.get("_pre_boundary_calibration_percent"), 0.0) < 67.0 else 3))
+        best_rank = seed_rank if draft_floor_lock else max(1, seed_rank - cap)
+        rescue_cap_active = severe_collapse_rescue and not draft_floor_lock and rescue_best_rank > best_rank
+        if rescue_cap_active:
+            best_rank = rescue_best_rank
         caps[sid] = {
             "cap": cap,
             "label": "completion_floor_lock" if draft_floor_lock else label,
-            "best_rank": seed_rank if draft_floor_lock else max(1, seed_rank - cap),
+            "best_rank": best_rank,
             "worst_rank": min(count, seed_rank + cap),
             "stability_penalty": stability_penalty,
             "effective_incident_weight": round(effective_incident, 6),
             "draft_completion_floor_lock": draft_floor_lock,
+            "severe_collapse_rescue_cap": rescue_cap_active,
         }
     return caps
 
@@ -589,6 +601,7 @@ def build_constraints(
     dropped_edges = []
     allowed_crossings = []
     blocked_crossings = []
+    overridden_crossings = []
 
     for higher in rows:
         for lower in rows:
@@ -616,6 +629,21 @@ def build_constraints(
                 allowed_crossings.append(detail)
                 continue
             blocked_crossings.append(detail)
+            reverse_margin = direct_weight(direction, lower["student_id"], higher["student_id"]) - direct_weight(direction, higher["student_id"], lower["student_id"])
+            direct_pairwise_override = (
+                int(detail.get("level_gap", 99)) <= 1
+                and abs(float(detail.get("rubric_gap", 999.0))) <= max(float(max_cross_rubric_gap), 2.0) + 4.0
+                and reverse_margin >= float(hard_evidence_margin)
+            )
+            if direct_pairwise_override:
+                overridden_crossings.append(
+                    {
+                        **detail,
+                        "reason": "direct_high_confidence_pairwise_override",
+                        "reverse_margin": round(reverse_margin, 6),
+                    }
+                )
+                continue
             note = {"kind": "level_lock", "src": higher["student_id"], "dst": lower["student_id"], "detail": detail}
             if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
@@ -636,6 +664,26 @@ def build_constraints(
             }
             if not add_edge(adjacency, indegree, added_edges, complete["student_id"], incomplete["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
+
+    for row in sorted(rows, key=lambda item: int(item["seed_rank"])):
+        sid = row["student_id"]
+        cap_info = caps.get(sid, {})
+        if not cap_info.get("severe_collapse_rescue_cap"):
+            continue
+        best_rank = int(cap_info["best_rank"])
+        for other in rows:
+            oid = other["student_id"]
+            if oid == sid:
+                continue
+            if int(other["seed_rank"]) < best_rank:
+                note = {
+                    "kind": "severe_collapse_rescue_cap_up",
+                    "src": oid,
+                    "dst": sid,
+                    "detail": {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]},
+                }
+                if not add_edge(adjacency, indegree, added_edges, oid, sid, note):
+                    dropped_edges.append({**note, "reason": "cycle_avoided"})
 
     seen_pairs = set()
     for (winner, loser), weight in sorted(direction.items()):
@@ -694,6 +742,7 @@ def build_constraints(
         "dropped_edges": dropped_edges,
         "allowed_crossings": allowed_crossings,
         "blocked_crossings": blocked_crossings,
+        "overridden_crossings": overridden_crossings,
     }
 
 
@@ -764,6 +813,8 @@ def build_final_rows(
             notes.append("cap_relaxed_for_hard_constraints")
         if cap_info.get("draft_completion_floor_lock"):
             notes.append("draft_completion_floor_lock")
+        if cap_info.get("severe_collapse_rescue_cap"):
+            notes.append("severe_collapse_rescue_cap")
         if per_student_metrics.get("support_weight", 0.0) > per_student_metrics.get("opposition_weight", 0.0):
             notes.append("net_pairwise_support")
         elif per_student_metrics.get("opposition_weight", 0.0) > per_student_metrics.get("support_weight", 0.0):

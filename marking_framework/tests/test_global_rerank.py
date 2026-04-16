@@ -108,6 +108,21 @@ def test_global_rerank_preserves_level_lock_without_justified_crossing(tmp_path)
     assert [row["student_id"] for row in rows] == ["s2", "s1"]
 
 
+def test_global_rerank_allows_direct_high_confidence_override_for_adjacent_levels(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.78"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "2", "rubric_after_penalty_percent": "67", "composite_score": "0.74"},
+    ]
+    checks = [
+        {"pair": ["s1", "s2"], "decision": "SWAP", "confidence": "high", "rationale": "s2 is clearly stronger on interpretation despite the lower seed."},
+    ]
+    result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s2", "s1"]
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["constraints"]["overridden_crossings"]
+
+
 def test_global_rerank_caps_low_confidence_displacement(tmp_path):
     seed_rows = [
         {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "89", "composite_score": "0.95"},
@@ -216,3 +231,77 @@ def test_global_rerank_keeps_draft_completion_floor_rows_from_moving_up(tmp_path
     rows = {row["student_id"]: row for row in result["final_rows"]}
     assert rows["s2"]["final_rank"] == 3
     assert rows["s2"]["rerank_notes"].find("draft_completion_floor_lock") >= 0
+
+
+def test_global_rerank_caps_severe_collapse_rescue_rows(tmp_path):
+    seed_rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": "1",
+            "consensus_rank": "1",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "76",
+            "pre_boundary_calibration_percent": "76",
+            "composite_score": "0.90",
+            "flags": "",
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": "2",
+            "consensus_rank": "2",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "74",
+            "pre_boundary_calibration_percent": "74",
+            "composite_score": "0.86",
+            "flags": "",
+        },
+        {
+            "student_id": "s3",
+            "seed_rank": "3",
+            "consensus_rank": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "73",
+            "pre_boundary_calibration_percent": "73",
+            "composite_score": "0.84",
+            "flags": "",
+        },
+        {
+            "student_id": "s4",
+            "seed_rank": "6",
+            "consensus_rank": "6",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "70",
+            "pre_boundary_calibration_percent": "62.5",
+            "composite_score": "0.80",
+            "flags": "boundary_calibration;severe_collapse_rescue",
+        },
+        {
+            "student_id": "s5",
+            "seed_rank": "4",
+            "consensus_rank": "4",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "72",
+            "pre_boundary_calibration_percent": "72",
+            "composite_score": "0.82",
+            "flags": "",
+        },
+        {
+            "student_id": "s6",
+            "seed_rank": "5",
+            "consensus_rank": "5",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": "71",
+            "pre_boundary_calibration_percent": "71",
+            "composite_score": "0.81",
+            "flags": "",
+        },
+    ]
+    checks = [
+        {"pair": ["s1", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "rescued essay seems stronger"},
+        {"pair": ["s2", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "rescued essay seems stronger"},
+        {"pair": ["s3", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "rescued essay seems stronger"},
+    ]
+    result, *_ = run_rerank(tmp_path, seed_rows, checks)
+    rows = {row["student_id"]: row for row in result["final_rows"]}
+    assert rows["s4"]["final_rank"] >= 4
+    assert "severe_collapse_rescue_cap" in rows["s4"]["rerank_notes"]

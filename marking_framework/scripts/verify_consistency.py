@@ -7,12 +7,14 @@ from pathlib import Path
 
 try:
     from scripts.assessor_utils import load_file_text, resolve_input_path
+    from scripts.assessor_context import load_class_metadata, normalize_genre
     from scripts.global_rerank import run_global_rerank
     from scripts.llm_assessors_core import json_from_text
     from scripts.levels import normalize_level
     from scripts.openai_client import extract_text, responses_create
 except ImportError:  # pragma: no cover - Support running as script without package context
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
+    from assessor_context import load_class_metadata, normalize_genre  # pragma: no cover
     from global_rerank import run_global_rerank  # pragma: no cover
     from llm_assessors_core import json_from_text  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
@@ -71,7 +73,68 @@ def normalize_decision(value) -> str:
     return "SWAP" if token == "SWAP" else "KEEP"
 
 
-def build_prompt(rubric: str, outline: str, higher: dict, lower: dict, higher_text: str, lower_text: str) -> str:
+def load_pairwise_metadata(path: Path | None) -> dict:
+    if path is None or not path.exists():
+        return {}
+    try:
+        payload = load_class_metadata(path)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def resolve_pairwise_genre(metadata: dict | None) -> str:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    raw = (
+        metadata.get("genre")
+        or metadata.get("assignment_genre")
+        or metadata.get("genre_form")
+        or metadata.get("assessment_unit")
+    )
+    return str(normalize_genre(raw) or "").strip().lower()
+
+
+def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None) -> str:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    lines = []
+    if genre == "literary_analysis":
+        lines.extend(
+            [
+                "Literary-analysis ranking rules:",
+                "- Prioritize the strength of the interpretive claim, the depth of explanation, and how well evidence is connected to the theme or idea.",
+                "- Do not over-reward rigid five-paragraph structure, formulaic topic sentences, or plot summary when the analysis is thinner.",
+                "- A complete essay with stronger interpretation and better explanation should outrank a more mechanical essay with weaker insight, even if the mechanical essay looks more formulaic.",
+            ]
+        )
+    if str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap" and genre:
+        lines.append(
+            "This is a cold-start classroom cohort. Be conservative about structure-only wins; prefer essays with clearer meaning-making and prompt-aligned explanation."
+        )
+    return "\n".join(lines).strip()
+
+
+def effective_window(requested_window: int, metadata: dict | None = None) -> int:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    requested = max(1, int(requested_window))
+    genre = resolve_pairwise_genre(metadata)
+    if str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap" and genre == "literary_analysis":
+        return max(requested, 4)
+    return requested
+
+
+def build_prompt(
+    rubric: str,
+    outline: str,
+    higher: dict,
+    lower: dict,
+    higher_text: str,
+    lower_text: str,
+    *,
+    genre: str = "",
+    metadata: dict | None = None,
+) -> str:
+    extra_guidance = genre_specific_pairwise_guidance(genre, metadata)
+    guidance_block = f"\nAdditional ranking guidance:\n{extra_guidance}\n" if extra_guidance else ""
     return f"""You are collecting pairwise ranking evidence for a global reranker.
 
 Rubric:
@@ -79,6 +142,7 @@ Rubric:
 
 Assignment Outline:
 {outline}
+{guidance_block}
 
 Current seed order:
 - Higher seed essay: {higher['student_id']} (seed rank {higher['seed_rank']}, level {higher['level'] or 'unknown'}, rubric {higher['rubric_after_penalty_percent']:.2f}%)
@@ -194,9 +258,11 @@ def collect_judgments(
     reasoning: str,
     max_output_tokens: int,
     window: int,
+    metadata: dict | None = None,
 ) -> list[dict]:
     judgments = []
-    for higher, lower in select_pairs(rows, window):
+    genre = resolve_pairwise_genre(metadata)
+    for higher, lower in select_pairs(rows, effective_window(window, metadata)):
         prompt = build_prompt(
             rubric,
             outline,
@@ -204,6 +270,8 @@ def collect_judgments(
             lower,
             texts.get(higher["student_id"], ""),
             texts.get(lower["student_id"], ""),
+            genre=genre,
+            metadata=metadata,
         )
         response = responses_create(
             model=model,
@@ -299,6 +367,7 @@ def main() -> int:
     parser.add_argument("--texts", default="processing/normalized_text", help="Essay text dir")
     parser.add_argument("--rubric", default="inputs/rubric.md", help="Rubric file")
     parser.add_argument("--outline", default="inputs/assignment_outline.md", help="Assignment outline file")
+    parser.add_argument("--class-metadata", default="inputs/class_metadata.json", help="Class metadata JSON")
     parser.add_argument("--routing", default="config/llm_routing.json", help="Routing config")
     parser.add_argument("--model", default="gpt-5.4-mini", help="Model for pairwise checks")
     parser.add_argument("--reasoning", default="low", help="Reasoning effort for pairwise checks")
@@ -327,6 +396,7 @@ def main() -> int:
     texts = load_texts(Path(args.texts))
     rubric_path = resolve_input_path(Path(args.rubric), "rubric")
     outline_path = resolve_input_path(Path(args.outline), "assignment_outline")
+    metadata = load_pairwise_metadata(Path(args.class_metadata))
     rubric = load_file_text(rubric_path)
     outline = load_file_text(outline_path)
 
@@ -340,6 +410,7 @@ def main() -> int:
         reasoning=args.reasoning,
         max_output_tokens=max(64, int(args.max_output_tokens)),
         window=max(1, int(args.window)),
+        metadata=metadata,
     )
     out_path = Path(args.output)
     write_judgment_payload(
@@ -348,7 +419,7 @@ def main() -> int:
         judgments,
         model=args.model,
         routing=args.routing,
-        window=max(1, int(args.window)),
+        window=effective_window(max(1, int(args.window)), metadata),
         source_scores=str(scores_path),
     )
     print(f"Pairwise judgments saved to {out_path}")
