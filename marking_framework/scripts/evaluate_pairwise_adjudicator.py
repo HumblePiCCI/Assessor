@@ -127,7 +127,7 @@ def judgment_outcome(item: dict) -> dict | None:
         seed_order = item.get("seed_order", {}) if isinstance(item.get("seed_order"), dict) else {}
         higher = str(seed_order.get("higher") or left).strip()
         lower = str(seed_order.get("lower") or right).strip()
-        decision = vc.normalize_decision(item.get("decision"))
+        decision = vc.decision_from_winner_side(item.get("winner_side")) or vc.normalize_decision(item.get("decision"))
         winner = lower if decision == "SWAP" else higher
         loser = higher if decision == "SWAP" else lower
     if winner not in {left, right} or loser not in {left, right} or winner == loser:
@@ -139,9 +139,11 @@ def judgment_outcome(item: dict) -> dict | None:
         "loser": loser,
         "confidence": vc.normalize_confidence(item.get("confidence")),
         "weight": confidence_weight(item.get("confidence")),
-        "decision": vc.normalize_decision(item.get("decision")),
+        "winner_side": vc.normalize_winner_side(item.get("winner_side")) or vc.winner_side_from_decision(item.get("decision")),
+        "decision": vc.decision_from_winner_side(item.get("winner_side")) or vc.normalize_decision(item.get("decision")),
         "decision_basis": vc.normalize_decision_basis(item.get("decision_basis")),
         "cautions_applied": vc.normalize_cautions(item.get("cautions_applied")),
+        "decision_checks": vc.normalize_decision_checks(item.get("decision_checks")),
         "rationale": str(item.get("rationale", "") or "").strip(),
         "raw": item,
     }
@@ -162,6 +164,10 @@ def outcomes_from_judgments(path: Path) -> dict[str, dict]:
     if not isinstance(raw_items, list):
         raw_items = []
 
+    return aggregate_judgment_outcomes(raw_items, source=str(path))
+
+
+def aggregate_judgment_outcomes(raw_items: list[dict], *, source: str) -> dict[str, dict]:
     buckets: dict[str, dict] = {}
     for item in raw_items:
         if not isinstance(item, dict):
@@ -195,7 +201,7 @@ def outcomes_from_judgments(path: Path) -> dict[str, dict]:
             "judgment_count": len(bucket["judgments"]),
             "strongest_judgment": strongest,
             "judgments": bucket["judgments"],
-            "source": str(path),
+            "source": source,
         }
     return outcomes
 
@@ -264,6 +270,8 @@ def live_outcomes(
     reasoning: str,
     max_output_tokens: int,
     anchor_dir: str,
+    orientation_audit: bool = True,
+    replicates: int = 1,
 ) -> dict[str, dict]:
     outcomes = {}
     missing_text = sorted({sid for pair in pairs for sid in pair["pair"] if not texts.get(sid)})
@@ -271,37 +279,38 @@ def live_outcomes(
         raise ValueError(f"Missing essay text for hard-pair eval: {', '.join(missing_text)}")
     for gold_pair in pairs:
         higher, lower = orient_pair(gold_pair, rows_by_id)
-        judgment = vc.judge_pair(
-            rubric,
-            outline,
-            higher,
-            lower,
-            texts.get(higher["student_id"], ""),
-            texts.get(lower["student_id"], ""),
-            model=model,
-            routing=routing,
-            reasoning=reasoning,
-            max_output_tokens=max_output_tokens,
-            genre=genre,
-            metadata=metadata,
-            selection_reasons=["gold_hard_pair_eval"],
-            selection_details=[
+        judgments = []
+        for replicate_idx in range(max(1, int(replicates))):
+            details = [
                 "This pair was selected because prior adjudication marked it as a difficult ranking boundary.",
-            ],
-            anchor_dir=anchor_dir,
-        )
-        outcome = judgment_outcome(judgment)
+            ]
+            if replicates > 1:
+                details.append(f"Independent replicate {replicate_idx + 1} of {replicates}; re-read the essays from scratch.")
+            judgments.append(
+                vc.judge_pair_with_orientation_audit(
+                    rubric,
+                    outline,
+                    higher,
+                    lower,
+                    texts.get(higher["student_id"], ""),
+                    texts.get(lower["student_id"], ""),
+                    model=model,
+                    routing=routing,
+                    reasoning=reasoning,
+                    max_output_tokens=max_output_tokens,
+                    genre=genre,
+                    metadata=metadata,
+                    selection_reasons=["gold_hard_pair_eval"],
+                    selection_details=details,
+                    anchor_dir=anchor_dir,
+                    orientation_audit=orientation_audit,
+                    student_count=len(rows_by_id),
+                )
+            )
+        aggregated = aggregate_judgment_outcomes(judgments, source="live_model")
+        outcome = aggregated.get(gold_pair_key(gold_pair))
         if outcome:
-            outcomes[gold_pair_key(gold_pair)] = {
-                "pair": outcome["pair"],
-                "winner": outcome["winner"],
-                "ambiguous": False,
-                "winner_weights": {outcome["winner"]: outcome["weight"]},
-                "judgment_count": 1,
-                "strongest_judgment": outcome,
-                "judgments": [outcome],
-                "source": "live_model",
-            }
+            outcomes[gold_pair_key(gold_pair)] = outcome
     return outcomes
 
 
@@ -454,6 +463,8 @@ def main() -> int:
     parser.add_argument("--reasoning", default="low", help="Reasoning effort for live model eval")
     parser.add_argument("--max-output-tokens", type=int, default=600, help="Max model output tokens")
     parser.add_argument("--anchor-dir", default=str(vc.DEFAULT_PAIRWISE_ANCHOR_DIR), help="Pairwise calibration anchor directory")
+    parser.add_argument("--disable-orientation-audit", action="store_true", help="Disable swapped-read orientation auditing for high-risk literary-analysis live eval pairs")
+    parser.add_argument("--replicates", type=int, default=1, help="Independent live model judgments per selected hard pair")
     parser.add_argument("--tags", default="", help="Comma-separated tag filter")
     parser.add_argument("--priorities", default="", help="Comma-separated priority filter")
     parser.add_argument("--limit", type=int, default=0, help="Limit selected pairs")
@@ -504,6 +515,8 @@ def main() -> int:
             reasoning=args.reasoning,
             max_output_tokens=max(64, int(args.max_output_tokens)),
             anchor_dir=args.anchor_dir,
+            orientation_audit=not args.disable_orientation_audit,
+            replicates=max(1, int(args.replicates)),
         )
         mode = "live_model"
 
@@ -529,6 +542,8 @@ def main() -> int:
             "model": args.model if mode == "live_model" else "",
             "routing": args.routing if mode == "live_model" else "",
             "anchor_dir": args.anchor_dir,
+            "orientation_audit": (not args.disable_orientation_audit) if mode == "live_model" else False,
+            "replicates": max(1, int(args.replicates)) if mode == "live_model" else 1,
         },
         **evaluated,
     }

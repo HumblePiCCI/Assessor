@@ -115,6 +115,7 @@ def test_live_pair_eval_uses_anchor_prompt_without_leaking_gold_winner(monkeypat
         reasoning="low",
         max_output_tokens=600,
         anchor_dir=str(anchor_dir),
+        orientation_audit=False,
     )
 
     prompt = prompts[0]
@@ -124,6 +125,22 @@ def test_live_pair_eval_uses_anchor_prompt_without_leaking_gold_winner(monkeypat
     assert "Gold expects" not in prompt
     assert "Do not leak" not in prompt
     assert "secret_gold_tag" not in prompt
+
+
+def test_pairwise_eval_prefers_winner_side_over_conflicting_decision():
+    outcome = epa.judgment_outcome(
+        {
+            "pair": ["a", "b"],
+            "seed_order": {"higher": "a", "lower": "b"},
+            "winner_side": "B",
+            "decision": "KEEP",
+            "confidence": "high",
+        }
+    )
+    assert outcome["winner"] == "b"
+    assert outcome["loser"] == "a"
+    assert outcome["winner_side"] == "B"
+    assert outcome["decision"] == "SWAP"
 
 
 def test_pairwise_eval_reads_pairwise_matrix_comparisons(tmp_path):

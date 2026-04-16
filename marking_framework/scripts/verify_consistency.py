@@ -13,6 +13,7 @@ try:
     from scripts.llm_assessors_core import json_from_text
     from scripts.levels import normalize_level
     from scripts.openai_client import extract_text, responses_create
+    from scripts.draft_quality import analyze_draft_quality
 except ImportError:  # pragma: no cover - Support running as script without package context
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
     from assessor_context import load_class_metadata, normalize_genre  # pragma: no cover
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover - Support running as script without pack
     from llm_assessors_core import json_from_text  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
     from openai_client import extract_text, responses_create  # pragma: no cover
+    from draft_quality import analyze_draft_quality  # pragma: no cover
 
 
 RESPONSE_FORMAT = {
@@ -27,6 +29,7 @@ RESPONSE_FORMAT = {
     "schema": {
         "type": "object",
         "properties": {
+            "winner_side": {"type": "string", "enum": ["A", "B"]},
             "decision": {"type": "string", "enum": ["KEEP", "SWAP"]},
             "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
             "rationale": {"type": "string"},
@@ -71,8 +74,30 @@ RESPONSE_FORMAT = {
                     ],
                 },
             },
+            "decision_checks": {
+                "type": "object",
+                "properties": {
+                    "deeper_interpretation": {"type": "string", "enum": ["A", "B", "tie"]},
+                    "better_text_evidence_explanation": {"type": "string", "enum": ["A", "B", "tie"]},
+                    "cleaner_or_more_formulaic": {"type": "string", "enum": ["A", "B", "tie"]},
+                    "rougher_but_stronger_content": {"type": "string", "enum": ["A", "B", "none"]},
+                    "completion_advantage": {"type": "string", "enum": ["A", "B", "tie"]},
+                    "cleaner_wins_on_substance": {"type": "string"},
+                    "rougher_loses_because": {"type": "string"},
+                },
+                "required": [
+                    "deeper_interpretation",
+                    "better_text_evidence_explanation",
+                    "cleaner_or_more_formulaic",
+                    "rougher_but_stronger_content",
+                    "completion_advantage",
+                    "cleaner_wins_on_substance",
+                    "rougher_loses_because",
+                ],
+                "additionalProperties": False,
+            },
         },
-        "required": ["decision", "confidence", "rationale", "criterion_notes", "decision_basis", "cautions_applied"],
+        "required": ["winner_side", "decision", "confidence", "rationale", "criterion_notes", "decision_basis", "cautions_applied", "decision_checks"],
         "additionalProperties": False,
     },
 }
@@ -106,6 +131,7 @@ GENRE_PRIORITY_RULES = {
         "criteria": [
             "Task alignment and interpretive claim about the text",
             "Depth of literary reasoning about theme, character, choices, consequences, or craft",
+            "Sustained explanation of a relationship, conflict, pattern, or mechanism of change when it reveals literary meaning",
             "Specific text evidence and explanation of how it proves the interpretation",
             "Distinction between analysis and plot summary",
             "Organization and coherence as support for the analysis",
@@ -114,7 +140,10 @@ GENRE_PRIORITY_RULES = {
         "cautions": [
             "A rougher essay with a clearer interpretation, better evidence explanation, or more task-specific meaning should beat a cleaner formulaic essay with thin insight.",
             "Do not let a five-paragraph shape, tidy topic sentences, length, or surface coherence outrank stronger literary thinking.",
+            "Do not require both essays to use the same theme wording. A defensible theme about trauma, healing, identity, trust, accountability, consequences, or support can win when it is better developed.",
+            "A sustained analysis of one important relationship, conflict, or mechanism can beat a broader list of events that repeats a simple theme.",
             "Plot summary is not analysis unless the student explains how the events support the claim.",
+            "An unfinished scaffold, outline, or fragmentary draft should not beat a complete essay unless the complete essay is off-task or meaning is not recoverable.",
         ],
     },
     "argumentative": {
@@ -436,7 +465,7 @@ def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None, a
         format_numbered(rules["criteria"]),
         "Meaning-before-polish guardrails:",
         *[f"- {item}" for item in rules["cautions"]],
-        "- Do not use aggregate rank, Borda, rubric percent, or seed order as the reason for the decision; those are context only.",
+        "- Do not use aggregate rank, Borda, rubric percent, level, or seed order as evidence; the pairwise read is blind because upstream signals can be wrong.",
         "- Use organization and conventions as tie-breakers unless they materially affect meaning, task completion, accuracy, or genre function.",
     ]
     if str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap" and genre:
@@ -591,24 +620,32 @@ def build_prompt(
     selection_reasons: list[str] | None = None,
     selection_details: list[str] | None = None,
     anchor_dir: str | Path | None = None,
+    orientation_context: str = "",
 ) -> str:
     extra_guidance = genre_specific_pairwise_guidance(genre, metadata, anchor_dir)
     guidance_block = f"\nAdditional ranking guidance:\n{extra_guidance}\n" if extra_guidance else ""
     reason_text = ", ".join(selection_reasons or []) or "seed_window"
     details = "\n".join(f"- {detail}" for detail in (selection_details or []) if detail)
     details_block = f"\nSelection details:\n{details}\n" if details else ""
+    orientation_block = f"\nOrientation audit context:\n{orientation_context.strip()}\n" if str(orientation_context or "").strip() else ""
     output_contract = """Judgment process:
 1. Compare the essays using the priority frame above, in order.
 2. Name which essay is stronger for each major criterion. Use "tie" when there is no meaningful difference.
-3. Decide KEEP only if Essay A should remain above Essay B. Decide SWAP only if Essay B should move above Essay A.
-4. If one essay is cleaner or more formulaic but the other has stronger task-specific content, reasoning, evidence, or genre fulfillment, do not choose the cleaner essay for polish alone.
-5. If conventions or organization drive the result, explain whether they merely polish the writing or actually affect meaning, accuracy, completion, or usability.
-6. Confidence calibration:
+3. Complete decision_checks before deciding. For literary analysis, "deeper_interpretation" and "better_text_evidence_explanation" are the core checks; "cleaner_or_more_formulaic" is not a winning check by itself.
+4. Choose winner_side first: A if Essay A is stronger, B if Essay B is stronger. Ignore current seed order when choosing winner_side.
+5. Set decision only after winner_side: KEEP when winner_side is A; SWAP when winner_side is B.
+6. If one essay is cleaner or more formulaic but the other has stronger task-specific content, reasoning, evidence, or genre fulfillment, do not choose the cleaner essay for polish alone.
+7. If you choose the cleaner or more formulaic essay over a rougher essay, cleaner_wins_on_substance must identify the specific stronger interpretation/evidence explanation. Do not cite focus, structure, clarity, length, or grammar alone.
+8. If you choose against a rougher essay with possible stronger interpretation, rougher_loses_because must explain why its interpretation or evidence explanation is actually weaker, not just less polished.
+9. For literary analysis, five-paragraph form, paragraph count, complete essay shape, clearer thesis wording, or smoother transitions are not decisive unless the other response is incomplete/scaffolded or meaning is not recoverable.
+10. If conventions or organization drive the result, explain whether they merely polish the writing or actually affect meaning, accuracy, completion, or usability.
+11. Confidence calibration:
    - Use high when the same essay is clearly stronger on task alignment plus content/reasoning or evidence/development, even if the other essay is cleaner or more formulaic.
    - Use medium when the important criteria are genuinely mixed or the advantage is modest.
    - Use low only when the comparison is ambiguous or both essays are similarly flawed.
    - Do not downgrade a clear content/evidence winner from high to medium just because it has more surface errors.
-7. Use cautions_applied only for cautions that materially affected this judgment. Use an empty array when none of the caution labels is genuinely needed."""
+   - In a literary-analysis rougher-vs-cleaner conflict, use high only if the winner clearly wins both deeper_interpretation and better_text_evidence_explanation.
+12. Use cautions_applied only for cautions that materially affected this judgment. Use an empty array when none of the caution labels is genuinely needed."""
     return f"""You are collecting pairwise ranking evidence for a global reranker.
 
 Rubric:
@@ -618,33 +655,43 @@ Assignment Outline:
 {outline}
 {guidance_block}
 
-Current seed order:
-- Higher seed essay: {higher['student_id']} (seed rank {higher['seed_rank']}, level {higher['level'] or 'unknown'}, rubric {higher['rubric_after_penalty_percent']:.2f}%, Borda {clamp01(higher.get('borda_percent'), 0.0):.4f}, composite {num(higher.get('composite_score'), 0.0):.4f})
-- Lower seed essay: {lower['student_id']} (seed rank {lower['seed_rank']}, level {lower['level'] or 'unknown'}, rubric {lower['rubric_after_penalty_percent']:.2f}%, Borda {clamp01(lower.get('borda_percent'), 0.0):.4f}, composite {num(lower.get('composite_score'), 0.0):.4f})
+Pair identity only:
+- Essay A: {higher['student_id']}
+- Essay B: {lower['student_id']}
+
+This comparison is blind to preliminary ranks, bands, rubric percents, Borda support, and composite scores. Those upstream signals may explain why the pair was selected, but they are not evidence for which essay is stronger.
 
 Why this pair is being checked:
 {reason_text}
 {details_block}
+{orientation_block}
 
 {output_contract}
 
-Essay A (currently seeded above Essay B): {higher['student_id']}
+Essay A: {higher['student_id']}
 {higher_text}
 
-Essay B (currently seeded below Essay A): {lower['student_id']}
+Essay B: {lower['student_id']}
 {lower_text}
 
-Decide whether the seed order should stay as-is or flip for the final ranking.
+Decide which essay should rank higher for this assignment.
 
 Allowed values:
+- winner_side: A when Essay A is stronger; B when Essay B is stronger.
 - decision: KEEP when Essay A should stay above Essay B; SWAP when Essay B should move above Essay A.
 - confidence: low, medium, high.
 - criterion_notes[].stronger: A, B, tie.
 - decision_basis: task_alignment, content_reasoning, evidence_development, genre_requirements, organization, language_control, completion, balanced.
 - cautions_applied: rougher_but_stronger_content, formulaic_but_thin, polished_but_shallow, mechanics_impede_meaning, off_task, incomplete_or_scaffold, genre_requirement_decisive. Use [] if no caution materially affected the decision.
+- decision_checks.deeper_interpretation: A, B, tie.
+- decision_checks.better_text_evidence_explanation: A, B, tie.
+- decision_checks.cleaner_or_more_formulaic: A, B, tie.
+- decision_checks.rougher_but_stronger_content: A, B, none.
+- decision_checks.completion_advantage: A, B, tie.
 
 Return ONLY valid JSON in this shape:
 {{
+  "winner_side": "A",
   "decision": "KEEP",
   "confidence": "high",
   "rationale": "short justification that names the decisive task-specific reason, not just polish or seed order",
@@ -655,7 +702,16 @@ Return ONLY valid JSON in this shape:
     {{"criterion": "organization/language", "stronger": "A", "reason": "brief note"}}
   ],
   "decision_basis": "content_reasoning",
-  "cautions_applied": []
+  "cautions_applied": [],
+  "decision_checks": {{
+    "deeper_interpretation": "A",
+    "better_text_evidence_explanation": "A",
+    "cleaner_or_more_formulaic": "B",
+    "rougher_but_stronger_content": "none",
+    "completion_advantage": "tie",
+    "cleaner_wins_on_substance": "If the cleaner essay wins, name its stronger interpretation/evidence explanation here; otherwise explain that polish did not decide.",
+    "rougher_loses_because": "If the rougher essay loses, explain the substantive weakness here; otherwise explain that roughness did not decide."
+  }}
 }}
 """
 
@@ -674,14 +730,21 @@ def build_repair_prompt(raw_text: str) -> str:
     return f"""The prior response was supposed to be JSON but was malformed.
 
 Allowed values:
+- winner_side: A when Essay A is stronger; B when Essay B is stronger.
 - decision: KEEP or SWAP.
 - confidence: low, medium, high.
 - criterion_notes[].stronger: A, B, tie.
 - decision_basis: task_alignment, content_reasoning, evidence_development, genre_requirements, organization, language_control, completion, balanced.
 - cautions_applied: rougher_but_stronger_content, formulaic_but_thin, polished_but_shallow, mechanics_impede_meaning, off_task, incomplete_or_scaffold, genre_requirement_decisive. Use [] if no caution materially affected the decision.
+- decision_checks.deeper_interpretation: A, B, tie.
+- decision_checks.better_text_evidence_explanation: A, B, tie.
+- decision_checks.cleaner_or_more_formulaic: A, B, tie.
+- decision_checks.rougher_but_stronger_content: A, B, none.
+- decision_checks.completion_advantage: A, B, tie.
 
 Return ONLY valid JSON in this shape:
 {{
+  "winner_side": "A",
   "decision": "KEEP",
   "confidence": "medium",
   "rationale": "short justification",
@@ -692,7 +755,16 @@ Return ONLY valid JSON in this shape:
     {{"criterion": "organization/language", "stronger": "A", "reason": "brief note"}}
   ],
   "decision_basis": "balanced",
-  "cautions_applied": []
+  "cautions_applied": [],
+  "decision_checks": {{
+    "deeper_interpretation": "tie",
+    "better_text_evidence_explanation": "tie",
+    "cleaner_or_more_formulaic": "tie",
+    "rougher_but_stronger_content": "none",
+    "completion_advantage": "tie",
+    "cleaner_wins_on_substance": "brief note",
+    "rougher_loses_because": "brief note"
+  }}
 }}
 
 Malformed response:
@@ -740,6 +812,98 @@ def normalize_cautions(value) -> list[str]:
     return cautions
 
 
+def normalize_side(value, *, allow_none: bool = False) -> str:
+    token = str(value or "").strip().upper()
+    if allow_none and not token:
+        return "none"
+    if token in {"A", "B"}:
+        return token
+    if allow_none and token == "NONE":
+        return "none"
+    return "tie"
+
+
+def normalize_winner_side(value) -> str:
+    token = str(value or "").strip().upper()
+    return token if token in {"A", "B"} else ""
+
+
+def decision_from_winner_side(value) -> str:
+    side = normalize_winner_side(value)
+    if side == "A":
+        return "KEEP"
+    if side == "B":
+        return "SWAP"
+    return ""
+
+
+def winner_side_from_decision(value) -> str:
+    return "B" if normalize_decision(value) == "SWAP" else "A"
+
+
+def normalize_decision_checks(value) -> dict:
+    payload = value if isinstance(value, dict) else {}
+    return {
+        "deeper_interpretation": normalize_side(payload.get("deeper_interpretation")),
+        "better_text_evidence_explanation": normalize_side(payload.get("better_text_evidence_explanation")),
+        "cleaner_or_more_formulaic": normalize_side(payload.get("cleaner_or_more_formulaic")),
+        "rougher_but_stronger_content": normalize_side(payload.get("rougher_but_stronger_content"), allow_none=True),
+        "completion_advantage": normalize_side(payload.get("completion_advantage")),
+        "cleaner_wins_on_substance": str(payload.get("cleaner_wins_on_substance", "") or "").strip(),
+        "rougher_loses_because": str(payload.get("rougher_loses_because", "") or "").strip(),
+    }
+
+
+def side_for_student(higher: dict, lower: dict, student_id: str) -> str:
+    if student_id == higher["student_id"]:
+        return "A"
+    if student_id == lower["student_id"]:
+        return "B"
+    return ""
+
+
+def student_for_side(higher: dict, lower: dict, side: str) -> str:
+    token = normalize_side(side)
+    if token == "A":
+        return higher["student_id"]
+    if token == "B":
+        return lower["student_id"]
+    return ""
+
+
+def confidence_downgrade_for_selfcheck(
+    higher: dict,
+    lower: dict,
+    *,
+    genre: str,
+    decision: str,
+    confidence: str,
+    decision_basis: str,
+    decision_checks: dict,
+) -> tuple[str, list[str]]:
+    notes = []
+    normalized_genre = resolve_pairwise_genre({"assignment_genre": genre}) or normalize_genre(genre) or ""
+    if normalized_genre != "literary_analysis" or normalize_confidence(confidence) != "high":
+        return confidence, notes
+    winner = pair_winner_from_decision(higher, lower, decision)
+    winner_side = side_for_student(higher, lower, winner)
+    deeper = decision_checks.get("deeper_interpretation", "tie")
+    evidence = decision_checks.get("better_text_evidence_explanation", "tie")
+    cleaner = decision_checks.get("cleaner_or_more_formulaic", "tie")
+    rougher_stronger = decision_checks.get("rougher_but_stronger_content", "none")
+    if deeper not in {winner_side, "tie"} or evidence not in {winner_side, "tie"}:
+        notes.append("high_confidence_downgraded_literary_core_checks_mixed")
+    if cleaner == winner_side and (deeper != winner_side or evidence != winner_side):
+        notes.append("high_confidence_downgraded_cleaner_winner_without_core_sweep")
+    if rougher_stronger in {"A", "B"} and rougher_stronger != winner_side:
+        notes.append("high_confidence_downgraded_selfcheck_prefers_loser")
+    if decision_basis in {"organization", "language_control"}:
+        notes.append("high_confidence_downgraded_surface_basis")
+    if notes:
+        return "medium", notes
+    return confidence, notes
+
+
 def pair_winner_from_decision(higher: dict, lower: dict, decision: str) -> str:
     return lower["student_id"] if normalize_decision(decision) == "SWAP" else higher["student_id"]
 
@@ -776,6 +940,7 @@ def judge_pair(
     selection_reasons: list[str] | None = None,
     selection_details: list[str] | None = None,
     anchor_dir: str | Path | None = None,
+    orientation_context: str = "",
 ) -> dict:
     prompt = build_prompt(
         rubric,
@@ -789,6 +954,7 @@ def judge_pair(
         selection_reasons=selection_reasons,
         selection_details=selection_details,
         anchor_dir=anchor_dir,
+        orientation_context=orientation_context,
     )
     response = responses_create(
         model=model,
@@ -817,12 +983,33 @@ def judge_pair(
         content = extract_text(repair_response)
         parsed = parse_json(content)
         response = repair_response
-    decision = normalize_decision(parsed.get("decision"))
+    parsed_decision = normalize_decision(parsed.get("decision"))
+    winner_side = normalize_winner_side(parsed.get("winner_side"))
+    decision = decision_from_winner_side(winner_side) or parsed_decision
+    decision_notes = []
+    if winner_side:
+        expected_decision = decision_from_winner_side(winner_side)
+        if expected_decision != parsed_decision:
+            decision_notes.append("decision_overridden_by_winner_side")
+    else:
+        winner_side = winner_side_from_decision(parsed_decision)
+        decision_notes.append("winner_side_missing_fallback_to_decision")
     confidence = normalize_confidence(parsed.get("confidence"))
     rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip()
     criterion_notes = normalize_criterion_notes(parsed.get("criterion_notes"))
     decision_basis = normalize_decision_basis(parsed.get("decision_basis"))
     cautions_applied = normalize_cautions(parsed.get("cautions_applied"))
+    decision_checks = normalize_decision_checks(parsed.get("decision_checks"))
+    confidence, selfcheck_notes = confidence_downgrade_for_selfcheck(
+        higher,
+        lower,
+        genre=genre,
+        decision=decision,
+        confidence=confidence,
+        decision_basis=decision_basis,
+        decision_checks=decision_checks,
+    )
+    selfcheck_notes = decision_notes + selfcheck_notes
     return {
         "pair": [higher["student_id"], lower["student_id"]],
         "seed_order": {
@@ -837,6 +1024,7 @@ def judge_pair(
         },
         "selection_reasons": list(selection_reasons or []),
         "selection_details": list(selection_details or []),
+        "winner_side": winner_side,
         "decision": decision,
         "winner": pair_winner_from_decision(higher, lower, decision),
         "loser": pair_loser_from_decision(higher, lower, decision),
@@ -845,17 +1033,327 @@ def judge_pair(
         "criterion_notes": criterion_notes,
         "decision_basis": decision_basis,
         "cautions_applied": cautions_applied,
+        "decision_checks": decision_checks,
         "model_metadata": {
             "requested_model": model,
             "response_model": response.get("model") or model,
             "routing_path": routing,
             "repair_used": repair_used,
+            "selfcheck_notes": selfcheck_notes,
             "reasoning": reasoning,
             "temperature": 0.0,
             "cached": bool(response.get("cached", False)),
             "usage": response.get("usage", {}),
         },
     }
+
+
+ORIENTATION_AUDIT_REASONS = {
+    "large_mover_neighborhood",
+    "band_seam_requested",
+}
+ORIENTATION_AUDIT_DIVERGENCE_THRESHOLD = 0.35
+ORIENTATION_CONFIDENCE_WEIGHTS = {"low": 0.5, "medium": 1.0, "high": 2.0}
+
+
+def should_orientation_audit_pair(
+    genre: str,
+    selection_reasons: list[str] | None,
+    higher: dict | None = None,
+    lower: dict | None = None,
+    *,
+    student_count: int = 0,
+) -> bool:
+    normalized_genre = resolve_pairwise_genre({"assignment_genre": genre}) or normalize_genre(genre) or ""
+    if normalized_genre != "literary_analysis":
+        return False
+    reasons = {str(item or "").strip() for item in (selection_reasons or [])}
+    if reasons & ORIENTATION_AUDIT_REASONS:
+        return True
+    count = max(int(student_count or 0), int(num((higher or {}).get("seed_rank"), 0)), int(num((lower or {}).get("seed_rank"), 0)), 1)
+    return any(
+        rank_divergence(row, count) >= ORIENTATION_AUDIT_DIVERGENCE_THRESHOLD
+        for row in (higher or {}, lower or {})
+        if isinstance(row, dict)
+    )
+
+
+def compact_judgment_for_orientation_audit(judgment: dict) -> dict:
+    checks = judgment.get("decision_checks") if isinstance(judgment.get("decision_checks"), dict) else {}
+    return {
+        "pair": list(judgment.get("pair", [])),
+        "winner": judgment.get("winner", ""),
+        "winner_side": judgment.get("winner_side", ""),
+        "decision": judgment.get("decision", ""),
+        "confidence": judgment.get("confidence", ""),
+        "decision_basis": judgment.get("decision_basis", ""),
+        "cautions_applied": list(judgment.get("cautions_applied", [])),
+        "decision_checks": {
+            "deeper_interpretation": checks.get("deeper_interpretation", ""),
+            "better_text_evidence_explanation": checks.get("better_text_evidence_explanation", ""),
+            "cleaner_or_more_formulaic": checks.get("cleaner_or_more_formulaic", ""),
+            "rougher_but_stronger_content": checks.get("rougher_but_stronger_content", ""),
+            "completion_advantage": checks.get("completion_advantage", ""),
+        },
+        "rationale": str(judgment.get("rationale", "") or "")[:700],
+    }
+
+
+def attach_orientation_audit(judgment: dict, audit: dict) -> dict:
+    metadata = judgment.setdefault("model_metadata", {})
+    metadata["orientation_audit"] = audit
+    return judgment
+
+
+def side_for_pair_member(judgment: dict, student_id: str) -> str:
+    pair = judgment.get("pair") if isinstance(judgment.get("pair"), list) else []
+    if len(pair) >= 1 and student_id == pair[0]:
+        return "A"
+    if len(pair) >= 2 and student_id == pair[1]:
+        return "B"
+    return ""
+
+
+def student_for_pair_side(judgment: dict, side: str) -> str:
+    pair = judgment.get("pair") if isinstance(judgment.get("pair"), list) else []
+    token = normalize_winner_side(side)
+    if token == "A" and len(pair) >= 1:
+        return str(pair[0])
+    if token == "B" and len(pair) >= 2:
+        return str(pair[1])
+    return ""
+
+
+def remap_side_for_original(value, judgment: dict, higher: dict, lower: dict, *, allow_none: bool = False) -> str:
+    token = normalize_side(value, allow_none=allow_none)
+    if token in {"tie", "none"}:
+        return token
+    student_id = student_for_pair_side(judgment, token)
+    return side_for_student(higher, lower, student_id) or ("none" if allow_none else "tie")
+
+
+def reorient_judgment_to_original(judgment: dict, higher: dict, lower: dict) -> dict:
+    winner = str(judgment.get("winner", "") or "")
+    if winner not in {higher["student_id"], lower["student_id"]}:
+        return judgment
+    loser = lower["student_id"] if winner == higher["student_id"] else higher["student_id"]
+    winner_side = side_for_student(higher, lower, winner)
+    reoriented = dict(judgment)
+    reoriented["pair"] = [higher["student_id"], lower["student_id"]]
+    reoriented["seed_order"] = {
+        "higher": higher["student_id"],
+        "lower": lower["student_id"],
+        "higher_rank": int(higher["seed_rank"]),
+        "lower_rank": int(lower["seed_rank"]),
+    }
+    reoriented["seed_features"] = {
+        "higher": pair_seed_features(higher),
+        "lower": pair_seed_features(lower),
+    }
+    reoriented["winner_side"] = winner_side
+    reoriented["decision"] = decision_from_winner_side(winner_side)
+    reoriented["winner"] = winner
+    reoriented["loser"] = loser
+    notes = []
+    for note in judgment.get("criterion_notes", []) if isinstance(judgment.get("criterion_notes"), list) else []:
+        item = dict(note) if isinstance(note, dict) else {}
+        item["stronger"] = remap_side_for_original(item.get("stronger"), judgment, higher, lower)
+        notes.append(item)
+    reoriented["criterion_notes"] = notes
+    checks = normalize_decision_checks(judgment.get("decision_checks"))
+    reoriented["decision_checks"] = {
+        "deeper_interpretation": remap_side_for_original(checks.get("deeper_interpretation"), judgment, higher, lower),
+        "better_text_evidence_explanation": remap_side_for_original(checks.get("better_text_evidence_explanation"), judgment, higher, lower),
+        "cleaner_or_more_formulaic": remap_side_for_original(checks.get("cleaner_or_more_formulaic"), judgment, higher, lower),
+        "rougher_but_stronger_content": remap_side_for_original(checks.get("rougher_but_stronger_content"), judgment, higher, lower, allow_none=True),
+        "completion_advantage": remap_side_for_original(checks.get("completion_advantage"), judgment, higher, lower),
+        "cleaner_wins_on_substance": checks.get("cleaner_wins_on_substance", ""),
+        "rougher_loses_because": checks.get("rougher_loses_because", ""),
+    }
+    if judgment.get("pair") != reoriented["pair"]:
+        reoriented["rationale"] = (
+            f"Orientation-audited swapped read selected {winner}. "
+            f"Raw swapped rationale: {str(judgment.get('rationale', '') or '')}"
+        )
+    return reoriented
+
+
+def completion_floor_winner_from_judgment(judgment: dict) -> str:
+    cautions = set(normalize_cautions(judgment.get("cautions_applied")))
+    if "incomplete_or_scaffold" not in cautions:
+        return ""
+    checks = normalize_decision_checks(judgment.get("decision_checks"))
+    return student_for_pair_side(judgment, checks.get("completion_advantage"))
+
+
+def primary_self_declares_orientation_risk(genre: str, judgment: dict) -> bool:
+    normalized_genre = resolve_pairwise_genre({"assignment_genre": genre}) or normalize_genre(genre) or ""
+    if normalized_genre != "literary_analysis":
+        return False
+    if normalize_confidence(judgment.get("confidence")) == "high":
+        return False
+    cautions = set(normalize_cautions(judgment.get("cautions_applied")))
+    return bool(cautions & {"rougher_but_stronger_content", "mechanics_impede_meaning", "polished_but_shallow", "formulaic_but_thin"})
+
+
+def positive_support_divergence(row: dict, student_count: int) -> float:
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    borda_pct = clamp01(row.get("borda_percent"), seed_pct)
+    composite_pct = clamp01(row.get("composite_score"), seed_pct)
+    return max(borda_pct - seed_pct, composite_pct - seed_pct, 0.0)
+
+
+def choose_orientation_conflict_judgment(
+    primary: dict,
+    reverse: dict,
+    higher: dict,
+    lower: dict,
+    *,
+    student_count: int,
+    higher_text: str = "",
+    lower_text: str = "",
+) -> tuple[dict, str]:
+    higher_draft = analyze_draft_quality(higher_text)
+    lower_draft = analyze_draft_quality(lower_text)
+    if higher_draft.get("hard_floor_incomplete") and not lower_draft.get("hard_floor_incomplete"):
+        for judgment in (primary, reverse):
+            if judgment.get("winner") == lower["student_id"]:
+                return judgment, "resolved_by_deterministic_completion_floor"
+        return primary, "primary_retained_deterministic_completion_floor_unmatched"
+    if lower_draft.get("hard_floor_incomplete") and not higher_draft.get("hard_floor_incomplete"):
+        for judgment in (primary, reverse):
+            if judgment.get("winner") == higher["student_id"]:
+                return judgment, "resolved_by_deterministic_completion_floor"
+        return primary, "primary_retained_deterministic_completion_floor_unmatched"
+
+    completion_candidates = [
+        sid
+        for sid in (completion_floor_winner_from_judgment(primary), completion_floor_winner_from_judgment(reverse))
+        if sid in {higher["student_id"], lower["student_id"]}
+    ]
+    if completion_candidates:
+        counts = Counter(completion_candidates)
+        winner = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        for judgment in (primary, reverse):
+            if judgment.get("winner") == winner:
+                return judgment, "resolved_by_completion_floor"
+        return primary, "primary_retained_completion_floor_unmatched"
+
+    count = max(int(student_count or 0), int(higher.get("seed_rank", 0) or 0), int(lower.get("seed_rank", 0) or 0), 1)
+    positive_divergences = {
+        higher["student_id"]: positive_support_divergence(higher, count),
+        lower["student_id"]: positive_support_divergence(lower, count),
+    }
+    movers = [sid for sid, divergence in positive_divergences.items() if divergence >= ORIENTATION_AUDIT_DIVERGENCE_THRESHOLD]
+    if len(movers) == 1:
+        mover = movers[0]
+        for judgment in (primary, reverse):
+            if judgment.get("winner") == mover:
+                return judgment, "resolved_by_large_mover_cross_evidence"
+
+    primary_weight = ORIENTATION_CONFIDENCE_WEIGHTS.get(normalize_confidence(primary.get("confidence")), 0.5)
+    reverse_weight = ORIENTATION_CONFIDENCE_WEIGHTS.get(normalize_confidence(reverse.get("confidence")), 0.5)
+    if abs(primary_weight - reverse_weight) >= 1.0:
+        if reverse_weight > primary_weight:
+            return reverse, "resolved_by_higher_confidence_swapped_read"
+        return primary, "resolved_by_higher_confidence_primary_read"
+
+    return primary, "primary_retained_after_unresolved_orientation_conflict"
+
+
+def judge_pair_with_orientation_audit(
+    rubric: str,
+    outline: str,
+    higher: dict,
+    lower: dict,
+    higher_text: str,
+    lower_text: str,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    genre: str = "",
+    metadata: dict | None = None,
+    selection_reasons: list[str] | None = None,
+    selection_details: list[str] | None = None,
+    anchor_dir: str | Path | None = None,
+    orientation_audit: bool = True,
+    student_count: int = 0,
+) -> dict:
+    primary = judge_pair(
+        rubric,
+        outline,
+        higher,
+        lower,
+        higher_text,
+        lower_text,
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=genre,
+        metadata=metadata,
+        selection_reasons=selection_reasons,
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+    )
+    audit_needed = should_orientation_audit_pair(genre, selection_reasons, higher, lower, student_count=student_count) or primary_self_declares_orientation_risk(genre, primary)
+    if not orientation_audit or not audit_needed:
+        return primary
+
+    reverse_reasons = list(selection_reasons or [])
+    if "orientation_audit_swapped_read" not in reverse_reasons:
+        reverse_reasons.append("orientation_audit_swapped_read")
+    reverse_details = list(selection_details or []) + [
+        "Swapped read for orientation-bias detection; Essay A/B positions are arbitrary.",
+    ]
+    reverse = judge_pair(
+        rubric,
+        outline,
+        lower,
+        higher,
+        lower_text,
+        higher_text,
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=genre,
+        metadata=metadata,
+        selection_reasons=reverse_reasons,
+        selection_details=reverse_details,
+        anchor_dir=anchor_dir,
+    )
+    if primary.get("winner") == reverse.get("winner"):
+        return attach_orientation_audit(
+            primary,
+            {
+                "status": "agreement",
+                "primary": compact_judgment_for_orientation_audit(primary),
+                "swapped": compact_judgment_for_orientation_audit(reverse),
+            },
+        )
+
+    chosen, status = choose_orientation_conflict_judgment(
+        primary,
+        reverse,
+        higher,
+        lower,
+        student_count=student_count,
+        higher_text=higher_text,
+        lower_text=lower_text,
+    )
+    resolved = reorient_judgment_to_original(chosen, higher, lower)
+    return attach_orientation_audit(
+        resolved,
+        {
+            "status": status,
+            "primary": compact_judgment_for_orientation_audit(primary),
+            "swapped": compact_judgment_for_orientation_audit(reverse),
+            "resolver": compact_judgment_for_orientation_audit(resolved),
+        },
+    )
 
 
 def rank_key(rows: list[dict]) -> str:
@@ -1022,6 +1520,8 @@ def collect_judgments(
     band_seam_report: dict | None = None,
     large_mover_divergence: float = 0.35,
     anchor_dir: str | Path | None = None,
+    orientation_audit: bool = True,
+    replicates: int = 1,
 ) -> list[dict]:
     judgments = []
     genre = resolve_pairwise_genre(metadata)
@@ -1037,24 +1537,30 @@ def collect_judgments(
     for spec in pair_specs:
         higher = spec["higher"]
         lower = spec["lower"]
-        judgment = judge_pair(
-            rubric,
-            outline,
-            higher,
-            lower,
-            texts.get(higher["student_id"], ""),
-            texts.get(lower["student_id"], ""),
-            model=model,
-            routing=routing,
-            reasoning=reasoning,
-            max_output_tokens=max_output_tokens,
-            genre=genre,
-            metadata=metadata,
-            selection_reasons=spec.get("selection_reasons", []),
-            selection_details=spec.get("selection_details", []),
-            anchor_dir=anchor_dir,
-        )
-        judgments.append(judgment)
+        for replicate_idx in range(max(1, int(replicates))):
+            details = list(spec.get("selection_details", []))
+            if replicates > 1:
+                details.append(f"Independent replicate {replicate_idx + 1} of {replicates}; re-read the essays from scratch.")
+            judgment = judge_pair_with_orientation_audit(
+                rubric,
+                outline,
+                higher,
+                lower,
+                texts.get(higher["student_id"], ""),
+                texts.get(lower["student_id"], ""),
+                model=model,
+                routing=routing,
+                reasoning=reasoning,
+                max_output_tokens=max_output_tokens,
+                genre=genre,
+                metadata=metadata,
+                selection_reasons=spec.get("selection_reasons", []),
+                selection_details=details,
+                anchor_dir=anchor_dir,
+                orientation_audit=orientation_audit,
+                student_count=len(rows),
+            )
+            judgments.append(judgment)
     return judgments
 
 
@@ -1118,6 +1624,8 @@ def write_judgment_payload(
     top_pack_size: int = 0,
     large_mover_window: int = 0,
     band_seam_report: str = "",
+    orientation_audit: bool = True,
+    replicates: int = 1,
 ):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -1130,6 +1638,8 @@ def write_judgment_payload(
             "top_pack_size": int(top_pack_size),
             "large_mover_window": int(large_mover_window),
             "band_seam_report": band_seam_report,
+            "orientation_audit": bool(orientation_audit),
+            "replicates": int(max(1, replicates)),
             "reason_counts": summarize_pair_reasons(judgments),
         },
         "seed_student_count": len(rows),
@@ -1157,6 +1667,8 @@ def main() -> int:
     parser.add_argument("--expansion-report", default=DEFAULT_EXPANSION_REPORT, help="Pair expansion audit artifact JSON")
     parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
     parser.add_argument("--anchor-dir", default=str(DEFAULT_PAIRWISE_ANCHOR_DIR), help="Directory of genre-specific pairwise calibration anchor JSON files")
+    parser.add_argument("--disable-orientation-audit", action="store_true", help="Disable swapped-read orientation auditing for high-risk literary-analysis pairs")
+    parser.add_argument("--replicates", type=int, default=1, help="Independent judgments per selected pair")
     parser.add_argument("--max-output-tokens", type=int, default=600, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
     parser.add_argument("--apply", action="store_true", help="Compatibility mode: collect evidence, then run the global reranker")
@@ -1208,6 +1720,8 @@ def main() -> int:
         band_seam_report=band_seam_report,
         large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
         anchor_dir=args.anchor_dir,
+        orientation_audit=not args.disable_orientation_audit,
+        replicates=max(1, int(args.replicates)),
     )
     out_path = Path(args.output)
     expansion_report_path = Path(args.expansion_report)
@@ -1224,6 +1738,8 @@ def main() -> int:
         top_pack_size=top_pack_size,
         large_mover_window=large_mover_window,
         band_seam_report=str(band_seam_report_path) if expansion_enabled else "",
+        orientation_audit=not args.disable_orientation_audit,
+        replicates=max(1, int(args.replicates)),
     )
     if expansion_enabled:
         write_expansion_report(

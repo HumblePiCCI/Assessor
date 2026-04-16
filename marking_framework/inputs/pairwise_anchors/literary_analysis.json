@@ -9,18 +9,33 @@
       "title": "Formula is not analysis",
       "decision_rule": "Do not reward five-paragraph control, repeated topic sentences, or tidy transitions over actual literary reasoning about how the text creates meaning."
     },
-    {
-      "title": "Evidence must be explained",
-      "decision_rule": "Specific events or quotations count most when the student explains how they support the interpretation; named events without explanation are weaker."
-    },
-    {
-      "title": "Mechanics are secondary until meaning breaks",
-      "decision_rule": "Conventions should not bury a paper with substantially stronger interpretation unless the errors make the analysis hard to understand."
-    }
+        {
+            "title": "Evidence must be explained",
+            "decision_rule": "Specific events or quotations count most when the student explains how they support the interpretation; named events without explanation are weaker."
+        },
+        {
+            "title": "Alternate themes can win",
+            "decision_rule": "Do not require both essays to use the same theme wording. A defensible theme about trauma, healing, identity, trust, accountability, consequences, or support can beat a repeated on-prompt keyword when it is better developed."
+        },
+        {
+            "title": "Sustained mechanism beats event listing",
+            "decision_rule": "A sustained analysis of one important relationship, conflict, or mechanism of change can beat a broader but more summary-driven list of events."
+        },
+        {
+            "title": "Completion floor",
+            "decision_rule": "An unfinished scaffold, outline, or fragmentary draft should not beat a complete essay unless the complete essay is off-task or meaning is not recoverable."
+        },
+        {
+            "title": "Mechanics are secondary until meaning breaks",
+            "decision_rule": "Conventions should not bury a paper with substantially stronger interpretation unless the errors make the analysis hard to understand."
+        }
   ],
   "caution_checks": [
-    "Which essay explains why the character, conflict, theme, or author choice matters?",
-    "Is the cleaner essay mostly retelling events without a literary claim?",
-    "Is the rougher essay still intelligible enough that its stronger interpretation should count?"
-  ]
+        "Which essay explains why the character, conflict, theme, or author choice matters?",
+        "Is one essay repeating an on-prompt keyword while the other develops a defensible alternate literary theme?",
+        "Is one essay sustaining analysis of an important relationship or mechanism rather than merely listing more events?",
+        "Is the cleaner essay mostly retelling events without a literary claim?",
+        "Is the rougher essay still intelligible enough that its stronger interpretation should count?",
+        "Is either response unfinished scaffold text that should trigger a completion floor?"
+    ]
 }

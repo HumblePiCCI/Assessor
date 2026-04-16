@@ -80,6 +80,24 @@ def normalize_decision(value) -> str:
     return "SWAP" if token == "SWAP" else "KEEP"
 
 
+def normalize_winner_side(value) -> str:
+    token = str(value or "").strip().upper()
+    return token if token in {"A", "B"} else ""
+
+
+def decision_from_winner_side(value) -> str:
+    side = normalize_winner_side(value)
+    if side == "A":
+        return "KEEP"
+    if side == "B":
+        return "SWAP"
+    return ""
+
+
+def winner_side_from_decision(value) -> str:
+    return "B" if normalize_decision(value) == "SWAP" else "A"
+
+
 def confidence_weight(confidence: str) -> float:
     return float(CONFIDENCE_WEIGHTS.get(normalize_confidence(confidence), CONFIDENCE_WEIGHTS["low"]))
 
@@ -188,13 +206,17 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         lower = str(seed_order.get("lower") or pair[1]).strip()
         if higher not in rows_by_id or lower not in rows_by_id:
             continue
-        decision = normalize_decision(item.get("decision"))
+        winner_side = normalize_winner_side(item.get("winner_side"))
+        decision = decision_from_winner_side(winner_side) or normalize_decision(item.get("decision"))
+        if not winner_side:
+            winner_side = winner_side_from_decision(decision)
         confidence = normalize_confidence(item.get("confidence"))
         rationale = str(item.get("rationale") or item.get("reason") or "").strip()
         model_metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
         criterion_notes = item.get("criterion_notes") if isinstance(item.get("criterion_notes"), list) else []
         decision_basis = str(item.get("decision_basis", "") or "").strip()
         cautions_applied = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
+        decision_checks = item.get("decision_checks") if isinstance(item.get("decision_checks"), dict) else {}
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
         normalized.append(
@@ -209,12 +231,14 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                     "lower_rank": int(num(seed_order.get("lower_rank"), rows_by_id[lower]["seed_rank"])),
                 },
                 "decision": decision,
+                "winner_side": winner_side,
                 "confidence": confidence,
                 "weight": confidence_weight(confidence),
                 "rationale": rationale,
                 "criterion_notes": criterion_notes,
                 "decision_basis": decision_basis,
                 "cautions_applied": cautions_applied,
+                "decision_checks": decision_checks,
                 "winner": winner,
                 "loser": loser,
                 "model_metadata": model_metadata,
@@ -264,6 +288,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
         comparison["judgments"].append(
             {
                 "decision": judgment["decision"],
+                "winner_side": judgment.get("winner_side", ""),
                 "confidence": judgment["confidence"],
                 "weight": judgment["weight"],
                 "winner": judgment["winner"],
@@ -272,6 +297,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "criterion_notes": judgment.get("criterion_notes", []),
                 "decision_basis": judgment.get("decision_basis", ""),
                 "cautions_applied": judgment.get("cautions_applied", []),
+                "decision_checks": judgment.get("decision_checks", {}),
                 "model_metadata": judgment["model_metadata"],
             }
         )

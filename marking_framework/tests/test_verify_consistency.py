@@ -285,9 +285,22 @@ def test_verify_consistency_build_prompt_includes_literary_priority_contract():
     )
     assert "rougher essay with a clearer interpretation" in prompt
     assert "Do not let a five-paragraph shape" in prompt
+    assert "five-paragraph form" in prompt
+    assert "defensible theme about trauma" in prompt
+    assert "sustained analysis of one important relationship" in prompt
+    assert "unfinished scaffold" in prompt
     assert "Do not downgrade a clear content/evidence winner" in prompt
     assert "criterion_notes" in prompt
     assert "decision_basis" in prompt
+    assert "winner_side" in prompt
+    assert "decision_checks" in prompt
+    assert "cleaner_wins_on_substance" in prompt
+    assert "rougher_loses_because" in prompt
+    assert "Pair identity only" in prompt
+    assert "Current seed order" not in prompt
+    assert "current seed rank" not in prompt
+    assert "rubric 70.00%" not in prompt
+    assert "Ignore current seed order" in prompt
     assert "cold-start classroom cohort" in prompt
 
 
@@ -354,6 +367,15 @@ def test_collect_judgments_stores_criterion_audit_fields(monkeypatch):
             ],
             "decision_basis": "content_reasoning",
             "cautions_applied": ["rougher_but_stronger_content", "polished_but_shallow", "unknown"],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "",
+                "rougher_loses_because": "",
+            },
         }
         return {"model": model, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
 
@@ -374,6 +396,165 @@ def test_collect_judgments_stores_criterion_audit_fields(monkeypatch):
     assert judgments[0]["decision_basis"] == "content_reasoning"
     assert judgments[0]["criterion_notes"][0]["stronger"] == "B"
     assert judgments[0]["cautions_applied"] == ["rougher_but_stronger_content", "polished_but_shallow"]
+    assert judgments[0]["decision_checks"]["rougher_but_stronger_content"] == "B"
+
+
+def test_winner_side_overrides_legacy_decision(monkeypatch):
+    higher = {
+        "student_id": "clean",
+        "seed_rank": 1,
+        "level": "3",
+        "rubric_after_penalty_percent": 73.0,
+        "borda_percent": 0.8,
+        "composite_score": 0.7,
+    }
+    lower = {
+        "student_id": "rough",
+        "seed_rank": 2,
+        "level": "3",
+        "rubric_after_penalty_percent": 71.0,
+        "borda_percent": 0.7,
+        "composite_score": 0.69,
+    }
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        payload = {
+            "winner_side": "B",
+            "decision": "KEEP",
+            "confidence": "high",
+            "rationale": "B has rougher mechanics but the stronger interpretation and textual explanation.",
+            "criterion_notes": [{"criterion": "content/reasoning", "stronger": "B", "reason": "Stronger interpretation."}],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "Polish did not decide.",
+                "rougher_loses_because": "The rougher essay does not lose.",
+            },
+        }
+        return {"model": model, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgment = vc.judge_pair(
+        "rubric",
+        "outline",
+        higher,
+        lower,
+        "Clean but shallow summary.",
+        "Rougher analysis with a real interpretation.",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=600,
+        genre="literary_analysis",
+    )
+    assert judgment["winner_side"] == "B"
+    assert judgment["decision"] == "SWAP"
+    assert judgment["winner"] == "rough"
+    assert judgment["loser"] == "clean"
+    assert "decision_overridden_by_winner_side" in judgment["model_metadata"]["selfcheck_notes"]
+
+
+def test_orientation_audit_resolves_conflicting_swapped_reads(monkeypatch):
+    higher = {
+        "student_id": "clean",
+        "seed_rank": 1,
+        "level": "3",
+        "rubric_after_penalty_percent": 73.0,
+        "borda_percent": 0.8,
+        "composite_score": 0.7,
+    }
+    lower = {
+        "student_id": "rough",
+        "seed_rank": 8,
+        "level": "3",
+        "rubric_after_penalty_percent": 71.0,
+        "borda_percent": 0.95,
+        "composite_score": 0.69,
+    }
+
+    def payload(winner_side, rationale):
+        return {
+            "winner_side": winner_side,
+            "decision": "KEEP" if winner_side == "A" else "SWAP",
+            "confidence": "medium",
+            "rationale": rationale,
+            "criterion_notes": [{"criterion": "content/reasoning", "stronger": winner_side, "reason": "Better interpretation."}],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "decision_checks": {
+                "deeper_interpretation": winner_side,
+                "better_text_evidence_explanation": winner_side,
+                "cleaner_or_more_formulaic": "B" if winner_side == "A" else "A",
+                "rougher_but_stronger_content": winner_side,
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "Polish did not decide.",
+                "rougher_loses_because": "Roughness did not decide.",
+            },
+        }
+
+    responses = iter(
+        [
+            payload("A", "First orientation prefers Essay A."),
+            payload("A", "Swapped orientation also prefers Essay A, revealing position risk."),
+        ]
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        prompts.append(messages[0]["content"])
+        return {"model": model, "output": [{"type": "output_text", "text": json.dumps(next(responses))}]}
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgment = vc.judge_pair_with_orientation_audit(
+        "rubric",
+        "outline",
+        higher,
+        lower,
+        "Clean but shallow summary.",
+        "Rougher analysis with a real interpretation.",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=600,
+        genre="literary_analysis",
+        selection_reasons=["large_mover_neighborhood"],
+        student_count=10,
+    )
+    assert judgment["winner"] == "rough"
+    assert judgment["winner_side"] == "B"
+    audit = judgment["model_metadata"]["orientation_audit"]
+    assert audit["status"] == "resolved_by_large_mover_cross_evidence"
+    assert audit["primary"]["winner"] == "clean"
+    assert audit["swapped"]["winner"] == "rough"
+    assert len(prompts) == 2
+
+
+def test_literary_selfcheck_downgrades_high_confidence_cleaner_winner():
+    higher = {"student_id": "clean", "seed_rank": 1}
+    lower = {"student_id": "rough", "seed_rank": 2}
+    confidence, notes = vc.confidence_downgrade_for_selfcheck(
+        higher,
+        lower,
+        genre="literary_analysis",
+        decision="KEEP",
+        confidence="high",
+        decision_basis="content_reasoning",
+        decision_checks={
+            "deeper_interpretation": "B",
+            "better_text_evidence_explanation": "B",
+            "cleaner_or_more_formulaic": "A",
+            "rougher_but_stronger_content": "B",
+            "completion_advantage": "tie",
+        },
+    )
+    assert confidence == "medium"
+    assert "high_confidence_downgraded_literary_core_checks_mixed" in notes
+    assert "high_confidence_downgraded_cleaner_winner_without_core_sweep" in notes
 
 
 def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch):

@@ -86,12 +86,18 @@ def test_global_rerank_preserves_pairwise_criterion_audit_fields(tmp_path):
     checks = [
         {
             "pair": ["s1", "s2"],
+            "winner_side": "B",
             "decision": "SWAP",
             "confidence": "high",
             "rationale": "s2 has stronger interpretation despite rougher mechanics.",
             "criterion_notes": [{"criterion": "content/reasoning", "stronger": "B", "reason": "More developed analysis."}],
             "decision_basis": "content_reasoning",
             "cautions_applied": ["rougher_but_stronger_content"],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "A",
+            },
         }
     ]
     _result, _final_order, matrix_path, *_ = run_rerank(tmp_path, seed_rows, checks)
@@ -100,6 +106,32 @@ def test_global_rerank_preserves_pairwise_criterion_audit_fields(tmp_path):
     assert judgment["criterion_notes"][0]["criterion"] == "content/reasoning"
     assert judgment["decision_basis"] == "content_reasoning"
     assert judgment["cautions_applied"] == ["rougher_but_stronger_content"]
+    assert judgment["winner_side"] == "B"
+    assert judgment["decision_checks"]["deeper_interpretation"] == "B"
+
+
+def test_global_rerank_prefers_winner_side_over_conflicting_decision(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "72", "composite_score": "0.72"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.71"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s2"],
+            "winner_side": "B",
+            "decision": "KEEP",
+            "confidence": "high",
+            "rationale": "s2 is stronger even though a legacy field says keep.",
+        }
+    ]
+    _result, final_order, matrix_path, *_ = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s2", "s1"]
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    judgment = matrix["comparisons"][0]["judgments"][0]
+    assert judgment["winner_side"] == "B"
+    assert judgment["decision"] == "SWAP"
+    assert judgment["winner"] == "s2"
 
 
 def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
