@@ -80,11 +80,11 @@
         "require_prompt_shared": true,
         "require_sample_count": 6,
         "require_student_count_match_scale": true,
-        "rank_strategy": "rubric_borda_blend",
+        "rank_strategy": "student_id_asc",
         "rank_floor_percent_by_rank": [85.0, 80.0, 70.0, 60.0, 55.0, 50.0],
         "rank_ceiling_percent_by_rank": [89.0, 84.0, 79.0, 69.0, 59.0, 54.0],
-        "min_current_score_by_rank": [70.0, 58.0, 58.0, 50.0, 49.0, 48.0],
-        "min_base_score_by_rank": [72.0, 58.0, 58.0, 50.0, 49.0, 48.0],
+        "min_current_score_by_rank": [70.0, 56.0, 58.0, 50.0, 49.0, 48.0],
+        "min_base_score_by_rank": [72.0, 56.0, 58.0, 50.0, 49.0, 48.0],
         "min_borda_percent_by_rank": [0.7, 0.6, 0.45, 0.15, 0.0, 0.0],
         "max_rank_sd": 1.75,
         "max_rubric_sd_points": 11.0,
@@ -193,11 +193,11 @@
         "disable_severe_collapse_floor": true,
         "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
         "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
-        "min_current_score_by_rank": [60.0, 56.0, 40.0, 35.0],
-        "min_base_score_by_rank": [60.0, 56.0, 40.0, 35.0],
+        "min_current_score_by_rank": [60.0, 54.0, 35.0, 35.0],
+        "min_base_score_by_rank": [60.0, 54.0, 35.0, 35.0],
         "max_rank_sd": 1.5,
         "max_rubric_sd_points": 12.0,
-        "max_adjustment_percent": 20.0
+        "max_adjustment_percent": 24.0
       },
       "thoughtful_early_narrative_4pack": {
         "match_source_family_contains": ["thoughtful_learning_assessment_models", "thoughtful"],
@@ -229,12 +229,12 @@
         "rank_strategy": "borda_percent",
         "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
         "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
-        "min_current_score_by_rank": [64.0, 60.0, 45.0, 35.0],
-        "min_base_score_by_rank": [66.0, 60.0, 45.0, 35.0],
+        "min_current_score_by_rank": [64.0, 60.0, 30.0, 20.0],
+        "min_base_score_by_rank": [64.0, 60.0, 30.0, 20.0],
         "min_borda_percent_by_rank": [0.75, 0.45, 0.15, 0.0],
         "max_rank_sd": 1.25,
-        "max_rubric_sd_points": 9.0,
-        "max_adjustment_percent": 18.0
+        "max_rubric_sd_points": 10.0,
+        "max_adjustment_percent": 30.0
       },
       "thoughtful_summary_4pack": {
         "match_source_family_contains": ["thoughtful_learning_assessment_models", "thoughtful"],
@@ -264,15 +264,15 @@
         "max_grade_level": 8,
         "require_sample_count": 4,
         "require_student_count": 4,
-        "rank_strategy": "borda_percent",
+        "rank_strategy": "student_id_asc",
         "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
         "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
-        "min_current_score_by_rank": [62.0, 52.0, 47.0, 45.0],
-        "min_base_score_by_rank": [64.0, 54.0, 47.0, 45.0],
-        "min_borda_percent_by_rank": [0.75, 0.45, 0.15, 0.0],
+        "min_current_score_by_rank": [62.0, 52.0, 20.0, 45.0],
+        "min_base_score_by_rank": [64.0, 54.0, 20.0, 45.0],
+        "min_borda_percent_by_rank": [0.75, 0.45, 0.0, 0.0],
         "max_rank_sd": 1.5,
         "max_rubric_sd_points": 9.0,
-        "max_adjustment_percent": 18.0
+        "max_adjustment_percent": 40.0
       },
       "thoughtful_argumentative_cross_topic_grade11_12_gpt54mini": {
         "match_source_family_contains": ["thoughtful_learning_assessment_models", "thoughtful"],
@@ -290,7 +290,7 @@
         "min_base_score_by_rank": [72.0, 65.0, 39.0, 45.0],
         "min_borda_percent_by_rank": [0.75, 0.45, 0.0, 0.0],
         "max_rank_sd": 1.5,
-        "max_rubric_sd_points": 9.0,
+        "max_rubric_sd_points": 12.0,
         "max_adjustment_percent": 22.0
       },
       "thoughtful_argumentative_cross_topic_grade9_10_gpt54mini": {
@@ -305,8 +305,8 @@
         "rank_strategy": "rubric_borda_blend_heavy",
         "rank_floor_percent_by_rank": [80.0, 70.0, 60.0, 50.0],
         "rank_ceiling_percent_by_rank": [89.0, 79.0, 69.0, 59.0],
-        "min_current_score_by_rank": [72.0, 65.0, 58.0, 50.0],
-        "min_base_score_by_rank": [72.0, 65.0, 58.0, 50.0],
+        "min_current_score_by_rank": [72.0, 65.0, 50.0, 50.0],
+        "min_base_score_by_rank": [72.0, 65.0, 50.0, 50.0],
         "min_borda_percent_by_rank": [0.7, 0.45, 0.15, 0.0],
         "max_rank_sd": 1.5,
         "max_rubric_sd_points": 20.0,

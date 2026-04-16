@@ -404,6 +404,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
         target_score = current_score
         reasons = []
         capped = False
+        source_top_boundary_blocked = False
 
         if adjusted_level in {"1", "2"} and not source_disable_severe_collapse:
             severe_min_gate = severe_min_rubric
@@ -453,6 +454,8 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                 and rank_sd <= source_max_rank_sd
                 and rubric_sd <= source_max_rubric_sd
             )
+            if source_supported and source_rank > 1 and 0.0 < source_ceiling < floor_level_4:
+                source_top_boundary_blocked = True
             if source_supported and current_score < source_floor:
                 target_score = max(target_score, source_floor)
                 reasons.append(f"source_scale_floor:{source_scale_profile_name}")
@@ -463,7 +466,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                 target_score = source_anchor
                 reasons.append(f"source_scale_anchor:{source_scale_profile_name}")
 
-        top_boundary_supported = strong_support
+        top_boundary_supported = strong_support and not source_top_boundary_blocked
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
             target_score = max(target_score, floor_level_4)
             reasons.append("top_boundary_uplift")
