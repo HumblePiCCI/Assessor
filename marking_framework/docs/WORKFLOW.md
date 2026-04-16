@@ -38,9 +38,13 @@ Optional LLM assessors:
 - Update scores or rankings if needed.
 - Re-run aggregation.
 
-8) Pairwise Evidence And Global Rerank
-- Collect pairwise evidence: `python3 scripts/verify_consistency.py`
-- Apply deterministic rerank: `python3 scripts/global_rerank.py`
+8) Pairwise Evidence, Escalation, And Global Rerank
+- Collect broad cheap pairwise evidence: `python3 scripts/verify_consistency.py`
+- Escalate only unstable/high-leverage edges: `python3 scripts/escalate_pairwise_adjudications.py`
+- Apply deterministic rerank with escalated direct edges preferred: `python3 scripts/global_rerank.py --judgments outputs/consistency_checks.escalated.json`
+- Review `outputs/pairwise_escalation_candidates.json` for the routed hard-pair selection.
+- Review `outputs/pairwise_escalations.json` for stronger-model teacher-grade decisions.
+- Review `outputs/consistency_checks.escalated.json` for the merged evidence file consumed by rerank.
 - Review `outputs/pairwise_matrix.json` for normalized pairwise evidence.
 - Review `outputs/consistency_report.json` for movements, uncertainty flags, and rerank diagnostics.
 - Review `outputs/final_order.csv` for the resolved order used by grading.

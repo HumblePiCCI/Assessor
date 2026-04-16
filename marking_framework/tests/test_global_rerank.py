@@ -134,6 +134,41 @@ def test_global_rerank_prefers_winner_side_over_conflicting_decision(tmp_path):
     assert judgment["winner"] == "s2"
 
 
+def test_global_rerank_prefers_escalated_direct_edge_over_cheap_conflict(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "72", "composite_score": "0.72"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.71"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s2"],
+            "seed_order": {"higher": "s1", "lower": "s2"},
+            "decision": "KEEP",
+            "confidence": "high",
+            "rationale": "cheap pass favored the cleaner essay",
+            "model_metadata": {"adjudication_source": "cheap_pairwise", "superseded_by_escalation": True},
+        },
+        {
+            "pair": ["s1", "s2"],
+            "seed_order": {"higher": "s1", "lower": "s2"},
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "teacher-grade escalation found s2 stronger on content",
+            "model_metadata": {"adjudication_source": "escalated_adjudication"},
+        },
+    ]
+    _result, final_order, matrix_path, *_ = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s2", "s1"]
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    comparison = matrix["comparisons"][0]
+    assert comparison["judgment_count"] == 1
+    assert comparison["source_counts"] == {"escalated_adjudication": 1}
+    assert comparison["judgments"][0]["adjudication_source"] == "escalated_adjudication"
+    assert comparison["judgments"][0]["winner"] == "s2"
+
+
 def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
     seed_rows = [
         {"student_id": "a", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "84", "composite_score": "0.84"},

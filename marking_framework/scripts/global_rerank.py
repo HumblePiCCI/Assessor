@@ -80,6 +80,16 @@ def normalize_decision(value) -> str:
     return "SWAP" if token == "SWAP" else "KEEP"
 
 
+def adjudication_source(item: dict) -> str:
+    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+    source = str(metadata.get("adjudication_source") or item.get("adjudication_source") or "").strip()
+    if source:
+        return source
+    if isinstance(metadata.get("orientation_audit"), dict):
+        return "orientation_audit"
+    return "cheap_pairwise"
+
+
 def normalize_winner_side(value) -> str:
     token = str(value or "").strip().upper()
     return token if token in {"A", "B"} else ""
@@ -217,6 +227,7 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         decision_basis = str(item.get("decision_basis", "") or "").strip()
         cautions_applied = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
         decision_checks = item.get("decision_checks") if isinstance(item.get("decision_checks"), dict) else {}
+        source = adjudication_source(item)
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
         normalized.append(
@@ -242,8 +253,23 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "winner": winner,
                 "loser": loser,
                 "model_metadata": model_metadata,
+                "adjudication_source": source,
+                "superseded_by_escalation": bool(model_metadata.get("superseded_by_escalation", False)),
             }
         )
+    escalated_pair_keys = {
+        item["pair_key"]
+        for item in normalized
+        if item.get("adjudication_source") == "escalated_adjudication"
+    }
+    if escalated_pair_keys:
+        normalized = [
+            item
+            for item in normalized
+            if item["pair_key"] not in escalated_pair_keys or item.get("adjudication_source") == "escalated_adjudication"
+        ]
+        for idx, item in enumerate(normalized, start=1):
+            item["id"] = idx
     return payload if isinstance(payload, dict) else {}, normalized
 
 
@@ -279,12 +305,14 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "judgment_count": 0,
                 "directional_weight": defaultdict(float),
                 "confidence_counts": {"low": 0, "medium": 0, "high": 0},
+                "source_counts": defaultdict(int),
                 "judgments": [],
             },
         )
         comparison["judgment_count"] += 1
         comparison["directional_weight"][f"{judgment['winner']}>{judgment['loser']}"] += judgment["weight"]
         comparison["confidence_counts"][judgment["confidence"]] += 1
+        comparison["source_counts"][judgment.get("adjudication_source", "cheap_pairwise")] += 1
         comparison["judgments"].append(
             {
                 "decision": judgment["decision"],
@@ -298,6 +326,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "decision_basis": judgment.get("decision_basis", ""),
                 "cautions_applied": judgment.get("cautions_applied", []),
                 "decision_checks": judgment.get("decision_checks", {}),
+                "adjudication_source": judgment.get("adjudication_source", "cheap_pairwise"),
                 "model_metadata": judgment["model_metadata"],
             }
         )
@@ -326,6 +355,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "right_over_left_weight": round(right_over_left, 6),
                 "net_preference": round(left_over_right - right_over_left, 6),
                 "confidence_counts": dict(item["confidence_counts"]),
+                "source_counts": dict(item["source_counts"]),
                 "judgments": list(item["judgments"]),
             }
         )

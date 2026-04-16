@@ -142,6 +142,8 @@ def main() -> int:
         if run(step_cmd("consistency", ["python3", "scripts/verify_consistency.py"])) != 0:
             return 1
         if args.apply_consistency:
+            if run(step_cmd("pairwise_escalation", ["python3", "scripts/escalate_pairwise_adjudications.py"])) != 0:
+                return 1
             if run(step_cmd("rerank", ["python3", "scripts/global_rerank.py"])) != 0:
                 return 1
 

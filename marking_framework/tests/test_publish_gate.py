@@ -391,10 +391,14 @@ def test_publish_gate_helper_branches(tmp_path):
     assert corpus_bench["failed_dataset_count"] == 1
     assert corpus_bench["dataset_count"] == 3
     assert corpus_bench["exact_level_hit_rate"] == 0.84
-    assert pg.pairwise_eval_metrics(tmp_path / "missing-pairwise-eval.json")["present"] is False
+    missing_pairwise_eval = pg.pairwise_eval_metrics(tmp_path / "missing-pairwise-eval.json")
+    assert missing_pairwise_eval["present"] is False
+    assert missing_pairwise_eval["escalated_path"] is False
     (tmp_path / "pairwise_eval.json").write_text(
         json.dumps(
             {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.json"},
                 "summary": {
                     "pair_count": 4,
                     "evaluated_count": 3,
@@ -410,8 +414,34 @@ def test_publish_gate_helper_branches(tmp_path):
     )
     pairwise_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval.json")
     assert pairwise_eval["present"] is True
+    assert pairwise_eval["mode"] == "existing_judgments"
+    assert pairwise_eval["escalated_path"] is False
     assert pairwise_eval["polish_bias_risk_count"] == 1
     assert pairwise_eval["failures"] == ["accuracy_below_threshold"]
+    (tmp_path / "pairwise_eval_escalated.json").write_text(
+        json.dumps(
+            {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.escalated.json"},
+                "summary": {"pair_count": 1, "evaluated_count": 1, "accuracy": 1.0, "coverage": 1.0, "critical_accuracy": 1.0},
+                "pairs": [
+                    {
+                        "outcome": {
+                            "judgments": [
+                                {
+                                    "winner": "b",
+                                    "model_metadata": {"adjudication_source": "escalated_adjudication"},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    escalated_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_escalated.json")
+    assert escalated_eval["escalated_path"] is True
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():
@@ -453,6 +483,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "pairwise_eval_coverage": 0.5,
         "pairwise_eval_polish_bias_risk_count": 2,
         "pairwise_eval_failures": ["accuracy_below_threshold"],
+        "pairwise_eval_escalated_path": False,
     }
     thresholds = {
         "min_rank_kendall_w": 0.7,
@@ -490,6 +521,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "pairwise_eval_min_coverage": 1.0,
         "pairwise_eval_max_polish_bias_risks": 0,
         "pairwise_eval_fail_on_report_failures": True,
+        "pairwise_eval_require_escalated_path": True,
     }
     failures = pg.evaluate(metrics, thresholds)
     assert "kendall_w_below_threshold" in failures
@@ -526,6 +558,7 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "pairwise_eval_coverage_below_threshold" in failures
     assert "pairwise_eval_polish_bias_risks_above_threshold" in failures
     assert "pairwise_eval_report_failures_present" in failures
+    assert "pairwise_eval_escalated_path_missing" in failures
 
 
 def test_publish_gate_evaluate_requires_pairwise_eval_report():

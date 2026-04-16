@@ -113,6 +113,16 @@ def confidence_weight(confidence: str) -> float:
     return float(CONFIDENCE_WEIGHTS.get(vc.normalize_confidence(confidence), CONFIDENCE_WEIGHTS["low"]))
 
 
+def adjudication_source(item: dict) -> str:
+    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+    source = str(metadata.get("adjudication_source") or item.get("adjudication_source") or "").strip()
+    if source:
+        return source
+    if isinstance(metadata.get("orientation_audit"), dict):
+        return "orientation_audit"
+    return "cheap_pairwise"
+
+
 def judgment_outcome(item: dict) -> dict | None:
     pair = item.get("pair")
     if not isinstance(pair, list) or len(pair) != 2:
@@ -144,6 +154,7 @@ def judgment_outcome(item: dict) -> dict | None:
         "decision_basis": vc.normalize_decision_basis(item.get("decision_basis")),
         "cautions_applied": vc.normalize_cautions(item.get("cautions_applied")),
         "decision_checks": vc.normalize_decision_checks(item.get("decision_checks")),
+        "adjudication_source": adjudication_source(item),
         "rationale": str(item.get("rationale", "") or "").strip(),
         "raw": item,
     }
@@ -168,12 +179,21 @@ def outcomes_from_judgments(path: Path) -> dict[str, dict]:
 
 
 def aggregate_judgment_outcomes(raw_items: list[dict], *, source: str) -> dict[str, dict]:
-    buckets: dict[str, dict] = {}
+    all_outcomes = []
     for item in raw_items:
         if not isinstance(item, dict):
             continue
         outcome = judgment_outcome(item)
-        if not outcome:
+        if outcome:
+            all_outcomes.append(outcome)
+    escalated_pair_keys = {
+        outcome["key"]
+        for outcome in all_outcomes
+        if outcome.get("adjudication_source") == "escalated_adjudication"
+    }
+    buckets: dict[str, dict] = {}
+    for outcome in all_outcomes:
+        if outcome["key"] in escalated_pair_keys and outcome.get("adjudication_source") != "escalated_adjudication":
             continue
         bucket = buckets.setdefault(
             outcome["key"],

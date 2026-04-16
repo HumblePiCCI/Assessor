@@ -143,6 +143,38 @@ def test_pairwise_eval_prefers_winner_side_over_conflicting_decision():
     assert outcome["decision"] == "SWAP"
 
 
+def test_pairwise_eval_prefers_escalated_judgment_in_merged_checks(tmp_path):
+    judgments_path = tmp_path / "checks.escalated.json"
+    judgments_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "pair": ["a", "b"],
+                        "seed_order": {"higher": "a", "lower": "b"},
+                        "decision": "KEEP",
+                        "confidence": "high",
+                        "model_metadata": {"adjudication_source": "cheap_pairwise", "superseded_by_escalation": True},
+                    },
+                    {
+                        "pair": ["a", "b"],
+                        "seed_order": {"higher": "a", "lower": "b"},
+                        "winner_side": "B",
+                        "decision": "SWAP",
+                        "confidence": "medium",
+                        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    outcomes = epa.outcomes_from_judgments(judgments_path)
+    assert outcomes["a::b"]["winner"] == "b"
+    assert outcomes["a::b"]["judgment_count"] == 1
+    assert outcomes["a::b"]["strongest_judgment"]["adjudication_source"] == "escalated_adjudication"
+
+
 def test_pairwise_eval_reads_pairwise_matrix_comparisons(tmp_path):
     matrix_path = tmp_path / "matrix.json"
     matrix_path.write_text(

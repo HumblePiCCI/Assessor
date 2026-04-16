@@ -301,6 +301,9 @@ def pairwise_eval_metrics(report_path: Path) -> dict:
     if not report:
         return {
             "present": False,
+            "mode": "",
+            "judgments": "",
+            "escalated_path": False,
             "pair_count": 0,
             "evaluated_count": 0,
             "accuracy": 0.0,
@@ -310,10 +313,17 @@ def pairwise_eval_metrics(report_path: Path) -> dict:
             "failures": [],
         }
     summary = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
+    inputs = report.get("inputs", {}) if isinstance(report.get("inputs"), dict) else {}
     polish_bias_risks = report.get("polish_bias_risks", []) if isinstance(report.get("polish_bias_risks"), list) else []
     failures = summary.get("failures", []) if isinstance(summary.get("failures"), list) else []
+    judgments = str(inputs.get("judgments", "") or "")
+    escalated_path = bool(judgments and "escalated" in Path(judgments).name)
+    escalated_path = escalated_path or contains_escalated_pairwise_judgment(report)
     return {
         "present": True,
+        "mode": str(report.get("mode", "") or ""),
+        "judgments": judgments,
+        "escalated_path": escalated_path,
         "pair_count": int(summary.get("pair_count", 0) or 0),
         "evaluated_count": int(summary.get("evaluated_count", 0) or 0),
         "accuracy": float(summary.get("accuracy", 0.0) or 0.0),
@@ -322,6 +332,18 @@ def pairwise_eval_metrics(report_path: Path) -> dict:
         "polish_bias_risk_count": len(polish_bias_risks),
         "failures": [str(item) for item in failures],
     }
+
+
+def contains_escalated_pairwise_judgment(value) -> bool:
+    if isinstance(value, dict):
+        metadata = value.get("model_metadata") if isinstance(value.get("model_metadata"), dict) else {}
+        source = str(metadata.get("adjudication_source") or value.get("adjudication_source") or "").strip()
+        if source == "escalated_adjudication":
+            return True
+        return any(contains_escalated_pairwise_judgment(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_escalated_pairwise_judgment(item) for item in value)
+    return False
 
 
 def reproducibility_metrics(report_path: Path) -> dict:
@@ -493,6 +515,8 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             failures.append("pairwise_eval_polish_bias_risks_above_threshold")
         if thresholds.get("pairwise_eval_fail_on_report_failures", False) and metrics.get("pairwise_eval_failures", []):
             failures.append("pairwise_eval_report_failures_present")
+        if thresholds.get("pairwise_eval_require_escalated_path", False) and not metrics.get("pairwise_eval_escalated_path", False):
+            failures.append("pairwise_eval_escalated_path_missing")
     return failures
 
 
@@ -534,6 +558,9 @@ def build_profile_metrics(
             "benchmark_mean_student_rank_sd": float(benchmark.get("mean_student_rank_sd", 0.0) or 0.0),
             "benchmark_mean_student_score_sd": float(benchmark.get("mean_student_score_sd", 0.0) or 0.0),
             "pairwise_eval_present": bool(pairwise_eval.get("present", False)),
+            "pairwise_eval_mode": str(pairwise_eval.get("mode", "") or ""),
+            "pairwise_eval_judgments": str(pairwise_eval.get("judgments", "") or ""),
+            "pairwise_eval_escalated_path": bool(pairwise_eval.get("escalated_path", False)),
             "pairwise_eval_pair_count": int(pairwise_eval.get("pair_count", 0) or 0),
             "pairwise_eval_evaluated_count": int(pairwise_eval.get("evaluated_count", 0) or 0),
             "pairwise_eval_accuracy": float(pairwise_eval.get("accuracy", 0.0) or 0.0),
@@ -628,6 +655,9 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "benchmark_mean_student_rank_sd",
         "benchmark_mean_student_score_sd",
         "pairwise_eval_present",
+        "pairwise_eval_mode",
+        "pairwise_eval_judgments",
+        "pairwise_eval_escalated_path",
         "pairwise_eval_pair_count",
         "pairwise_eval_evaluated_count",
         "pairwise_eval_accuracy",
