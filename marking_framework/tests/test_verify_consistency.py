@@ -192,6 +192,86 @@ def test_select_pairs_expands_for_bootstrap_divergence_outliers():
     assert ("s1", "s4") in tokens
 
 
+def test_select_pair_specs_fully_compares_top_pack_beyond_window():
+    rows = [
+        {"student_id": f"s{idx}", "seed_rank": idx, "borda_percent": 0.5, "composite_score": 0.5}
+        for idx in range(1, 7)
+    ]
+    specs = vc.select_pair_specs(rows, window=1, metadata={}, top_pack_size=4)
+    by_pair = {
+        (spec["higher"]["student_id"], spec["lower"]["student_id"]): spec
+        for spec in specs
+    }
+    assert ("s1", "s4") in by_pair
+    assert "top_pack" in by_pair[("s1", "s4")]["selection_reasons"]
+
+
+def test_select_pair_specs_checks_post_seam_movers_against_top_pack_and_neighbors():
+    rows = [
+        {"student_id": f"s{idx}", "seed_rank": idx, "adjusted_level": "2", "borda_percent": 0.5, "composite_score": 0.5}
+        for idx in range(1, 8)
+    ]
+    report = {"applied": [{"student_id": "s7", "from_level": "1", "to_level": "2"}]}
+    specs = vc.select_pair_specs(
+        rows,
+        window=1,
+        metadata={},
+        top_pack_size=3,
+        large_mover_window=1,
+        band_seam_report=report,
+    )
+    by_pair = {(item["higher"]["student_id"], item["lower"]["student_id"]): item for item in specs}
+    assert "large_mover_top_pack" in by_pair[("s1", "s7")]["selection_reasons"]
+    assert "large_mover_neighborhood" in by_pair[("s6", "s7")]["selection_reasons"]
+
+
+def test_collect_judgments_records_selection_reasons(tmp_path, monkeypatch):
+    rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": 1,
+            "level": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": 70.0,
+            "borda_percent": 0.6,
+            "composite_score": 0.6,
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": 2,
+            "level": "2",
+            "adjusted_level": "2",
+            "rubric_after_penalty_percent": 68.0,
+            "borda_percent": 0.7,
+            "composite_score": 0.7,
+        },
+    ]
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        prompts.append(messages[0]["content"])
+        payload = {"decision": "SWAP", "confidence": "high", "rationale": "B has stronger evidence."}
+        return {"model": model, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgments = vc.collect_judgments(
+        rows,
+        {"s1": "Essay one", "s2": "Essay two"},
+        "rubric",
+        "outline",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=300,
+        window=1,
+        metadata={},
+        top_pack_size=2,
+    )
+    assert judgments[0]["selection_reasons"][:2] == ["seed_window", "top_pack"]
+    assert "Why this pair is being checked" in prompts[0]
+    assert "top_pack" in prompts[0]
+
+
 def test_verify_consistency_build_prompt_includes_literary_guidance():
     prompt = vc.build_prompt(
         "rubric",

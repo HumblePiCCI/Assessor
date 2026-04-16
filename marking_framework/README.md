@@ -37,6 +37,7 @@ Quick Start
    - `python3 scripts/verify_consistency.py`
    - `python3 scripts/global_rerank.py`
    - Or via Hero Path: `python3 scripts/hero_path.py --verify-consistency --apply-consistency`
+   - The consistency pass expands post-seam coverage by default: it fully compares the top pack, checks band-seam/aggregate movers against that pack, and writes an audit report.
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`
@@ -65,6 +66,7 @@ Key Outputs
 - `outputs/grade_curve.csv` (level-aware bell-curve grades based on the resolved order)
 - `outputs/pairwise_matrix.json` (normalized pairwise evidence and support/opposition weights)
 - `outputs/consistency_report.json` (rerank diagnostics, movements, and uncertainty details)
+- `outputs/post_seam_pair_expansion.json` (top-pack and large-mover pair coverage audit)
 - `outputs/final_order.csv` (post global rerank order)
 - `outputs/feedback_summaries/` (two stars and a wish with validated quotes)
 - `outputs/dashboard_data.json` (UI data)

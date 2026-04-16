@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +35,9 @@ RESPONSE_FORMAT = {
         "additionalProperties": False,
     },
 }
+
+DEFAULT_BAND_SEAM_REPORT = "outputs/band_seam_report.json"
+DEFAULT_EXPANSION_REPORT = "outputs/post_seam_pair_expansion.json"
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -83,6 +87,16 @@ def load_pairwise_metadata(path: Path | None) -> dict:
     try:
         payload = load_class_metadata(path)
     except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def load_json(path: Path | None) -> dict:
+    if path is None or not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -152,6 +166,100 @@ def comparison_reach(row: dict, requested_window: int, student_count: int, metad
     return min(max(1, student_count - 1), base + extra)
 
 
+def rank_divergence(row: dict, student_count: int) -> float:
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    borda_pct = clamp01(row.get("borda_percent"), seed_pct)
+    composite_pct = clamp01(row.get("composite_score"), seed_pct)
+    return max(abs(seed_pct - borda_pct), abs(seed_pct - composite_pct))
+
+
+def ids_from_band_seam_report(report: dict) -> set[str]:
+    ids = set()
+    for item in report.get("applied", []) if isinstance(report.get("applied"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("student_id", "") or "").strip()
+        if sid:
+            ids.add(sid)
+    return ids
+
+
+def ids_from_band_seam_pairwise_requests(report: dict) -> list[tuple[str, str, str]]:
+    requested = []
+    for item in report.get("pairwise_checks_needed", []) if isinstance(report.get("pairwise_checks_needed"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        higher = str(item.get("higher_candidate", "") or "").strip()
+        lower = str(item.get("lower_candidate", "") or "").strip()
+        if higher and lower and higher != lower:
+            requested.append((higher, lower, str(item.get("reason", "") or "").strip()))
+    return requested
+
+
+def band_seam_mover_ids(rows: list[dict], band_seam_report: dict | None = None) -> set[str]:
+    row_ids = {str(row.get("student_id", "") or "").strip() for row in rows}
+    movers = ids_from_band_seam_report(band_seam_report or {}) & row_ids
+    for row in rows:
+        sid = str(row.get("student_id", "") or "").strip()
+        if not sid:
+            continue
+        pre_level = normalize_level(row.get("pre_band_adjudication_level"))
+        adjusted_level = normalize_level(row.get("adjusted_level") or row.get("base_level"))
+        if pre_level and adjusted_level and pre_level != adjusted_level:
+            movers.add(sid)
+    return movers
+
+
+def aggregate_divergence_mover_ids(rows: list[dict], *, divergence_threshold: float = 0.35) -> set[str]:
+    count = max(1, len(rows))
+    movers = set()
+    for row in rows:
+        sid = str(row.get("student_id", "") or "").strip()
+        if sid and rank_divergence(row, count) >= float(divergence_threshold):
+            movers.add(sid)
+    return movers
+
+
+def has_top_pack_claim(row: dict, *, top_pack_size: int, student_count: int) -> bool:
+    if top_pack_size <= 0:
+        return False
+    top_cutoff = seed_percentile(min(top_pack_size, student_count), student_count)
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    aggregate_peak = max(seed_pct, clamp01(row.get("borda_percent"), seed_pct), clamp01(row.get("composite_score"), seed_pct))
+    return aggregate_peak >= max(0.0, top_cutoff - 0.05)
+
+
+def post_seam_mover_ids(rows: list[dict], band_seam_report: dict | None = None, *, divergence_threshold: float = 0.35) -> set[str]:
+    return band_seam_mover_ids(rows, band_seam_report) | aggregate_divergence_mover_ids(rows, divergence_threshold=divergence_threshold)
+
+
+def add_pair_spec(specs: dict[tuple[str, str], dict], rows_by_id: dict[str, dict], left_id: str, right_id: str, reason: str, *, detail: str = ""):
+    left_id = str(left_id or "").strip()
+    right_id = str(right_id or "").strip()
+    if not left_id or not right_id or left_id == right_id or left_id not in rows_by_id or right_id not in rows_by_id:
+        return
+    left = rows_by_id[left_id]
+    right = rows_by_id[right_id]
+    higher, lower = sorted(
+        [left, right],
+        key=lambda row: (int(row.get("seed_rank", 0) or 0), str(row.get("student_id", "")).lower()),
+    )
+    key = tuple(sorted((left_id, right_id)))
+    item = specs.setdefault(
+        key,
+        {
+            "higher": higher,
+            "lower": lower,
+            "selection_reasons": [],
+            "selection_details": [],
+        },
+    )
+    if reason and reason not in item["selection_reasons"]:
+        item["selection_reasons"].append(reason)
+    if detail and detail not in item["selection_details"]:
+        item["selection_details"].append(detail)
+
+
 def build_prompt(
     rubric: str,
     outline: str,
@@ -162,9 +270,14 @@ def build_prompt(
     *,
     genre: str = "",
     metadata: dict | None = None,
+    selection_reasons: list[str] | None = None,
+    selection_details: list[str] | None = None,
 ) -> str:
     extra_guidance = genre_specific_pairwise_guidance(genre, metadata)
     guidance_block = f"\nAdditional ranking guidance:\n{extra_guidance}\n" if extra_guidance else ""
+    reason_text = ", ".join(selection_reasons or []) or "seed_window"
+    details = "\n".join(f"- {detail}" for detail in (selection_details or []) if detail)
+    details_block = f"\nSelection details:\n{details}\n" if details else ""
     return f"""You are collecting pairwise ranking evidence for a global reranker.
 
 Rubric:
@@ -175,8 +288,12 @@ Assignment Outline:
 {guidance_block}
 
 Current seed order:
-- Higher seed essay: {higher['student_id']} (seed rank {higher['seed_rank']}, level {higher['level'] or 'unknown'}, rubric {higher['rubric_after_penalty_percent']:.2f}%)
-- Lower seed essay: {lower['student_id']} (seed rank {lower['seed_rank']}, level {lower['level'] or 'unknown'}, rubric {lower['rubric_after_penalty_percent']:.2f}%)
+- Higher seed essay: {higher['student_id']} (seed rank {higher['seed_rank']}, level {higher['level'] or 'unknown'}, rubric {higher['rubric_after_penalty_percent']:.2f}%, Borda {clamp01(higher.get('borda_percent'), 0.0):.4f}, composite {num(higher.get('composite_score'), 0.0):.4f})
+- Lower seed essay: {lower['student_id']} (seed rank {lower['seed_rank']}, level {lower['level'] or 'unknown'}, rubric {lower['rubric_after_penalty_percent']:.2f}%, Borda {clamp01(lower.get('borda_percent'), 0.0):.4f}, composite {num(lower.get('composite_score'), 0.0):.4f})
+
+Why this pair is being checked:
+{reason_text}
+{details_block}
 
 Essay A (currently seeded above Essay B): {higher['student_id']}
 {higher_text}
@@ -259,10 +376,19 @@ def prepare_rows(rows: list[dict]) -> list[dict]:
     return prepared
 
 
-def select_pairs(rows: list[dict], window: int, metadata: dict | None = None) -> list[tuple[dict, dict]]:
+def select_pair_specs(
+    rows: list[dict],
+    window: int,
+    metadata: dict | None = None,
+    *,
+    top_pack_size: int = 0,
+    large_mover_window: int = 0,
+    band_seam_report: dict | None = None,
+    large_mover_divergence: float = 0.35,
+) -> list[dict]:
     ordered = list(rows)
-    pairs = []
-    seen = set()
+    specs = {}
+    rows_by_id = {row["student_id"]: row for row in ordered}
     width = max(1, int(window))
     count = len(ordered)
     reach = {
@@ -275,12 +401,87 @@ def select_pairs(rows: list[dict], window: int, metadata: dict | None = None) ->
             gap = lower_idx - idx
             if gap > max(reach.get(higher["student_id"], width), reach.get(lower["student_id"], width)):
                 continue
-            token = (higher["student_id"], lower["student_id"])
-            if token in seen:
-                continue
-            seen.add(token)
-            pairs.append((higher, lower))
-    return pairs
+            reason = "seed_window" if gap <= width else "aggregate_divergence_reach"
+            add_pair_spec(
+                specs,
+                rows_by_id,
+                higher["student_id"],
+                lower["student_id"],
+                reason,
+                detail=f"seed rank gap {gap}; reach {max(reach.get(higher['student_id'], width), reach.get(lower['student_id'], width))}",
+            )
+
+    top_count = min(max(0, int(top_pack_size)), count)
+    for idx, higher in enumerate(ordered[:top_count]):
+        for lower in ordered[idx + 1 : top_count]:
+            add_pair_spec(
+                specs,
+                rows_by_id,
+                higher["student_id"],
+                lower["student_id"],
+                "top_pack",
+                detail=f"both essays are in the top {top_count} seed positions after band-seam adjudication",
+            )
+
+    seam_movers = band_seam_mover_ids(ordered, band_seam_report or {})
+    aggregate_movers = aggregate_divergence_mover_ids(ordered, divergence_threshold=large_mover_divergence)
+    movers = seam_movers | aggregate_movers
+    top_pack_movers = {
+        sid
+        for sid in movers
+        if sid in seam_movers
+        or has_top_pack_claim(rows_by_id.get(sid, {}), top_pack_size=top_count, student_count=count)
+    }
+    mover_window = max(0, int(large_mover_window))
+    index_by_id = {row["student_id"]: idx for idx, row in enumerate(ordered)}
+    top_ids = [row["student_id"] for row in ordered[:top_count]]
+    for mover_id in sorted(top_pack_movers, key=lambda sid: index_by_id.get(sid, count)):
+        mover_idx = index_by_id.get(mover_id)
+        if mover_idx is None:
+            continue
+        for top_id in top_ids:
+            if top_id != mover_id:
+                add_pair_spec(
+                    specs,
+                    rows_by_id,
+                    mover_id,
+                    top_id,
+                    "large_mover_top_pack",
+                    detail=f"{mover_id} is a post-seam or aggregate-divergence mover checked against the top pack",
+                )
+    for mover_id in sorted(movers, key=lambda sid: index_by_id.get(sid, count)):
+        mover_idx = index_by_id.get(mover_id)
+        if mover_idx is None:
+            continue
+        if mover_window:
+            start = max(0, mover_idx - mover_window)
+            stop = min(count, mover_idx + mover_window + 1)
+            for other in ordered[start:stop]:
+                if other["student_id"] != mover_id:
+                    add_pair_spec(
+                        specs,
+                        rows_by_id,
+                        mover_id,
+                        other["student_id"],
+                        "large_mover_neighborhood",
+                        detail=f"{mover_id} is checked within +/-{mover_window} seed positions",
+                    )
+
+    for higher_id, lower_id, reason in ids_from_band_seam_pairwise_requests(band_seam_report or {}):
+        add_pair_spec(
+            specs,
+            rows_by_id,
+            higher_id,
+            lower_id,
+            "band_seam_requested",
+            detail=reason or "band seam adjudicator requested this direct comparison",
+        )
+
+    return list(specs.values())
+
+
+def select_pairs(rows: list[dict], window: int, metadata: dict | None = None) -> list[tuple[dict, dict]]:
+    return [(item["higher"], item["lower"]) for item in select_pair_specs(rows, window, metadata)]
 
 
 def collect_judgments(
@@ -295,10 +496,25 @@ def collect_judgments(
     max_output_tokens: int,
     window: int,
     metadata: dict | None = None,
+    top_pack_size: int = 0,
+    large_mover_window: int = 0,
+    band_seam_report: dict | None = None,
+    large_mover_divergence: float = 0.35,
 ) -> list[dict]:
     judgments = []
     genre = resolve_pairwise_genre(metadata)
-    for higher, lower in select_pairs(rows, window, metadata):
+    pair_specs = select_pair_specs(
+        rows,
+        window,
+        metadata,
+        top_pack_size=top_pack_size,
+        large_mover_window=large_mover_window,
+        band_seam_report=band_seam_report,
+        large_mover_divergence=large_mover_divergence,
+    )
+    for spec in pair_specs:
+        higher = spec["higher"]
+        lower = spec["lower"]
         prompt = build_prompt(
             rubric,
             outline,
@@ -308,6 +524,8 @@ def collect_judgments(
             texts.get(lower["student_id"], ""),
             genre=genre,
             metadata=metadata,
+            selection_reasons=spec.get("selection_reasons", []),
+            selection_details=spec.get("selection_details", []),
         )
         response = responses_create(
             model=model,
@@ -355,6 +573,7 @@ def collect_judgments(
                         "level": higher["level"],
                         "rubric_after_penalty_percent": round(float(higher["rubric_after_penalty_percent"]), 6),
                         "composite_score": round(float(higher["composite_score"]), 6),
+                        "borda_percent": round(float(higher["borda_percent"]), 6),
                     },
                     "lower": {
                         "student_id": lower["student_id"],
@@ -362,8 +581,11 @@ def collect_judgments(
                         "level": lower["level"],
                         "rubric_after_penalty_percent": round(float(lower["rubric_after_penalty_percent"]), 6),
                         "composite_score": round(float(lower["composite_score"]), 6),
+                        "borda_percent": round(float(lower["borda_percent"]), 6),
                     },
                 },
+                "selection_reasons": list(spec.get("selection_reasons", [])),
+                "selection_details": list(spec.get("selection_details", [])),
                 "decision": decision,
                 "confidence": confidence,
                 "rationale": rationale,
@@ -382,7 +604,67 @@ def collect_judgments(
     return judgments
 
 
-def write_judgment_payload(path: Path, rows: list[dict], judgments: list[dict], *, model: str, routing: str, window: int, source_scores: str):
+def summarize_pair_reasons(judgments: list[dict]) -> dict:
+    counts = Counter()
+    for judgment in judgments:
+        for reason in judgment.get("selection_reasons", []) if isinstance(judgment.get("selection_reasons"), list) else []:
+            counts[str(reason)] += 1
+    return dict(sorted(counts.items()))
+
+
+def write_expansion_report(
+    path: Path,
+    rows: list[dict],
+    judgments: list[dict],
+    *,
+    top_pack_size: int,
+    large_mover_window: int,
+    band_seam_report_path: str,
+    large_mover_divergence: float,
+    band_seam_report: dict,
+):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seam_movers = band_seam_mover_ids(rows, band_seam_report)
+    aggregate_movers = aggregate_divergence_mover_ids(rows, divergence_threshold=large_mover_divergence)
+    mover_ids = post_seam_mover_ids(rows, band_seam_report, divergence_threshold=large_mover_divergence)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "top_pack_size": int(top_pack_size),
+        "large_mover_window": int(large_mover_window),
+        "large_mover_divergence": float(large_mover_divergence),
+        "band_seam_report": band_seam_report_path,
+        "band_seam_movers": sorted(seam_movers),
+        "aggregate_divergence_movers": sorted(aggregate_movers),
+        "post_seam_movers": sorted(mover_ids),
+        "comparison_count": len(judgments),
+        "reason_counts": summarize_pair_reasons(judgments),
+        "pairs": [
+            {
+                "pair": list(judgment.get("pair", [])),
+                "seed_order": dict(judgment.get("seed_order", {})),
+                "selection_reasons": list(judgment.get("selection_reasons", [])),
+                "selection_details": list(judgment.get("selection_details", [])),
+            }
+            for judgment in judgments
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
+
+
+def write_judgment_payload(
+    path: Path,
+    rows: list[dict],
+    judgments: list[dict],
+    *,
+    model: str,
+    routing: str,
+    window: int,
+    source_scores: str,
+    top_pack_size: int = 0,
+    large_mover_window: int = 0,
+    band_seam_report: str = "",
+):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -390,6 +672,12 @@ def write_judgment_payload(path: Path, rows: list[dict], judgments: list[dict], 
         "model": model,
         "routing": routing,
         "comparison_window": int(window),
+        "post_seam_expansion": {
+            "top_pack_size": int(top_pack_size),
+            "large_mover_window": int(large_mover_window),
+            "band_seam_report": band_seam_report,
+            "reason_counts": summarize_pair_reasons(judgments),
+        },
         "seed_student_count": len(rows),
         "checks": judgments,
     }
@@ -408,6 +696,12 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-5.4-mini", help="Model for pairwise checks")
     parser.add_argument("--reasoning", default="low", help="Reasoning effort for pairwise checks")
     parser.add_argument("--window", type=int, default=2, help="How many lower-seeded neighbors to compare against each essay")
+    parser.add_argument("--top-pack-size", type=int, default=6, help="Fully compare the top N seeds after band-seam adjudication")
+    parser.add_argument("--large-mover-window", type=int, default=5, help="Neighborhood radius for post-seam and aggregate-divergence movers")
+    parser.add_argument("--large-mover-divergence", type=float, default=0.35, help="Seed-vs-aggregate divergence threshold for large-mover expansion")
+    parser.add_argument("--band-seam-report", default=DEFAULT_BAND_SEAM_REPORT, help="Band seam report used for post-seam pair expansion")
+    parser.add_argument("--expansion-report", default=DEFAULT_EXPANSION_REPORT, help="Pair expansion audit artifact JSON")
+    parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
     parser.add_argument("--max-output-tokens", type=int, default=300, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
     parser.add_argument("--apply", action="store_true", help="Compatibility mode: collect evidence, then run the global reranker")
@@ -435,6 +729,13 @@ def main() -> int:
     metadata = load_pairwise_metadata(Path(args.class_metadata))
     rubric = load_file_text(rubric_path)
     outline = load_file_text(outline_path)
+    expansion_enabled = not args.disable_post_seam_expansion
+    band_seam_report_path = Path(args.band_seam_report)
+    if args.band_seam_report == DEFAULT_BAND_SEAM_REPORT and scores_path.parent.name != "outputs":
+        band_seam_report_path = scores_path.parent / "band_seam_report.json"
+    band_seam_report = load_json(band_seam_report_path) if expansion_enabled else {}
+    top_pack_size = max(0, int(args.top_pack_size)) if expansion_enabled else 0
+    large_mover_window = max(0, int(args.large_mover_window)) if expansion_enabled else 0
 
     judgments = collect_judgments(
         seed_rows,
@@ -447,8 +748,15 @@ def main() -> int:
         max_output_tokens=max(64, int(args.max_output_tokens)),
         window=max(1, int(args.window)),
         metadata=metadata,
+        top_pack_size=top_pack_size,
+        large_mover_window=large_mover_window,
+        band_seam_report=band_seam_report,
+        large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
     )
     out_path = Path(args.output)
+    expansion_report_path = Path(args.expansion_report)
+    if args.expansion_report == DEFAULT_EXPANSION_REPORT and out_path.parent.name != "outputs":
+        expansion_report_path = out_path.parent / "post_seam_pair_expansion.json"
     write_judgment_payload(
         out_path,
         seed_rows,
@@ -457,7 +765,21 @@ def main() -> int:
         routing=args.routing,
         window=effective_window(max(1, int(args.window)), metadata),
         source_scores=str(scores_path),
+        top_pack_size=top_pack_size,
+        large_mover_window=large_mover_window,
+        band_seam_report=str(band_seam_report_path) if expansion_enabled else "",
     )
+    if expansion_enabled:
+        write_expansion_report(
+            expansion_report_path,
+            seed_rows,
+            judgments,
+            top_pack_size=top_pack_size,
+            large_mover_window=large_mover_window,
+            band_seam_report_path=str(band_seam_report_path),
+            large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
+            band_seam_report=band_seam_report,
+        )
     print(f"Pairwise judgments saved to {out_path}")
 
     if args.apply:
