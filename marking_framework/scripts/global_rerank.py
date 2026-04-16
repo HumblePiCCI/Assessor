@@ -192,6 +192,9 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         confidence = normalize_confidence(item.get("confidence"))
         rationale = str(item.get("rationale") or item.get("reason") or "").strip()
         model_metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+        criterion_notes = item.get("criterion_notes") if isinstance(item.get("criterion_notes"), list) else []
+        decision_basis = str(item.get("decision_basis", "") or "").strip()
+        cautions_applied = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
         normalized.append(
@@ -209,6 +212,9 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "confidence": confidence,
                 "weight": confidence_weight(confidence),
                 "rationale": rationale,
+                "criterion_notes": criterion_notes,
+                "decision_basis": decision_basis,
+                "cautions_applied": cautions_applied,
                 "winner": winner,
                 "loser": loser,
                 "model_metadata": model_metadata,
@@ -263,6 +269,9 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "winner": judgment["winner"],
                 "loser": judgment["loser"],
                 "rationale": judgment["rationale"],
+                "criterion_notes": judgment.get("criterion_notes", []),
+                "decision_basis": judgment.get("decision_basis", ""),
+                "cautions_applied": judgment.get("cautions_applied", []),
                 "model_metadata": judgment["model_metadata"],
             }
         )

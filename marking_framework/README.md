@@ -38,6 +38,7 @@ Quick Start
    - `python3 scripts/global_rerank.py`
    - Or via Hero Path: `python3 scripts/hero_path.py --verify-consistency --apply-consistency`
    - The consistency pass expands post-seam coverage by default: it fully compares the top pack, checks band-seam/aggregate movers against that pack, and writes an audit report.
+   - Pairwise judgments include genre-aware criterion notes so reviewers can see whether the model preferred meaning, evidence, genre requirements, organization, or language control.
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`

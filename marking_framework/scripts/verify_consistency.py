@@ -30,14 +30,235 @@ RESPONSE_FORMAT = {
             "decision": {"type": "string", "enum": ["KEEP", "SWAP"]},
             "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
             "rationale": {"type": "string"},
+            "criterion_notes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "criterion": {"type": "string"},
+                        "stronger": {"type": "string", "enum": ["A", "B", "tie"]},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["criterion", "stronger", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+            "decision_basis": {
+                "type": "string",
+                "enum": [
+                    "task_alignment",
+                    "content_reasoning",
+                    "evidence_development",
+                    "genre_requirements",
+                    "organization",
+                    "language_control",
+                    "completion",
+                    "balanced",
+                ],
+            },
+            "cautions_applied": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "rougher_but_stronger_content",
+                        "formulaic_but_thin",
+                        "polished_but_shallow",
+                        "mechanics_impede_meaning",
+                        "off_task",
+                        "incomplete_or_scaffold",
+                        "genre_requirement_decisive",
+                    ],
+                },
+            },
         },
-        "required": ["decision", "confidence", "rationale"],
+        "required": ["decision", "confidence", "rationale", "criterion_notes", "decision_basis", "cautions_applied"],
         "additionalProperties": False,
     },
 }
 
 DEFAULT_BAND_SEAM_REPORT = "outputs/band_seam_report.json"
 DEFAULT_EXPANSION_REPORT = "outputs/post_seam_pair_expansion.json"
+DECISION_BASIS_VALUES = {
+    "task_alignment",
+    "content_reasoning",
+    "evidence_development",
+    "genre_requirements",
+    "organization",
+    "language_control",
+    "completion",
+    "balanced",
+}
+CAUTION_VALUES = {
+    "rougher_but_stronger_content",
+    "formulaic_but_thin",
+    "polished_but_shallow",
+    "mechanics_impede_meaning",
+    "off_task",
+    "incomplete_or_scaffold",
+    "genre_requirement_decisive",
+}
+
+GENRE_PRIORITY_RULES = {
+    "literary_analysis": {
+        "label": "literary analysis",
+        "criteria": [
+            "Task alignment and interpretive claim about the text",
+            "Depth of literary reasoning about theme, character, choices, consequences, or craft",
+            "Specific text evidence and explanation of how it proves the interpretation",
+            "Distinction between analysis and plot summary",
+            "Organization and coherence as support for the analysis",
+            "Language control and conventions only after meaning, evidence, and explanation",
+        ],
+        "cautions": [
+            "A rougher essay with a clearer interpretation, better evidence explanation, or more task-specific meaning should beat a cleaner formulaic essay with thin insight.",
+            "Do not let a five-paragraph shape, tidy topic sentences, length, or surface coherence outrank stronger literary thinking.",
+            "Plot summary is not analysis unless the student explains how the events support the claim.",
+        ],
+    },
+    "argumentative": {
+        "label": "argumentative writing",
+        "criteria": [
+            "Clear, arguable claim that answers the prompt",
+            "Relevant reasons and evidence, including credibility or specificity where expected",
+            "Reasoning that explains why the evidence supports the claim",
+            "Counterargument engagement when the assignment calls for it",
+            "Audience awareness, organization, and transitions",
+            "Language control and conventions after claim, evidence, and reasoning",
+        ],
+        "cautions": [
+            "Do not reward persuasive polish or confident tone over weak reasons or unsupported claims.",
+            "A less polished argument with stronger reasons and evidence can outrank a smoother but emptier argument.",
+        ],
+    },
+    "informational_report": {
+        "label": "informational writing",
+        "criteria": [
+            "Accuracy and relevance of information",
+            "Completeness and sufficiency for the assigned topic",
+            "Explanation, examples, and source integration where expected",
+            "Logical organization, headings, or sections when useful",
+            "Objective tone and vocabulary suited to the audience",
+            "Language control and conventions after accuracy and sufficiency",
+        ],
+        "cautions": [
+            "Do not reward fluent filler over accurate, relevant information.",
+            "A polished report with thin, vague, or inaccurate content should lose to a rougher but more informative response.",
+        ],
+    },
+    "informative_letter": {
+        "label": "informative letter",
+        "criteria": [
+            "Clear purpose and useful context for the recipient",
+            "Relevant and sufficient information, examples, or explanations",
+            "Audience-appropriate tone and letter format",
+            "Organization that helps the recipient understand the information",
+            "Language control and conventions after purpose and information quality",
+        ],
+        "cautions": [
+            "Do not reward letter polish over missing or weak information.",
+            "Tone and format matter, but they should not outrank the assignment's purpose and content.",
+        ],
+    },
+    "summary_report": {
+        "label": "summary writing",
+        "criteria": [
+            "Accurate capture of the main idea and essential supporting points",
+            "Concise selection rather than dumping every detail",
+            "Paraphrase and synthesis in the student's own words",
+            "No major distortions, invented details, or copied/extraction-heavy passages",
+            "Organization and language control after accuracy, concision, and synthesis",
+        ],
+        "cautions": [
+            "Do not reward length, copied detail, or source-like fluency over accurate concise synthesis.",
+            "A shorter summary can outrank a longer one when it selects the essential ideas more accurately.",
+        ],
+    },
+    "instructions": {
+        "label": "procedural writing",
+        "criteria": [
+            "Procedural completeness: materials, setup, conditions, and all essential steps",
+            "Executable sequence and clarity",
+            "Precision, measurements, cautions, and safety details where needed",
+            "Audience usability",
+            "Language control and conventions after executability and precision",
+        ],
+        "cautions": [
+            "Do not reward smooth prose if the procedure cannot actually be followed.",
+            "Missing key steps, safety details, or measurements can be decisive even when the writing sounds polished.",
+        ],
+    },
+    "narrative": {
+        "label": "narrative writing",
+        "criteria": [
+            "Development of events, character, setting, and conflict",
+            "Purposeful detail, voice, and reflection",
+            "Sequencing, pacing, and coherence",
+            "Control of the narrative point or meaning",
+            "Language control and conventions after narrative development and effect",
+        ],
+        "cautions": [
+            "Do not require essay-like thesis structure in a narrative.",
+            "A mechanically rough narrative with stronger development, voice, and meaning can outrank a cleaner but flat story.",
+        ],
+    },
+    "news_report": {
+        "label": "news report",
+        "criteria": [
+            "Accurate who/what/when/where/why lead",
+            "Objective reporting tone",
+            "Relevant facts, quotations, and source attribution",
+            "Inverted-pyramid or news-appropriate structure",
+            "Language control and conventions after journalistic accuracy and objectivity",
+        ],
+        "cautions": [
+            "Do not reward dramatic or persuasive style over factual, objective reporting.",
+            "A cleaner article with missing core facts should lose to a rougher article that reports the event accurately.",
+        ],
+    },
+    "book_review": {
+        "label": "book review",
+        "criteria": [
+            "Clear judgment or recommendation",
+            "Specific support from the book",
+            "Audience awareness about what another reader needs to know",
+            "Balance of summary, evaluation, and response",
+            "Organization and language control after judgment and support",
+        ],
+        "cautions": [
+            "Do not reward pure plot summary over supported evaluation.",
+            "A rougher review with a clearer judgment and better text support can outrank a polished summary.",
+        ],
+    },
+    "speech": {
+        "label": "speech",
+        "criteria": [
+            "Clear purpose or claim for the audience",
+            "Rhetorical effectiveness, examples, and appeals",
+            "Audience engagement and tone",
+            "Speech structure: opening, development, and closing",
+            "Language control and conventions after purpose and rhetorical effect",
+        ],
+        "cautions": [
+            "Do not reward essay-like polish over audience impact and rhetorical purpose.",
+            "A speech must work for listeners, not only as a tidy paragraph sequence.",
+        ],
+    },
+    "portfolio": {
+        "label": "writing portfolio",
+        "criteria": [
+            "Sustained quality across included pieces",
+            "Range of writing skills, forms, and purposes",
+            "Sufficiency of evidence for the overall judgment",
+            "Strength of the strongest pieces balanced against serious weak spots",
+            "Language control after the portfolio evidence as a whole",
+        ],
+        "cautions": [
+            "Do not let one polished piece hide thin or incomplete portfolio evidence.",
+            "Judge the body of work, not a single best excerpt.",
+        ],
+    },
+}
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -112,21 +333,60 @@ def resolve_pairwise_genre(metadata: dict | None) -> str:
     return str(normalize_genre(raw) or "").strip().lower()
 
 
+def pairwise_genre_rules(genre: str) -> dict:
+    normalized = normalize_genre(genre) or ""
+    if normalized == "research_report":
+        normalized = "informational_report"
+    if normalized == "persuasive_response":
+        normalized = "argumentative"
+    return GENRE_PRIORITY_RULES.get(
+        normalized,
+        {
+            "label": normalized.replace("_", " ") if normalized else "the assigned writing type",
+            "criteria": [
+                "Task alignment and fulfillment of the assignment purpose",
+                "Quality, specificity, and development of ideas",
+                "Evidence, examples, details, or support required by the task",
+                "Genre control and audience awareness",
+                "Organization and coherence",
+                "Language control and conventions after purpose, ideas, support, and genre requirements",
+            ],
+            "cautions": [
+                "Use the rubric and assignment, not generic essay polish.",
+                "Do not let length, neat structure, or surface fluency outrank stronger task-specific content.",
+                "Conventions are decisive only when errors block meaning or when the content quality is otherwise close.",
+            ],
+        },
+    )
+
+
+def metadata_grade_label(metadata: dict | None) -> str:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    for key in ("grade_level", "grade_numeric_equivalent", "grade_numeric", "grade"):
+        value = str(metadata.get(key, "") or "").strip()
+        if value:
+            return f"Grade {value}"
+    return "the assigned grade level"
+
+
+def format_numbered(items: list[str]) -> str:
+    return "\n".join(f"{idx}. {item}" for idx, item in enumerate(items, start=1))
+
+
 def genre_specific_pairwise_guidance(genre: str, metadata: dict | None = None) -> str:
     metadata = metadata if isinstance(metadata, dict) else {}
-    lines = []
-    if genre == "literary_analysis":
-        lines.extend(
-            [
-                "Literary-analysis ranking rules:",
-                "- Prioritize the strength of the interpretive claim, the depth of explanation, and how well evidence is connected to the theme or idea.",
-                "- Do not over-reward rigid five-paragraph structure, formulaic topic sentences, or plot summary when the analysis is thinner.",
-                "- A complete essay with stronger interpretation and better explanation should outrank a more mechanical essay with weaker insight, even if the mechanical essay looks more formulaic.",
-            ]
-        )
+    rules = pairwise_genre_rules(genre)
+    lines = [
+        f"Pairwise priority frame for {metadata_grade_label(metadata)} {rules['label']}:",
+        format_numbered(rules["criteria"]),
+        "Meaning-before-polish guardrails:",
+        *[f"- {item}" for item in rules["cautions"]],
+        "- Do not use aggregate rank, Borda, rubric percent, or seed order as the reason for the decision; those are context only.",
+        "- Use organization and conventions as tie-breakers unless they materially affect meaning, task completion, accuracy, or genre function.",
+    ]
     if str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap" and genre:
         lines.append(
-            "This is a cold-start classroom cohort. Be conservative about structure-only wins; prefer essays with clearer meaning-making and prompt-aligned explanation."
+            "This is a cold-start classroom cohort. Be conservative about structure-only wins; prefer essays with clearer task-specific meaning, evidence, and explanation."
         )
     return "\n".join(lines).strip()
 
@@ -278,6 +538,18 @@ def build_prompt(
     reason_text = ", ".join(selection_reasons or []) or "seed_window"
     details = "\n".join(f"- {detail}" for detail in (selection_details or []) if detail)
     details_block = f"\nSelection details:\n{details}\n" if details else ""
+    output_contract = """Judgment process:
+1. Compare the essays using the priority frame above, in order.
+2. Name which essay is stronger for each major criterion. Use "tie" when there is no meaningful difference.
+3. Decide KEEP only if Essay A should remain above Essay B. Decide SWAP only if Essay B should move above Essay A.
+4. If one essay is cleaner or more formulaic but the other has stronger task-specific content, reasoning, evidence, or genre fulfillment, do not choose the cleaner essay for polish alone.
+5. If conventions or organization drive the result, explain whether they merely polish the writing or actually affect meaning, accuracy, completion, or usability.
+6. Confidence calibration:
+   - Use high when the same essay is clearly stronger on task alignment plus content/reasoning or evidence/development, even if the other essay is cleaner or more formulaic.
+   - Use medium when the important criteria are genuinely mixed or the advantage is modest.
+   - Use low only when the comparison is ambiguous or both essays are similarly flawed.
+   - Do not downgrade a clear content/evidence winner from high to medium just because it has more surface errors.
+7. Use cautions_applied only for cautions that materially affected this judgment. Use an empty array when none of the caution labels is genuinely needed."""
     return f"""You are collecting pairwise ranking evidence for a global reranker.
 
 Rubric:
@@ -295,6 +567,8 @@ Why this pair is being checked:
 {reason_text}
 {details_block}
 
+{output_contract}
+
 Essay A (currently seeded above Essay B): {higher['student_id']}
 {higher_text}
 
@@ -303,11 +577,26 @@ Essay B (currently seeded below Essay A): {lower['student_id']}
 
 Decide whether the seed order should stay as-is or flip for the final ranking.
 
-Return ONLY JSON:
+Allowed values:
+- decision: KEEP when Essay A should stay above Essay B; SWAP when Essay B should move above Essay A.
+- confidence: low, medium, high.
+- criterion_notes[].stronger: A, B, tie.
+- decision_basis: task_alignment, content_reasoning, evidence_development, genre_requirements, organization, language_control, completion, balanced.
+- cautions_applied: rougher_but_stronger_content, formulaic_but_thin, polished_but_shallow, mechanics_impede_meaning, off_task, incomplete_or_scaffold, genre_requirement_decisive. Use [] if no caution materially affected the decision.
+
+Return ONLY valid JSON in this shape:
 {{
-  "decision": "KEEP" | "SWAP",
-  "confidence": "low" | "medium" | "high",
-  "rationale": "short justification"
+  "decision": "KEEP",
+  "confidence": "high",
+  "rationale": "short justification that names the decisive task-specific reason, not just polish or seed order",
+  "criterion_notes": [
+    {{"criterion": "task alignment", "stronger": "A", "reason": "brief note"}},
+    {{"criterion": "content/reasoning", "stronger": "B", "reason": "brief note"}},
+    {{"criterion": "evidence/development", "stronger": "tie", "reason": "brief note"}},
+    {{"criterion": "organization/language", "stronger": "A", "reason": "brief note"}}
+  ],
+  "decision_basis": "content_reasoning",
+  "cautions_applied": []
 }}
 """
 
@@ -325,16 +614,71 @@ def parse_json(text: str) -> dict:
 def build_repair_prompt(raw_text: str) -> str:
     return f"""The prior response was supposed to be JSON but was malformed.
 
-Return ONLY valid JSON in this exact format:
+Allowed values:
+- decision: KEEP or SWAP.
+- confidence: low, medium, high.
+- criterion_notes[].stronger: A, B, tie.
+- decision_basis: task_alignment, content_reasoning, evidence_development, genre_requirements, organization, language_control, completion, balanced.
+- cautions_applied: rougher_but_stronger_content, formulaic_but_thin, polished_but_shallow, mechanics_impede_meaning, off_task, incomplete_or_scaffold, genre_requirement_decisive. Use [] if no caution materially affected the decision.
+
+Return ONLY valid JSON in this shape:
 {{
-  "decision": "KEEP" | "SWAP",
-  "confidence": "low" | "medium" | "high",
-  "rationale": "short justification"
+  "decision": "KEEP",
+  "confidence": "medium",
+  "rationale": "short justification",
+  "criterion_notes": [
+    {{"criterion": "task alignment", "stronger": "A", "reason": "brief note"}},
+    {{"criterion": "content/reasoning", "stronger": "B", "reason": "brief note"}},
+    {{"criterion": "evidence/development", "stronger": "tie", "reason": "brief note"}},
+    {{"criterion": "organization/language", "stronger": "A", "reason": "brief note"}}
+  ],
+  "decision_basis": "balanced",
+  "cautions_applied": []
 }}
 
 Malformed response:
 {raw_text}
 """
+
+
+def normalize_stronger(value) -> str:
+    token = str(value or "").strip().upper()
+    if token in {"A", "B"}:
+        return token
+    return "tie"
+
+
+def normalize_criterion_notes(value) -> list[dict]:
+    notes = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        criterion = str(item.get("criterion", "") or "").strip()
+        reason = str(item.get("reason", "") or "").strip()
+        if not criterion and not reason:
+            continue
+        notes.append(
+            {
+                "criterion": criterion or "unspecified",
+                "stronger": normalize_stronger(item.get("stronger")),
+                "reason": reason,
+            }
+        )
+    return notes
+
+
+def normalize_decision_basis(value) -> str:
+    token = str(value or "").strip().lower()
+    return token if token in DECISION_BASIS_VALUES else "balanced"
+
+
+def normalize_cautions(value) -> list[str]:
+    cautions = []
+    for item in value if isinstance(value, list) else []:
+        token = str(item or "").strip().lower()
+        if token in CAUTION_VALUES and token not in cautions:
+            cautions.append(token)
+    return cautions
 
 
 def rank_key(rows: list[dict]) -> str:
@@ -557,6 +901,9 @@ def collect_judgments(
         decision = normalize_decision(parsed.get("decision"))
         confidence = normalize_confidence(parsed.get("confidence"))
         rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip()
+        criterion_notes = normalize_criterion_notes(parsed.get("criterion_notes"))
+        decision_basis = normalize_decision_basis(parsed.get("decision_basis"))
+        cautions_applied = normalize_cautions(parsed.get("cautions_applied"))
         judgments.append(
             {
                 "pair": [higher["student_id"], lower["student_id"]],
@@ -589,6 +936,9 @@ def collect_judgments(
                 "decision": decision,
                 "confidence": confidence,
                 "rationale": rationale,
+                "criterion_notes": criterion_notes,
+                "decision_basis": decision_basis,
+                "cautions_applied": cautions_applied,
                 "model_metadata": {
                     "requested_model": model,
                     "response_model": response.get("model") or model,
@@ -702,7 +1052,7 @@ def main() -> int:
     parser.add_argument("--band-seam-report", default=DEFAULT_BAND_SEAM_REPORT, help="Band seam report used for post-seam pair expansion")
     parser.add_argument("--expansion-report", default=DEFAULT_EXPANSION_REPORT, help="Pair expansion audit artifact JSON")
     parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
-    parser.add_argument("--max-output-tokens", type=int, default=300, help="Max model output tokens")
+    parser.add_argument("--max-output-tokens", type=int, default=600, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
     parser.add_argument("--apply", action="store_true", help="Compatibility mode: collect evidence, then run the global reranker")
     parser.add_argument("--rerank-output", default="outputs/final_order.csv", help="Final reranked CSV output")

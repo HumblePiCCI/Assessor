@@ -44,7 +44,7 @@ def test_verify_consistency_collects_normalized_judgments(tmp_path, monkeypatch)
 
     def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
         assert text_format is not None
-        assert max_output_tokens == 300
+        assert max_output_tokens == 600
         payload = {"decision": "SWAP", "confidence": "high", "rationale": "B is stronger overall."}
         return {"model": model, "usage": {"input_tokens": 10}, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
 
@@ -272,7 +272,7 @@ def test_collect_judgments_records_selection_reasons(tmp_path, monkeypatch):
     assert "top_pack" in prompts[0]
 
 
-def test_verify_consistency_build_prompt_includes_literary_guidance():
+def test_verify_consistency_build_prompt_includes_literary_priority_contract():
     prompt = vc.build_prompt(
         "rubric",
         "outline",
@@ -283,8 +283,97 @@ def test_verify_consistency_build_prompt_includes_literary_guidance():
         genre="literary_analysis",
         metadata={"generated_by": "bootstrap", "assignment_genre": "literary_analysis"},
     )
-    assert "Do not over-reward rigid five-paragraph structure" in prompt
+    assert "rougher essay with a clearer interpretation" in prompt
+    assert "Do not let a five-paragraph shape" in prompt
+    assert "Do not downgrade a clear content/evidence winner" in prompt
+    assert "criterion_notes" in prompt
+    assert "decision_basis" in prompt
     assert "cold-start classroom cohort" in prompt
+
+
+def test_verify_consistency_build_prompt_adapts_to_argumentative_and_summary():
+    argumentative = vc.build_prompt(
+        "rubric",
+        "outline",
+        {"student_id": "s1", "seed_rank": 1, "level": "3", "rubric_after_penalty_percent": 70.0},
+        {"student_id": "s2", "seed_rank": 2, "level": "3", "rubric_after_penalty_percent": 68.0},
+        "Essay one",
+        "Essay two",
+        genre="argumentative",
+        metadata={"grade_level": 8, "assignment_genre": "argumentative"},
+    )
+    assert "Clear, arguable claim" in argumentative
+    assert "Counterargument engagement" in argumentative
+    assert "less polished argument with stronger reasons" in argumentative
+
+    summary = vc.build_prompt(
+        "rubric",
+        "outline",
+        {"student_id": "s1", "seed_rank": 1, "level": "3", "rubric_after_penalty_percent": 70.0},
+        {"student_id": "s2", "seed_rank": 2, "level": "3", "rubric_after_penalty_percent": 68.0},
+        "Essay one",
+        "Essay two",
+        genre="summary_report",
+        metadata={"grade_level": 6, "assignment_genre": "summary_report"},
+    )
+    assert "Accurate capture of the main idea" in summary
+    assert "copied detail" in summary
+    assert "shorter summary can outrank a longer one" in summary
+
+
+def test_collect_judgments_stores_criterion_audit_fields(monkeypatch):
+    rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": 1,
+            "level": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": 70.0,
+            "borda_percent": 0.6,
+            "composite_score": 0.6,
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": 2,
+            "level": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": 69.0,
+            "borda_percent": 0.7,
+            "composite_score": 0.7,
+        },
+    ]
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        payload = {
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "B has rougher mechanics but stronger interpretation and evidence.",
+            "criterion_notes": [
+                {"criterion": "task alignment", "stronger": "B", "reason": "B answers the prompt more directly."},
+                {"criterion": "organization/language", "stronger": "A", "reason": "A is cleaner but thinner."},
+            ],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content", "polished_but_shallow", "unknown"],
+        }
+        return {"model": model, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgments = vc.collect_judgments(
+        rows,
+        {"s1": "Essay one", "s2": "Essay two"},
+        "rubric",
+        "outline",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=600,
+        window=1,
+        metadata={"assignment_genre": "literary_analysis"},
+    )
+    assert judgments[0]["decision"] == "SWAP"
+    assert judgments[0]["decision_basis"] == "content_reasoning"
+    assert judgments[0]["criterion_notes"][0]["stronger"] == "B"
+    assert judgments[0]["cautions_applied"] == ["rougher_but_stronger_content", "polished_but_shallow"]
 
 
 def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch):

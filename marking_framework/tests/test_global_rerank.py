@@ -78,6 +78,30 @@ def test_global_rerank_known_optimum_order(tmp_path):
     assert "boundary_disagreement_concentration" in report_payload["summary"]
 
 
+def test_global_rerank_preserves_pairwise_criterion_audit_fields(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "72", "composite_score": "0.72"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.71"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s2"],
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "s2 has stronger interpretation despite rougher mechanics.",
+            "criterion_notes": [{"criterion": "content/reasoning", "stronger": "B", "reason": "More developed analysis."}],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+        }
+    ]
+    _result, _final_order, matrix_path, *_ = run_rerank(tmp_path, seed_rows, checks)
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    judgment = matrix["comparisons"][0]["judgments"][0]
+    assert judgment["criterion_notes"][0]["criterion"] == "content/reasoning"
+    assert judgment["decision_basis"] == "content_reasoning"
+    assert judgment["cautions_applied"] == ["rougher_but_stronger_content"]
+
+
 def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
     seed_rows = [
         {"student_id": "a", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "84", "composite_score": "0.84"},
