@@ -24,7 +24,7 @@
       "model": "gpt-5.4",
       "reasoning": "medium",
       "temperature": 0.0,
-      "max_output_tokens": 900
+      "max_output_tokens": 1600
     },
     "feedback_drafter": {
       "model": "gpt-5.4-nano",

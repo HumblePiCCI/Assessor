@@ -39,13 +39,36 @@ def test_verify_consistency_collects_normalized_judgments(tmp_path, monkeypatch)
     (texts_dir / "s2.txt").write_text("Essay two", encoding="utf-8")
     rubric = tmp_path / "rubric.md"
     outline = tmp_path / "outline.md"
+    metadata = tmp_path / "class_metadata.json"
     rubric.write_text("rubric", encoding="utf-8")
     outline.write_text("outline", encoding="utf-8")
+    metadata.write_text(json.dumps({}), encoding="utf-8")
 
     def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
         assert text_format is not None
-        assert max_output_tokens == 600
-        payload = {"decision": "SWAP", "confidence": "high", "rationale": "B is stronger overall."}
+        assert max_output_tokens == 900
+        payload = {
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "B is stronger overall.",
+            "criterion_notes": [
+                {"criterion": "task alignment", "stronger": "B", "reason": "Better aligned."},
+                {"criterion": "content/reasoning", "stronger": "B", "reason": "Better reasoning."},
+                {"criterion": "evidence/development", "stronger": "B", "reason": "Better evidence."},
+            ],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": [],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "tie",
+                "rougher_but_stronger_content": "none",
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "Polish did not decide.",
+                "rougher_loses_because": "Roughness did not decide.",
+            },
+        }
         return {"model": model, "usage": {"input_tokens": 10}, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
 
     monkeypatch.setattr(vc, "responses_create", fake_create)
@@ -62,6 +85,8 @@ def test_verify_consistency_collects_normalized_judgments(tmp_path, monkeypatch)
             str(rubric),
             "--outline",
             str(outline),
+            "--class-metadata",
+            str(metadata),
             "--output",
             str(out_path),
         ],
@@ -223,6 +248,68 @@ def test_select_pair_specs_checks_post_seam_movers_against_top_pack_and_neighbor
     by_pair = {(item["higher"]["student_id"], item["lower"]["student_id"]): item for item in specs}
     assert "large_mover_top_pack" in by_pair[("s1", "s7")]["selection_reasons"]
     assert "large_mover_neighborhood" in by_pair[("s6", "s7")]["selection_reasons"]
+
+
+def test_select_pair_specs_checks_top_lower_band_challengers_against_upper_anchors():
+    rows = [
+        {"student_id": "u1", "seed_rank": 1, "level": "3", "borda_percent": 0.7, "composite_score": 0.7},
+        {"student_id": "u2", "seed_rank": 2, "level": "3", "borda_percent": 0.6, "composite_score": 0.6},
+        {"student_id": "l1", "seed_rank": 7, "level": "2", "borda_percent": 0.95, "composite_score": 0.92},
+        {"student_id": "l2", "seed_rank": 8, "level": "2", "borda_percent": 0.4, "composite_score": 0.4},
+    ]
+    specs = vc.select_pair_specs(
+        rows,
+        window=1,
+        metadata={},
+        cross_band_challenger_count=1,
+        cross_band_anchor_count=2,
+    )
+    by_pair = {(item["higher"]["student_id"], item["lower"]["student_id"]): item for item in specs}
+    assert ("u1", "l1") in by_pair
+    assert ("u2", "l1") in by_pair
+    assert "cross_band_challenger" in by_pair[("u1", "l1")]["selection_reasons"]
+    assert ("u1", "l2") not in by_pair
+
+
+def test_select_pair_specs_checks_uncertainty_challengers_against_top_anchors():
+    rows = [
+        {"student_id": "a1", "seed_rank": 1, "level": "3", "borda_percent": 0.7, "composite_score": 0.7},
+        {"student_id": "a2", "seed_rank": 2, "level": "3", "borda_percent": 0.7, "composite_score": 0.7},
+        {"student_id": "a3", "seed_rank": 3, "level": "3", "borda_percent": 0.7, "composite_score": 0.7},
+        {
+            "student_id": "u1",
+            "seed_rank": 8,
+            "level": "2",
+            "borda_percent": 0.2,
+            "composite_score": 0.6,
+            "rank_sd": 3.5,
+            "rubric_sd_points": 9.0,
+            "flags": "rank_sd;rubric_sd",
+        },
+        {
+            "student_id": "u2",
+            "seed_rank": 9,
+            "level": "2",
+            "borda_percent": 0.2,
+            "composite_score": 0.2,
+            "rank_sd": 0.1,
+            "rubric_sd_points": 0.1,
+            "flags": "",
+        },
+    ]
+    specs = vc.select_pair_specs(
+        rows,
+        window=1,
+        metadata={},
+        top_pack_size=3,
+        uncertainty_challenger_count=1,
+        uncertainty_anchor_count=3,
+    )
+    by_pair = {(item["higher"]["student_id"], item["lower"]["student_id"]): item for item in specs}
+    assert ("a1", "u1") in by_pair
+    assert ("a3", "u1") in by_pair
+    assert "uncertainty_challenger" in by_pair[("a1", "u1")]["selection_reasons"]
+    assert ("a1", "u2") not in by_pair
 
 
 def test_collect_judgments_records_selection_reasons(tmp_path, monkeypatch):
@@ -483,7 +570,11 @@ def test_orientation_audit_resolves_conflicting_swapped_reads(monkeypatch):
             "decision": "KEEP" if winner_side == "A" else "SWAP",
             "confidence": "medium",
             "rationale": rationale,
-            "criterion_notes": [{"criterion": "content/reasoning", "stronger": winner_side, "reason": "Better interpretation."}],
+            "criterion_notes": [
+                {"criterion": "task alignment", "stronger": winner_side, "reason": "Better aligned."},
+                {"criterion": "content/reasoning", "stronger": winner_side, "reason": "Better interpretation."},
+                {"criterion": "evidence/development", "stronger": winner_side, "reason": "Better evidence."},
+            ],
             "decision_basis": "content_reasoning",
             "cautions_applied": ["rougher_but_stronger_content"],
             "decision_checks": {
@@ -596,14 +687,71 @@ def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch)
                 "output": [
                     {
                         "type": "output_text",
-                        "text": json.dumps({"decision": "SWAP", "confidence": "high", "rationale": "Repair recovered valid JSON."}),
+                        "text": json.dumps(
+                            {
+                                "winner_side": "B",
+                                "decision": "SWAP",
+                                "confidence": "high",
+                                "rationale": "Repair recovered valid JSON.",
+                                "criterion_notes": [
+                                    {"criterion": "task alignment", "stronger": "B", "reason": "Better aligned."},
+                                    {"criterion": "content/reasoning", "stronger": "B", "reason": "Better reasoning."},
+                                    {"criterion": "evidence/development", "stronger": "B", "reason": "Better evidence."},
+                                ],
+                                "decision_basis": "content_reasoning",
+                                "cautions_applied": [],
+                                "decision_checks": {
+                                    "deeper_interpretation": "B",
+                                    "better_text_evidence_explanation": "B",
+                                    "cleaner_or_more_formulaic": "tie",
+                                    "rougher_but_stronger_content": "none",
+                                    "completion_advantage": "tie",
+                                    "cleaner_wins_on_substance": "Polish did not decide.",
+                                    "rougher_loses_because": "Roughness did not decide.",
+                                },
+                            }
+                        ),
+                    }
+                ],
+            },
+            {
+                "model": "gpt-5.4-mini",
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {
+                                "winner_side": "A",
+                                "decision": "KEEP",
+                                "confidence": "high",
+                                "rationale": "Swapped read agrees.",
+                                "criterion_notes": [
+                                    {"criterion": "task alignment", "stronger": "A", "reason": "Better aligned."},
+                                    {"criterion": "content/reasoning", "stronger": "A", "reason": "Better reasoning."},
+                                    {"criterion": "evidence/development", "stronger": "A", "reason": "Better evidence."},
+                                ],
+                                "decision_basis": "content_reasoning",
+                                "cautions_applied": [],
+                                "decision_checks": {
+                                    "deeper_interpretation": "A",
+                                    "better_text_evidence_explanation": "A",
+                                    "cleaner_or_more_formulaic": "tie",
+                                    "rougher_but_stronger_content": "none",
+                                    "completion_advantage": "tie",
+                                    "cleaner_wins_on_substance": "Polish did not decide.",
+                                    "rougher_loses_because": "Roughness did not decide.",
+                                },
+                            }
+                        ),
                     }
                 ],
             },
         ]
     )
+    prompts = []
 
     def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        prompts.append(messages[0]["content"])
         return next(responses)
 
     monkeypatch.setattr(vc, "responses_create", fake_create)
@@ -627,6 +775,99 @@ def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch)
     data = json.loads(out_path.read_text(encoding="utf-8"))
     assert data["checks"][0]["decision"] == "SWAP"
     assert data["checks"][0]["model_metadata"]["repair_used"] is True
+    assert "Original adjudication prompt" in prompts[1]
+    assert "Essay one" in prompts[1]
+    assert "Essay two" in prompts[1]
+
+
+def test_judge_pair_repairs_semantically_incomplete_json(monkeypatch):
+    higher = {
+        "student_id": "s1",
+        "seed_rank": 1,
+        "level": "3",
+        "rubric_after_penalty_percent": 73.0,
+        "borda_percent": 0.7,
+        "composite_score": 0.7,
+    }
+    lower = {
+        "student_id": "s2",
+        "seed_rank": 2,
+        "level": "3",
+        "rubric_after_penalty_percent": 72.0,
+        "borda_percent": 0.7,
+        "composite_score": 0.7,
+    }
+    responses = iter(
+        [
+            {
+                "model": "gpt-5.4-mini",
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps({"decision": "KEEP", "confidence": "low", "rationale": "A is cleaner, but B has stronger content."}),
+                    }
+                ],
+            },
+            {
+                "model": "gpt-5.4-mini",
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {
+                                "winner_side": "B",
+                                "decision": "SWAP",
+                                "confidence": "high",
+                                "rationale": "B has the stronger content and explanation.",
+                                "criterion_notes": [
+                                    {"criterion": "task alignment", "stronger": "B", "reason": "Better addresses the prompt."},
+                                    {"criterion": "content/reasoning", "stronger": "B", "reason": "Stronger reasoning."},
+                                    {"criterion": "evidence/development", "stronger": "B", "reason": "Better explains evidence."},
+                                ],
+                                "decision_basis": "content_reasoning",
+                                "cautions_applied": ["rougher_but_stronger_content"],
+                                "decision_checks": {
+                                    "deeper_interpretation": "B",
+                                    "better_text_evidence_explanation": "B",
+                                    "cleaner_or_more_formulaic": "A",
+                                    "rougher_but_stronger_content": "B",
+                                    "completion_advantage": "tie",
+                                    "cleaner_wins_on_substance": "Polish did not decide.",
+                                    "rougher_loses_because": "The rougher essay does not lose.",
+                                },
+                            }
+                        ),
+                    }
+                ],
+            },
+        ]
+    )
+    prompts = []
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        prompts.append(messages[0]["content"])
+        return next(responses)
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgment = vc.judge_pair(
+        "rubric",
+        "outline",
+        higher,
+        lower,
+        "Essay A text.",
+        "Essay B text.",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=600,
+        genre="argumentative",
+    )
+
+    assert judgment["winner"] == "s2"
+    assert judgment["model_metadata"]["repair_used"] is True
+    assert "missing_or_invalid_winner_side" in judgment["model_metadata"]["repair_reasons"]
+    assert "Original adjudication prompt" in prompts[1]
+    assert "Essay A text." in prompts[1]
 
 
 def test_verify_consistency_missing_scores(tmp_path, monkeypatch):

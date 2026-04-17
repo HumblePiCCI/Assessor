@@ -29,6 +29,10 @@ LARGE_MOVER_REASONS = {
     "large_mover_neighborhood",
     "aggregate_divergence_reach",
 }
+UNCERTAINTY_REASONS = {
+    "uncertainty_challenger",
+}
+DEFAULT_TOP_PACK_SIZE = 10
 
 
 def now_iso() -> str:
@@ -103,13 +107,20 @@ def level_value(row: dict) -> str:
 def compact_judgment(item: dict) -> dict:
     metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
     audit = metadata.get("orientation_audit") if isinstance(metadata.get("orientation_audit"), dict) else {}
+    pair = list(item.get("pair", [])) if isinstance(item.get("pair"), list) else []
+    seed_order = dict(item.get("seed_order", {})) if isinstance(item.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or (pair[0] if len(pair) > 0 else "") or "").strip()
+    lower = str(seed_order.get("lower") or (pair[1] if len(pair) > 1 else "") or "").strip()
+    decision = vc.decision_from_winner_side(item.get("winner_side")) or vc.normalize_decision(item.get("decision"))
+    winner = str(item.get("winner", "") or "").strip() or (lower if decision == "SWAP" else higher)
+    loser = str(item.get("loser", "") or "").strip() or (higher if decision == "SWAP" else lower)
     return {
-        "pair": list(item.get("pair", [])) if isinstance(item.get("pair"), list) else [],
-        "seed_order": dict(item.get("seed_order", {})) if isinstance(item.get("seed_order"), dict) else {},
-        "winner": str(item.get("winner", "") or ""),
-        "loser": str(item.get("loser", "") or ""),
+        "pair": pair,
+        "seed_order": seed_order,
+        "winner": winner,
+        "loser": loser,
         "winner_side": vc.normalize_winner_side(item.get("winner_side")) or vc.winner_side_from_decision(item.get("decision")),
-        "decision": vc.decision_from_winner_side(item.get("winner_side")) or vc.normalize_decision(item.get("decision")),
+        "decision": decision,
         "confidence": vc.normalize_confidence(item.get("confidence")),
         "decision_basis": vc.normalize_decision_basis(item.get("decision_basis")),
         "cautions_applied": vc.normalize_cautions(item.get("cautions_applied")),
@@ -264,12 +275,14 @@ def candidate_triggers(
         triggers.append("band_seam_requested")
     if reasons & LARGE_MOVER_REASONS or any(vc.rank_divergence(row, student_count) >= 0.35 for row in (higher, lower)):
         triggers.append("large_mover")
+    if reasons & UNCERTAINTY_REASONS:
+        triggers.append("uncertainty_challenger")
     if audit and str(audit.get("status", "") or "") != "agreement":
         triggers.append("orientation_audit_conflict")
         details["orientation_audit_status"] = audit.get("status", "")
     if genre == "literary_analysis" and confidence_is_low_or_medium(item.get("confidence")):
         triggers.append("low_medium_confidence_literary")
-    if decision_basis in SURFACE_BASES:
+    if decision_basis in SURFACE_BASES or (decision_basis == "completion" and ("incomplete_or_scaffold" not in cautions)):
         triggers.append("surface_form_winner")
     if cautions & CAUTION_TRIGGERS:
         triggers.append("caution_risk")
@@ -304,9 +317,152 @@ def candidate_triggers(
         or int(lower.get("seed_rank", 999999) or 999999) <= 10 < int(higher.get("seed_rank", 999999) or 999999)
     )
     level_cross = level_value(higher) and level_value(lower) and level_value(higher) != level_value(lower)
+    details["top10_involved"] = bool(top_boundary)
+    details["top10_cross"] = bool(top_cross)
+    details["level_cross"] = bool(level_cross)
     if top_boundary or top_cross or level_cross:
         triggers.append("top10_or_level_boundary")
     return sorted(set(triggers)), details
+
+
+def candidate_priority(candidate: dict) -> tuple[int, int, int, str]:
+    triggers = set(candidate.get("triggers", []))
+    details = candidate.get("trigger_details", {}) if isinstance(candidate.get("trigger_details"), dict) else {}
+    selection_reasons = set(candidate.get("selection_reasons", [])) if isinstance(candidate.get("selection_reasons"), list) else set()
+    seed_order = candidate.get("seed_order", {}) if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_rank = int(seed_order.get("higher_rank", 999999) or 999999)
+    lower_rank = int(seed_order.get("lower_rank", 999999) or 999999)
+    score = 0
+    if "top_pack" in triggers:
+        score += 120
+    if "large_mover_top_pack" in selection_reasons:
+        score += 100
+    if "band_seam_requested" in triggers:
+        score += 95
+    if "cross_band_challenger" in selection_reasons:
+        score += 90
+    if "uncertainty_challenger" in triggers:
+        score += 120
+        if details.get("top10_cross"):
+            score += 180
+        if details.get("level_cross"):
+            score += 80
+        if higher_rank <= 4:
+            score += 90
+        elif higher_rank <= 10:
+            score += 35
+    if is_cross_band_frontier_candidate(candidate):
+        score += 300
+        if "contradicts_aggregate_support" in triggers:
+            score += 80
+        if "orientation_audit_conflict" in triggers:
+            score += 50
+        if "caution_risk" in triggers:
+            score += 40
+        if higher_rank == 1:
+            score += 40
+        elif higher_rank <= 3:
+            score += 25
+    if higher_rank <= 6 and lower_rank <= 12:
+        score += 55
+    elif higher_rank <= 10 and lower_rank <= 15:
+        score += 35
+    if details.get("level_cross"):
+        score += 75
+    if "orientation_audit_conflict" in triggers:
+        score += 65
+    if "contradicts_direct_comparative_support" in triggers:
+        score += 80
+    if "contradicts_aggregate_support" in triggers:
+        score += 75
+    if "caution_risk" in triggers:
+        score += 55
+    if "surface_form_winner" in triggers:
+        score += 52
+    if "low_medium_confidence_literary" in triggers:
+        score += 50
+    if details.get("top10_cross"):
+        score += 42
+    elif "top10_or_level_boundary" in triggers:
+        score += 30
+    if "large_mover" in triggers:
+        score += 25
+    return (-score, higher_rank, lower_rank, str(candidate.get("pair_key", "")))
+
+
+def is_cross_band_frontier_candidate(candidate: dict) -> bool:
+    selection_reasons = set(candidate.get("selection_reasons", [])) if isinstance(candidate.get("selection_reasons"), list) else set()
+    if "cross_band_challenger" not in selection_reasons:
+        return False
+    seed_order = candidate.get("seed_order", {}) if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_rank = int(seed_order.get("higher_rank", 999999) or 999999)
+    lower_rank = int(seed_order.get("lower_rank", 999999) or 999999)
+    top_pack_size = int(candidate.get("top_pack_size", DEFAULT_TOP_PACK_SIZE) or DEFAULT_TOP_PACK_SIZE)
+    anchor_cutoff = max(4, top_pack_size // 2)
+    return higher_rank <= anchor_cutoff and top_pack_size < lower_rank <= top_pack_size + 2
+
+
+def budget_bucket(candidate: dict) -> str:
+    triggers = set(candidate.get("triggers", []))
+    details = candidate.get("trigger_details", {}) if isinstance(candidate.get("trigger_details"), dict) else {}
+    selection_reasons = set(candidate.get("selection_reasons", [])) if isinstance(candidate.get("selection_reasons"), list) else set()
+    if "band_seam_requested" in triggers or details.get("level_cross"):
+        return "band_boundary"
+    if "cross_band_challenger" in selection_reasons:
+        return "band_boundary"
+    if "uncertainty_challenger" in triggers:
+        return "large_mover"
+    if "top_pack" in triggers:
+        return "top_pack"
+    if "large_mover" in triggers:
+        return "large_mover"
+    return "other"
+
+
+def select_candidates_for_execution(
+    candidates: list[dict],
+    *,
+    max_escalations: int,
+    max_top_pack_escalations: int,
+    max_band_boundary_escalations: int,
+    max_large_mover_escalations: int,
+) -> tuple[list[dict], list[dict], dict]:
+    total_cap = max(0, int(max_escalations))
+    bucket_caps = {
+        "top_pack": max(0, int(max_top_pack_escalations)),
+        "band_boundary": max(0, int(max_band_boundary_escalations)),
+        "large_mover": max(0, int(max_large_mover_escalations)),
+    }
+    selected = []
+    skipped = []
+    bucket_counts = {"top_pack": 0, "band_boundary": 0, "large_mover": 0, "other": 0}
+    for raw in sorted(candidates, key=candidate_priority):
+        candidate = copy.deepcopy(raw)
+        bucket = budget_bucket(candidate)
+        candidate["budget_bucket"] = bucket
+        reason = ""
+        if total_cap and len(selected) >= total_cap:
+            reason = "max_escalations_exceeded"
+        elif bucket in bucket_caps and bucket_caps[bucket] and bucket_counts[bucket] >= bucket_caps[bucket]:
+            reason = f"max_{bucket}_escalations_exceeded"
+        if reason:
+            candidate["execution_status"] = "skipped_budget_cap"
+            candidate["skip_reason"] = reason
+            skipped.append(candidate)
+            continue
+        candidate["execution_status"] = "selected"
+        candidate["skip_reason"] = ""
+        selected.append(candidate)
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+    return selected, skipped, {
+        "max_escalations": total_cap,
+        "max_top_pack_escalations": bucket_caps["top_pack"],
+        "max_band_boundary_escalations": bucket_caps["band_boundary"],
+        "max_large_mover_escalations": bucket_caps["large_mover"],
+        "selected_count": len(selected),
+        "skipped_count": len(skipped),
+        "selected_bucket_counts": bucket_counts,
+    }
 
 
 def build_candidates(
@@ -356,6 +512,7 @@ def build_candidates(
             {
                 "pair_key": key,
                 "pair": [left_id, right_id],
+                "top_pack_size": int(top_pack_size),
                 "seed_order": {
                     "higher": higher["student_id"],
                     "lower": lower["student_id"],
@@ -475,7 +632,17 @@ def escalate_candidates(
     return escalations
 
 
-def merged_payload(original_payload: dict, checks: list[dict], escalations: list[dict], candidates: list[dict], *, model: str, routing: str, reasoning: str) -> dict:
+def merged_payload(
+    original_payload: dict,
+    checks: list[dict],
+    escalations: list[dict],
+    candidates: list[dict],
+    budget: dict,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+) -> dict:
     escalated_keys = {pair_key_from_item(item) for item in escalations if pair_key_from_item(item)}
     annotated = []
     for item in checks:
@@ -491,10 +658,13 @@ def merged_payload(original_payload: dict, checks: list[dict], escalations: list
         "generated_at": now_iso(),
         "candidate_count": len(candidates),
         "escalation_count": len(escalations),
+        "selected_count": int(budget.get("selected_count", len(escalations)) or 0),
+        "skipped_count": int(budget.get("skipped_count", 0) or 0),
         "escalated_pair_keys": sorted(escalated_keys),
         "model": model,
         "routing": routing,
         "reasoning": reasoning,
+        "budget": budget,
         "source_checks_generated_at": original_payload.get("generated_at", "") if isinstance(original_payload, dict) else "",
     }
     return merged
@@ -514,8 +684,12 @@ def main() -> int:
     parser.add_argument("--model", default="", help="Override escalator model")
     parser.add_argument("--reasoning", default="", help="Override escalator reasoning effort")
     parser.add_argument("--max-output-tokens", type=int, default=0, help="Override escalator output token budget")
-    parser.add_argument("--top-pack-size", type=int, default=10, help="Seed/top-pack rank cutoff treated as high leverage")
+    parser.add_argument("--top-pack-size", type=int, default=DEFAULT_TOP_PACK_SIZE, help="Seed/top-pack rank cutoff treated as high leverage")
     parser.add_argument("--support-margin", type=float, default=0.2, help="Aggregate support margin that triggers contradiction escalation")
+    parser.add_argument("--max-escalations", type=int, default=44, help="Maximum stronger-model escalations per cohort; 0 means no total cap")
+    parser.add_argument("--max-top-pack-escalations", type=int, default=8, help="Maximum selected top-pack escalations; 0 means no top-pack cap")
+    parser.add_argument("--max-band-boundary-escalations", type=int, default=20, help="Maximum selected band-boundary escalations; 0 means no boundary cap")
+    parser.add_argument("--max-large-mover-escalations", type=int, default=16, help="Maximum selected large-mover escalations; 0 means no large-mover cap")
     parser.add_argument("--anchor-dir", default=str(vc.DEFAULT_PAIRWISE_ANCHOR_DIR), help="Pairwise anchor directory")
     parser.add_argument("--disable-orientation-audit", action="store_true", help="Disable swapped-read orientation auditing for escalations")
     parser.add_argument("--candidate-output", default=DEFAULT_CANDIDATES, help="Escalation candidate artifact")
@@ -552,6 +726,25 @@ def main() -> int:
         top_pack_size=max(1, int(args.top_pack_size)),
         support_margin=max(0.0, float(args.support_margin)),
     )
+    selected_candidates, skipped_candidates, budget = select_candidates_for_execution(
+        candidates,
+        max_escalations=max(0, int(args.max_escalations)),
+        max_top_pack_escalations=max(0, int(args.max_top_pack_escalations)),
+        max_band_boundary_escalations=max(0, int(args.max_band_boundary_escalations)),
+        max_large_mover_escalations=max(0, int(args.max_large_mover_escalations)),
+    )
+    candidate_status = {candidate["pair_key"]: candidate for candidate in selected_candidates + skipped_candidates}
+    annotated_candidates = []
+    for candidate in candidates:
+        updated = copy.deepcopy(candidate)
+        status = candidate_status.get(candidate.get("pair_key", ""), {})
+        updated["execution_status"] = status.get("execution_status", "selected")
+        updated["budget_bucket"] = status.get("budget_bucket", budget_bucket(candidate))
+        updated["skip_reason"] = status.get("skip_reason", "")
+        annotated_candidates.append(updated)
+    estimated_max_model_calls = len(selected_candidates) * (2 if not args.disable_orientation_audit else 1)
+    budget["estimated_max_model_calls"] = estimated_max_model_calls
+    budget["estimated_max_output_tokens"] = estimated_max_model_calls * max(512, max_output_tokens)
     candidates_payload = {
         "generated_at": now_iso(),
         "source_checks": args.checks,
@@ -561,11 +754,16 @@ def main() -> int:
         "top_pack_size": max(1, int(args.top_pack_size)),
         "support_margin": max(0.0, float(args.support_margin)),
         "candidate_count": len(candidates),
-        "candidates": candidates,
+        "selected_count": len(selected_candidates),
+        "skipped_count": len(skipped_candidates),
+        "budget": budget,
+        "candidates": annotated_candidates,
+        "selected_candidates": selected_candidates,
+        "skipped_candidates": skipped_candidates,
     }
     write_json(Path(args.candidate_output), candidates_payload)
 
-    if mode != "codex_local" and candidates and not os.environ.get("OPENAI_API_KEY"):
+    if mode != "codex_local" and selected_candidates and not os.environ.get("OPENAI_API_KEY"):
         print("OPENAI_API_KEY is not set. Aborting before escalated adjudication.")
         return 1
 
@@ -576,7 +774,7 @@ def main() -> int:
     outline_text = load_file_text(outline_path)
     rows_by_id = {row["student_id"]: row for row in rows}
     escalations = escalate_candidates(
-        candidates,
+        selected_candidates,
         rows_by_id=rows_by_id,
         texts=texts,
         rubric=rubric_text,
@@ -597,18 +795,32 @@ def main() -> int:
         "model": model,
         "routing": args.routing,
         "reasoning": reasoning,
+        "budget": budget,
+        "selected_count": len(selected_candidates),
+        "skipped_count": len(skipped_candidates),
         "escalation_count": len(escalations),
         "checks": escalations,
     }
     write_json(Path(args.escalations_output), escalations_payload)
     write_json(
         Path(args.merged_output),
-        merged_payload(checks_payload, checks, escalations, candidates, model=model, routing=args.routing, reasoning=reasoning),
+        merged_payload(checks_payload, checks, escalations, annotated_candidates, budget, model=model, routing=args.routing, reasoning=reasoning),
     )
     print(f"Wrote {args.candidate_output}")
     print(f"Wrote {args.escalations_output}")
     print(f"Wrote {args.merged_output}")
-    print(json.dumps({"candidate_count": len(candidates), "escalation_count": len(escalations)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "candidate_count": len(candidates),
+                "selected_count": len(selected_candidates),
+                "skipped_count": len(skipped_candidates),
+                "escalation_count": len(escalations),
+                "estimated_max_model_calls": estimated_max_model_calls,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

@@ -137,6 +137,8 @@ def test_pairwise_escalation_routes_only_unstable_pairs_and_merges(tmp_path, mon
     assert esc.main() == 0
     candidate_payload = json.loads(candidates.read_text(encoding="utf-8"))
     assert candidate_payload["candidate_count"] == 1
+    assert candidate_payload["selected_count"] == 1
+    assert candidate_payload["budget"]["estimated_max_model_calls"] == 2
     triggers = set(candidate_payload["candidates"][0]["triggers"])
     assert {"top_pack", "low_medium_confidence_literary", "surface_form_winner", "caution_risk", "contradicts_aggregate_support"} <= triggers
     assert captured["kwargs"]["model"] == "strong"
@@ -150,3 +152,74 @@ def test_pairwise_escalation_routes_only_unstable_pairs_and_merges(tmp_path, mon
     assert merged_payload["checks"][0]["model_metadata"]["adjudication_source"] == "cheap_pairwise"
     assert merged_payload["checks"][1]["model_metadata"]["adjudication_source"] == "escalated_adjudication"
     assert merged_payload["pairwise_escalation"]["escalation_count"] == 1
+
+
+def test_pairwise_escalation_budget_selects_priority_and_skips_extras():
+    candidates = [
+        {
+            "pair_key": "a::b",
+            "seed_order": {"higher_rank": 1, "lower_rank": 2},
+            "triggers": ["top_pack"],
+            "trigger_details": {"level_cross": False},
+        },
+        {
+            "pair_key": "c::d",
+            "seed_order": {"higher_rank": 7, "lower_rank": 8},
+            "triggers": ["top10_or_level_boundary"],
+            "trigger_details": {"level_cross": True},
+        },
+        {
+            "pair_key": "e::f",
+            "seed_order": {"higher_rank": 18, "lower_rank": 19},
+            "triggers": ["large_mover"],
+            "trigger_details": {},
+        },
+    ]
+
+    selected, skipped, budget = esc.select_candidates_for_execution(
+        candidates,
+        max_escalations=2,
+        max_top_pack_escalations=1,
+        max_band_boundary_escalations=1,
+        max_large_mover_escalations=0,
+    )
+
+    assert [item["pair_key"] for item in selected] == ["a::b", "c::d"]
+    assert skipped[0]["pair_key"] == "e::f"
+    assert skipped[0]["skip_reason"] == "max_escalations_exceeded"
+    assert budget["selected_bucket_counts"]["band_boundary"] == 1
+    assert budget["selected_bucket_counts"]["top_pack"] == 1
+
+
+def test_pairwise_escalation_prioritizes_cross_band_frontier_challengers():
+    candidates = [
+        {
+            "pair_key": "upper::inside",
+            "top_pack_size": 10,
+            "seed_order": {"higher_rank": 1, "lower_rank": 6},
+            "selection_reasons": ["cross_band_challenger", "large_mover_top_pack"],
+            "triggers": ["top_pack", "top10_or_level_boundary", "caution_risk", "large_mover"],
+            "trigger_details": {"level_cross": True},
+        },
+        {
+            "pair_key": "upper::frontier",
+            "top_pack_size": 10,
+            "seed_order": {"higher_rank": 1, "lower_rank": 11},
+            "selection_reasons": ["cross_band_challenger"],
+            "triggers": ["top10_or_level_boundary", "caution_risk", "contradicts_aggregate_support"],
+            "trigger_details": {"level_cross": True},
+        },
+    ]
+
+    selected, skipped, budget = esc.select_candidates_for_execution(
+        candidates,
+        max_escalations=1,
+        max_top_pack_escalations=0,
+        max_band_boundary_escalations=1,
+        max_large_mover_escalations=0,
+    )
+
+    assert [item["pair_key"] for item in selected] == ["upper::frontier"]
+    assert skipped[0]["pair_key"] == "upper::inside"
+    assert skipped[0]["skip_reason"] == "max_escalations_exceeded"
+    assert budget["selected_bucket_counts"]["band_boundary"] == 1

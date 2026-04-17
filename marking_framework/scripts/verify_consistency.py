@@ -124,6 +124,7 @@ CAUTION_VALUES = {
     "incomplete_or_scaffold",
     "genre_requirement_decisive",
 }
+LEVEL_SORT = {"1": 1, "2": 2, "3": 3, "4": 4, "4+": 5}
 
 GENRE_PRIORITY_RULES = {
     "literary_analysis": {
@@ -607,6 +608,144 @@ def add_pair_spec(specs: dict[tuple[str, str], dict], rows_by_id: dict[str, dict
         item["selection_details"].append(detail)
 
 
+def cross_band_support_score(row: dict, student_count: int) -> float:
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    return max(
+        seed_pct,
+        clamp01(row.get("borda_percent"), seed_pct),
+        clamp01(row.get("composite_score"), seed_pct),
+    )
+
+
+def uncertainty_challenger_score(row: dict, student_count: int) -> float:
+    seed_pct = seed_percentile(int(row.get("seed_rank", 1) or 1), student_count)
+    support_peak = max(
+        seed_pct,
+        clamp01(row.get("borda_percent"), seed_pct),
+        clamp01(row.get("composite_score"), seed_pct),
+    )
+    flags = {item.strip() for item in str(row.get("flags", "") or "").split(";") if item.strip()}
+    score = 0.0
+    score += min(num(row.get("rank_sd"), 0.0) / 3.0, 1.0)
+    score += min(num(row.get("rubric_sd_points"), 0.0) / 8.0, 1.0)
+    score += max(0.0, support_peak - seed_pct)
+    if "rank_sd" in flags:
+        score += 0.5
+    if "rubric_sd" in flags:
+        score += 0.2
+    if "severe_collapse_rescue" in flags or "boundary_calibration" in flags:
+        score += 0.3
+    if "band_seam_ambiguous" in flags:
+        score += 0.3
+    return score
+
+
+def add_uncertainty_challenger_specs(
+    specs: dict[tuple[str, str], dict],
+    rows: list[dict],
+    rows_by_id: dict[str, dict],
+    *,
+    challenger_count: int,
+    anchor_count: int,
+    top_pack_size: int,
+):
+    challenger_count = max(0, int(challenger_count))
+    anchor_count = max(0, int(anchor_count))
+    if not challenger_count or not anchor_count:
+        return
+    student_count = max(1, len(rows))
+    top_cutoff = max(0, int(top_pack_size))
+    challengers = sorted(
+        [
+            row
+            for row in rows
+            if int(row.get("seed_rank", 999999) or 999999) > top_cutoff
+            and uncertainty_challenger_score(row, student_count) > 0.0
+        ],
+        key=lambda row: (
+            -uncertainty_challenger_score(row, student_count),
+            int(row.get("seed_rank", 999999) or 999999),
+            str(row.get("student_id", "")).lower(),
+        ),
+    )[:challenger_count]
+    anchors = sorted(
+        rows,
+        key=lambda row: (
+            int(row.get("seed_rank", 999999) or 999999),
+            str(row.get("student_id", "")).lower(),
+        ),
+    )[:anchor_count]
+    for challenger in challengers:
+        for anchor in anchors:
+            if challenger["student_id"] == anchor["student_id"]:
+                continue
+            add_pair_spec(
+                specs,
+                rows_by_id,
+                challenger["student_id"],
+                anchor["student_id"],
+                "uncertainty_challenger",
+                detail=(
+                    f"{challenger['student_id']} has high rank/rubric disagreement and is checked "
+                    f"against top-{anchor_count} post-seam anchors"
+                ),
+            )
+
+
+def add_cross_band_challenger_specs(
+    specs: dict[tuple[str, str], dict],
+    rows: list[dict],
+    rows_by_id: dict[str, dict],
+    *,
+    challenger_count: int,
+    anchor_count: int,
+):
+    challenger_count = max(0, int(challenger_count))
+    anchor_count = max(0, int(anchor_count))
+    if not challenger_count or not anchor_count:
+        return
+    by_level: dict[str, list[dict]] = {}
+    for row in rows:
+        level = normalize_level(row.get("level") or row.get("adjusted_level") or row.get("base_level"))
+        if level in LEVEL_SORT:
+            by_level.setdefault(level, []).append(row)
+    ordered_levels = sorted(by_level, key=lambda level: LEVEL_SORT[level])
+    student_count = max(1, len(rows))
+    for lower_level, upper_level in zip(ordered_levels, ordered_levels[1:]):
+        lower_rows = by_level.get(lower_level, [])
+        upper_rows = by_level.get(upper_level, [])
+        if not lower_rows or not upper_rows:
+            continue
+        challengers = sorted(
+            lower_rows,
+            key=lambda row: (
+                -cross_band_support_score(row, student_count),
+                int(row.get("seed_rank", 999999) or 999999),
+                str(row.get("student_id", "")).lower(),
+            ),
+        )[:challenger_count]
+        anchors = sorted(
+            upper_rows,
+            key=lambda row: (
+                int(row.get("seed_rank", 999999) or 999999),
+                str(row.get("student_id", "")).lower(),
+            ),
+        )[:anchor_count]
+        for challenger in challengers:
+            for anchor in anchors:
+                add_pair_spec(
+                    specs,
+                    rows_by_id,
+                    challenger["student_id"],
+                    anchor["student_id"],
+                    "cross_band_challenger",
+                    detail=(
+                        f"top lower-band challenger from Level {lower_level} checked against "
+                        f"upper-band Level {upper_level} anchor after band-seam adjudication"
+                    ),
+                )
+
+
 def build_prompt(
     rubric: str,
     outline: str,
@@ -637,9 +776,11 @@ def build_prompt(
 6. If one essay is cleaner or more formulaic but the other has stronger task-specific content, reasoning, evidence, or genre fulfillment, do not choose the cleaner essay for polish alone.
 7. If you choose the cleaner or more formulaic essay over a rougher essay, cleaner_wins_on_substance must identify the specific stronger interpretation/evidence explanation. Do not cite focus, structure, clarity, length, or grammar alone.
 8. If you choose against a rougher essay with possible stronger interpretation, rougher_loses_because must explain why its interpretation or evidence explanation is actually weaker, not just less polished.
-9. For literary analysis, five-paragraph form, paragraph count, complete essay shape, clearer thesis wording, or smoother transitions are not decisive unless the other response is incomplete/scaffolded or meaning is not recoverable.
-10. If conventions or organization drive the result, explain whether they merely polish the writing or actually affect meaning, accuracy, completion, or usability.
-11. Confidence calibration:
+9. If you choose the rougher essay, confirm that its deeper or alternate interpretation is sustained through recoverable textual evidence and explanation, not just mature theme vocabulary.
+10. For literary analysis, five-paragraph form, paragraph count, complete essay shape, clearer thesis wording, or smoother transitions are not decisive unless the other response is incomplete/scaffolded or meaning is not recoverable.
+11. For literary analysis, a complete essay with a clear claim, multiple specific text events, and repeated explanation can beat a rougher essay whose theme sounds more sophisticated but is less consistently proven.
+12. If conventions or organization drive the result, explain whether they merely polish the writing or actually affect meaning, accuracy, completion, or usability.
+13. Confidence calibration:
    - Use high when the same essay is clearly stronger on task alignment plus content/reasoning or evidence/development, even if the other essay is cleaner or more formulaic.
    - Use medium when the important criteria are genuinely mixed or the advantage is modest.
    - Use low only when the comparison is ambiguous or both essays are similarly flawed.
@@ -726,8 +867,21 @@ def parse_json(text: str) -> dict:
     return payload
 
 
-def build_repair_prompt(raw_text: str) -> str:
+def build_repair_prompt(raw_text: str, original_prompt: str = "", repair_reasons: list[str] | None = None) -> str:
+    original_block = ""
+    if str(original_prompt or "").strip():
+        original_block = f"""
+Original adjudication prompt, including the essays and rubric:
+{original_prompt}
+"""
+    reasons = [str(reason or "").strip() for reason in (repair_reasons or []) if str(reason or "").strip()]
+    reason_block = ""
+    if reasons:
+        reason_block = "\nRepair triggers:\n" + "\n".join(f"- {reason}" for reason in reasons) + "\n"
     return f"""The prior response was supposed to be JSON but was malformed.
+
+Repair the response by re-reading the original adjudication prompt when it is provided. Do not say the essays are missing when the original prompt includes them.
+{reason_block}
 
 Allowed values:
 - winner_side: A when Essay A is stronger; B when Essay B is stronger.
@@ -767,6 +921,7 @@ Return ONLY valid JSON in this shape:
   }}
 }}
 
+{original_block}
 Malformed response:
 {raw_text}
 """
@@ -852,6 +1007,38 @@ def normalize_decision_checks(value) -> dict:
         "cleaner_wins_on_substance": str(payload.get("cleaner_wins_on_substance", "") or "").strip(),
         "rougher_loses_because": str(payload.get("rougher_loses_because", "") or "").strip(),
     }
+
+
+def parsed_judgment_repair_reasons(parsed: dict) -> list[str]:
+    reasons = []
+    if not normalize_winner_side(parsed.get("winner_side")):
+        reasons.append("missing_or_invalid_winner_side")
+    if normalize_decision(parsed.get("decision")) not in {"KEEP", "SWAP"}:
+        reasons.append("missing_or_invalid_decision")
+    if normalize_confidence(parsed.get("confidence")) not in {"low", "medium", "high"}:
+        reasons.append("missing_or_invalid_confidence")
+    if normalize_decision_basis(parsed.get("decision_basis")) not in DECISION_BASIS_VALUES:
+        reasons.append("missing_or_invalid_decision_basis")
+    if len(normalize_criterion_notes(parsed.get("criterion_notes"))) < 3:
+        reasons.append("missing_or_sparse_criterion_notes")
+    checks = parsed.get("decision_checks") if isinstance(parsed.get("decision_checks"), dict) else {}
+    for key in (
+        "deeper_interpretation",
+        "better_text_evidence_explanation",
+        "cleaner_or_more_formulaic",
+        "rougher_but_stronger_content",
+        "completion_advantage",
+    ):
+        if not str(checks.get(key, "") or "").strip():
+            reasons.append(f"missing_decision_check:{key}")
+    rationale = str(parsed.get("rationale") or parsed.get("reason") or "").strip().lower()
+    if (
+        "cannot reliably evaluate" in rationale
+        or "not provided" in rationale
+        or ("missing" in rationale and "essay" in rationale)
+    ):
+        reasons.append("rationale_says_essay_content_missing")
+    return reasons
 
 
 def side_for_student(higher: dict, lower: dict, student_id: str) -> str:
@@ -967,13 +1154,19 @@ def judge_pair(
     )
     content = extract_text(response)
     repair_used = False
+    repair_reasons = []
     try:
         parsed = parse_json(content)
+        repair_reasons = parsed_judgment_repair_reasons(parsed)
+        if repair_reasons:
+            raise ValueError("Incomplete JSON response")
     except ValueError:
         repair_used = True
+        if not repair_reasons:
+            repair_reasons = ["invalid_json_response"]
         repair_response = responses_create(
             model=model,
-            messages=[{"role": "user", "content": build_repair_prompt(content)}],
+            messages=[{"role": "user", "content": build_repair_prompt(content, prompt, repair_reasons)}],
             temperature=0.0,
             reasoning="low",
             routing_path=routing,
@@ -982,6 +1175,7 @@ def judge_pair(
         )
         content = extract_text(repair_response)
         parsed = parse_json(content)
+        repair_reasons.extend(reason for reason in parsed_judgment_repair_reasons(parsed) if reason not in repair_reasons)
         response = repair_response
     parsed_decision = normalize_decision(parsed.get("decision"))
     winner_side = normalize_winner_side(parsed.get("winner_side"))
@@ -1039,6 +1233,7 @@ def judge_pair(
             "response_model": response.get("model") or model,
             "routing_path": routing,
             "repair_used": repair_used,
+            "repair_reasons": repair_reasons,
             "selfcheck_notes": selfcheck_notes,
             "reasoning": reasoning,
             "temperature": 0.0,
@@ -1389,6 +1584,9 @@ def prepare_rows(rows: list[dict]) -> list[dict]:
                 ),
                 "borda_percent": clamp01(row.get("borda_percent"), 0.0),
                 "composite_score": num(row.get("composite_score"), 0.0),
+                "rank_sd": num(row.get("rank_sd"), 0.0),
+                "rubric_sd_points": num(row.get("rubric_sd_points"), 0.0),
+                "flags": str(row.get("flags", "") or ""),
                 "source": dict(row),
             }
         )
@@ -1404,6 +1602,10 @@ def select_pair_specs(
     large_mover_window: int = 0,
     band_seam_report: dict | None = None,
     large_mover_divergence: float = 0.35,
+    cross_band_challenger_count: int = 0,
+    cross_band_anchor_count: int = 0,
+    uncertainty_challenger_count: int = 0,
+    uncertainty_anchor_count: int = 0,
 ) -> list[dict]:
     ordered = list(rows)
     specs = {}
@@ -1496,6 +1698,22 @@ def select_pair_specs(
             detail=reason or "band seam adjudicator requested this direct comparison",
         )
 
+    add_cross_band_challenger_specs(
+        specs,
+        ordered,
+        rows_by_id,
+        challenger_count=cross_band_challenger_count,
+        anchor_count=cross_band_anchor_count,
+    )
+    add_uncertainty_challenger_specs(
+        specs,
+        ordered,
+        rows_by_id,
+        challenger_count=uncertainty_challenger_count,
+        anchor_count=uncertainty_anchor_count,
+        top_pack_size=top_count,
+    )
+
     return list(specs.values())
 
 
@@ -1519,6 +1737,10 @@ def collect_judgments(
     large_mover_window: int = 0,
     band_seam_report: dict | None = None,
     large_mover_divergence: float = 0.35,
+    cross_band_challenger_count: int = 0,
+    cross_band_anchor_count: int = 0,
+    uncertainty_challenger_count: int = 0,
+    uncertainty_anchor_count: int = 0,
     anchor_dir: str | Path | None = None,
     orientation_audit: bool = True,
     replicates: int = 1,
@@ -1533,6 +1755,10 @@ def collect_judgments(
         large_mover_window=large_mover_window,
         band_seam_report=band_seam_report,
         large_mover_divergence=large_mover_divergence,
+        cross_band_challenger_count=cross_band_challenger_count,
+        cross_band_anchor_count=cross_band_anchor_count,
+        uncertainty_challenger_count=uncertainty_challenger_count,
+        uncertainty_anchor_count=uncertainty_anchor_count,
     )
     for spec in pair_specs:
         higher = spec["higher"]
@@ -1581,6 +1807,10 @@ def write_expansion_report(
     large_mover_window: int,
     band_seam_report_path: str,
     large_mover_divergence: float,
+    cross_band_challenger_count: int,
+    cross_band_anchor_count: int,
+    uncertainty_challenger_count: int,
+    uncertainty_anchor_count: int,
     band_seam_report: dict,
 ):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1592,6 +1822,10 @@ def write_expansion_report(
         "top_pack_size": int(top_pack_size),
         "large_mover_window": int(large_mover_window),
         "large_mover_divergence": float(large_mover_divergence),
+        "cross_band_challenger_count": int(cross_band_challenger_count),
+        "cross_band_anchor_count": int(cross_band_anchor_count),
+        "uncertainty_challenger_count": int(uncertainty_challenger_count),
+        "uncertainty_anchor_count": int(uncertainty_anchor_count),
         "band_seam_report": band_seam_report_path,
         "band_seam_movers": sorted(seam_movers),
         "aggregate_divergence_movers": sorted(aggregate_movers),
@@ -1624,6 +1858,10 @@ def write_judgment_payload(
     top_pack_size: int = 0,
     large_mover_window: int = 0,
     band_seam_report: str = "",
+    cross_band_challenger_count: int = 0,
+    cross_band_anchor_count: int = 0,
+    uncertainty_challenger_count: int = 0,
+    uncertainty_anchor_count: int = 0,
     orientation_audit: bool = True,
     replicates: int = 1,
 ):
@@ -1638,6 +1876,10 @@ def write_judgment_payload(
             "top_pack_size": int(top_pack_size),
             "large_mover_window": int(large_mover_window),
             "band_seam_report": band_seam_report,
+            "cross_band_challenger_count": int(cross_band_challenger_count),
+            "cross_band_anchor_count": int(cross_band_anchor_count),
+            "uncertainty_challenger_count": int(uncertainty_challenger_count),
+            "uncertainty_anchor_count": int(uncertainty_anchor_count),
             "orientation_audit": bool(orientation_audit),
             "replicates": int(max(1, replicates)),
             "reason_counts": summarize_pair_reasons(judgments),
@@ -1663,13 +1905,17 @@ def main() -> int:
     parser.add_argument("--top-pack-size", type=int, default=6, help="Fully compare the top N seeds after band-seam adjudication")
     parser.add_argument("--large-mover-window", type=int, default=5, help="Neighborhood radius for post-seam and aggregate-divergence movers")
     parser.add_argument("--large-mover-divergence", type=float, default=0.35, help="Seed-vs-aggregate divergence threshold for large-mover expansion")
+    parser.add_argument("--cross-band-challenger-count", type=int, default=8, help="Top lower-band challengers to compare against upper-band anchors after band seam")
+    parser.add_argument("--cross-band-anchor-count", type=int, default=6, help="Upper-band anchors per adjacent level boundary for challenger comparisons")
+    parser.add_argument("--uncertainty-challenger-count", type=int, default=12, help="High-disagreement non-top-pack papers to compare against post-seam anchors")
+    parser.add_argument("--uncertainty-anchor-count", type=int, default=10, help="Top post-seam anchors used for uncertainty-challenger comparisons")
     parser.add_argument("--band-seam-report", default=DEFAULT_BAND_SEAM_REPORT, help="Band seam report used for post-seam pair expansion")
     parser.add_argument("--expansion-report", default=DEFAULT_EXPANSION_REPORT, help="Pair expansion audit artifact JSON")
     parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
     parser.add_argument("--anchor-dir", default=str(DEFAULT_PAIRWISE_ANCHOR_DIR), help="Directory of genre-specific pairwise calibration anchor JSON files")
     parser.add_argument("--disable-orientation-audit", action="store_true", help="Disable swapped-read orientation auditing for high-risk literary-analysis pairs")
     parser.add_argument("--replicates", type=int, default=1, help="Independent judgments per selected pair")
-    parser.add_argument("--max-output-tokens", type=int, default=600, help="Max model output tokens")
+    parser.add_argument("--max-output-tokens", type=int, default=900, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
     parser.add_argument("--apply", action="store_true", help="Compatibility mode: collect evidence, then run the global reranker")
     parser.add_argument("--rerank-output", default="outputs/final_order.csv", help="Final reranked CSV output")
@@ -1703,6 +1949,10 @@ def main() -> int:
     band_seam_report = load_json(band_seam_report_path) if expansion_enabled else {}
     top_pack_size = max(0, int(args.top_pack_size)) if expansion_enabled else 0
     large_mover_window = max(0, int(args.large_mover_window)) if expansion_enabled else 0
+    cross_band_challenger_count = max(0, int(args.cross_band_challenger_count)) if expansion_enabled else 0
+    cross_band_anchor_count = max(0, int(args.cross_band_anchor_count)) if expansion_enabled else 0
+    uncertainty_challenger_count = max(0, int(args.uncertainty_challenger_count)) if expansion_enabled else 0
+    uncertainty_anchor_count = max(0, int(args.uncertainty_anchor_count)) if expansion_enabled else 0
 
     judgments = collect_judgments(
         seed_rows,
@@ -1719,6 +1969,10 @@ def main() -> int:
         large_mover_window=large_mover_window,
         band_seam_report=band_seam_report,
         large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
+        cross_band_challenger_count=cross_band_challenger_count,
+        cross_band_anchor_count=cross_band_anchor_count,
+        uncertainty_challenger_count=uncertainty_challenger_count,
+        uncertainty_anchor_count=uncertainty_anchor_count,
         anchor_dir=args.anchor_dir,
         orientation_audit=not args.disable_orientation_audit,
         replicates=max(1, int(args.replicates)),
@@ -1738,6 +1992,10 @@ def main() -> int:
         top_pack_size=top_pack_size,
         large_mover_window=large_mover_window,
         band_seam_report=str(band_seam_report_path) if expansion_enabled else "",
+        cross_band_challenger_count=cross_band_challenger_count,
+        cross_band_anchor_count=cross_band_anchor_count,
+        uncertainty_challenger_count=uncertainty_challenger_count,
+        uncertainty_anchor_count=uncertainty_anchor_count,
         orientation_audit=not args.disable_orientation_audit,
         replicates=max(1, int(args.replicates)),
     )
@@ -1750,6 +2008,10 @@ def main() -> int:
             large_mover_window=large_mover_window,
             band_seam_report_path=str(band_seam_report_path),
             large_mover_divergence=max(0.0, float(args.large_mover_divergence)),
+            cross_band_challenger_count=cross_band_challenger_count,
+            cross_band_anchor_count=cross_band_anchor_count,
+            uncertainty_challenger_count=uncertainty_challenger_count,
+            uncertainty_anchor_count=uncertainty_anchor_count,
             band_seam_report=band_seam_report,
         )
     print(f"Pairwise judgments saved to {out_path}")

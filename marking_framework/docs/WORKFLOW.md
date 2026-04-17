@@ -45,6 +45,9 @@ Optional LLM assessors:
 - Review `outputs/pairwise_escalation_candidates.json` for the routed hard-pair selection.
 - Review `outputs/pairwise_escalations.json` for stronger-model teacher-grade decisions.
 - Review `outputs/consistency_checks.escalated.json` for the merged evidence file consumed by rerank.
+- The escalation step keeps skipped candidates in the candidate artifact when budget caps apply; skipped pairs are not marked as teacher-grade evidence.
+- Cross-band challengers just below the top pack are prioritized inside the escalation budget, because a flawed seam can otherwise hide the exact papers that need teacher-grade comparison against top anchors.
+- High-disagreement non-top-pack papers are also checked against top post-seam anchors, so rank/rubric variance can surface long-gap challengers before the final rerank.
 - Review `outputs/pairwise_matrix.json` for normalized pairwise evidence.
 - Review `outputs/consistency_report.json` for movements, uncertainty flags, and rerank diagnostics.
 - Review `outputs/final_order.csv` for the resolved order used by grading.
