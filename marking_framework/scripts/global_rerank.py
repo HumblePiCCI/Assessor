@@ -4,15 +4,20 @@ import csv
 import json
 import math
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 try:
+    from scripts.adjudication_source import dedupe_by_precedence, normalize_source
     from scripts.aggregate_helpers import get_level_bands
     from scripts.local_teacher_prior import compute_teacher_preference_adjustments
     from scripts.levels import normalize_level
 except ImportError:  # pragma: no cover - Support running as a script
+    from adjudication_source import dedupe_by_precedence, normalize_source  # pragma: no cover
     from aggregate_helpers import get_level_bands  # pragma: no cover
     from local_teacher_prior import compute_teacher_preference_adjustments  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
@@ -81,13 +86,7 @@ def normalize_decision(value) -> str:
 
 
 def adjudication_source(item: dict) -> str:
-    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
-    source = str(metadata.get("adjudication_source") or item.get("adjudication_source") or "").strip()
-    if source:
-        return source
-    if isinstance(metadata.get("orientation_audit"), dict):
-        return "orientation_audit"
-    return "cheap_pairwise"
+    return normalize_source(item)
 
 
 def normalize_winner_side(value) -> str:
@@ -257,19 +256,9 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "superseded_by_escalation": bool(model_metadata.get("superseded_by_escalation", False)),
             }
         )
-    escalated_pair_keys = {
-        item["pair_key"]
-        for item in normalized
-        if item.get("adjudication_source") == "escalated_adjudication"
-    }
-    if escalated_pair_keys:
-        normalized = [
-            item
-            for item in normalized
-            if item["pair_key"] not in escalated_pair_keys or item.get("adjudication_source") == "escalated_adjudication"
-        ]
-        for idx, item in enumerate(normalized, start=1):
-            item["id"] = idx
+    normalized = dedupe_by_precedence(normalized, key_fn=lambda item: item["pair_key"])
+    for idx, item in enumerate(normalized, start=1):
+        item["id"] = idx
     return payload if isinstance(payload, dict) else {}, normalized
 
 

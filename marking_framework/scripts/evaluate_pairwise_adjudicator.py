@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 try:
+    from scripts.adjudication_source import dedupe_by_precedence, normalize_source
     from scripts import verify_consistency as vc
 except ImportError:  # pragma: no cover - Support running as script without package context
+    from adjudication_source import dedupe_by_precedence, normalize_source  # type: ignore  # pragma: no cover
     import verify_consistency as vc  # type: ignore  # pragma: no cover
 
 
@@ -114,13 +119,7 @@ def confidence_weight(confidence: str) -> float:
 
 
 def adjudication_source(item: dict) -> str:
-    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
-    source = str(metadata.get("adjudication_source") or item.get("adjudication_source") or "").strip()
-    if source:
-        return source
-    if isinstance(metadata.get("orientation_audit"), dict):
-        return "orientation_audit"
-    return "cheap_pairwise"
+    return normalize_source(item)
 
 
 def judgment_outcome(item: dict) -> dict | None:
@@ -186,15 +185,9 @@ def aggregate_judgment_outcomes(raw_items: list[dict], *, source: str) -> dict[s
         outcome = judgment_outcome(item)
         if outcome:
             all_outcomes.append(outcome)
-    escalated_pair_keys = {
-        outcome["key"]
-        for outcome in all_outcomes
-        if outcome.get("adjudication_source") == "escalated_adjudication"
-    }
+    all_outcomes = dedupe_by_precedence(all_outcomes, key_fn=lambda outcome: outcome["key"])
     buckets: dict[str, dict] = {}
     for outcome in all_outcomes:
-        if outcome["key"] in escalated_pair_keys and outcome.get("adjudication_source") != "escalated_adjudication":
-            continue
         bucket = buckets.setdefault(
             outcome["key"],
             {

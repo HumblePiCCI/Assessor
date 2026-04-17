@@ -175,6 +175,33 @@ def test_pairwise_eval_prefers_escalated_judgment_in_merged_checks(tmp_path):
     assert outcomes["a::b"]["strongest_judgment"]["adjudication_source"] == "escalated_adjudication"
 
 
+def test_aggregate_outcomes_committee_edge_overrides_escalated():
+    outcomes = epa.aggregate_judgment_outcomes(
+        [
+            {
+                "pair": ["a", "b"],
+                "seed_order": {"higher": "a", "lower": "b"},
+                "winner_side": "B",
+                "decision": "SWAP",
+                "confidence": "high",
+                "model_metadata": {"adjudication_source": "escalated_adjudication"},
+            },
+            {
+                "pair": ["a", "b"],
+                "seed_order": {"higher": "a", "lower": "b"},
+                "winner_side": "A",
+                "decision": "KEEP",
+                "confidence": "medium",
+                "model_metadata": {"adjudication_source": "committee_edge"},
+            },
+        ],
+        source="fixture",
+    )
+    assert outcomes["a::b"]["winner"] == "a"
+    assert outcomes["a::b"]["judgment_count"] == 1
+    assert outcomes["a::b"]["strongest_judgment"]["adjudication_source"] == "committee_edge"
+
+
 def test_pairwise_eval_reads_pairwise_matrix_comparisons(tmp_path):
     matrix_path = tmp_path / "matrix.json"
     matrix_path.write_text(

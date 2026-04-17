@@ -203,7 +203,61 @@ def test_hero_path_calibrate_and_consistency(tmp_path, monkeypatch):
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
     assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
+    assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_runs_committee_edge_resolver_between_escalation_and_rerank(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+        ],
+    )
+    assert hp.main() == 0
+    rendered = [" ".join(str(part) for part in call) for call in calls]
+    escalation_idx = next(idx for idx, call in enumerate(rendered) if "escalate_pairwise_adjudications.py" in call)
+    committee_idx = next(idx for idx, call in enumerate(rendered) if "committee_edge_resolver.py" in call)
+    rerank_idx = next(idx for idx, call in enumerate(rendered) if "global_rerank.py" in call)
+    assert escalation_idx < committee_idx < rerank_idx
+
+
+def test_hero_path_skips_committee_edge_resolver_without_apply_consistency(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+        ],
+    )
+    assert hp.main() == 0
+    assert not any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
 
 
 def test_hero_path_calibrate_fail(tmp_path, monkeypatch):
@@ -287,6 +341,7 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("band_seam_adjudication.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
     assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
+    assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
     assert any("sota_gate.py" in str(part) for call in calls for part in call)

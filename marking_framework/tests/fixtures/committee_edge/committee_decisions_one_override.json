@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-04-17T00:00:00+00:00",
+  "phase": 1,
+  "passthrough": false,
+  "decisions": [
+    {
+      "pair": ["s015", "s009"],
+      "pair_key": "s009::s015",
+      "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 2, "lower_rank": 3},
+      "winner": "s009",
+      "loser": "s015",
+      "winner_side": "B",
+      "decision": "SWAP",
+      "confidence": "high",
+      "adjudication_source": "committee_edge",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "decision_checks": {"rougher_but_stronger_content": "B", "polish_trap": true},
+      "rationale": "Committee fixture favors stronger interpretation over cleaner structure.",
+      "model_metadata": {
+        "adjudication_source": "committee_edge",
+        "supersedes_pair_key": "s009::s015",
+        "phase": 1,
+        "origin": "fixture"
+      }
+    }
+  ]
+}
