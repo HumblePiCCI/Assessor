@@ -93,3 +93,7 @@ def polish_vs_substance_gap(winner: SurfaceFeatures, loser: SurfaceFeatures) -> 
         "substance_delta": substance_delta,
         "polish_bias_flag": bool(surface_delta >= 0.25 and substance_delta <= -0.50),
     }
+
+
+def interpretive_density_delta(winner: SurfaceFeatures, loser: SurfaceFeatures) -> float:
+    return round(loser.interpretive_density - winner.interpretive_density, 6)

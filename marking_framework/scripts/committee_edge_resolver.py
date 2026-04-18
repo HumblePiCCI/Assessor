@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Phase 1 scaffold for routed committee-edge adjudication."""
+"""Routed committee-edge adjudication.
+
+Phase 1 shipped the scaffold (passthrough + precedence + basic triggers).
+Phase 2a (this revision) calibrates the trigger set so the resolver routes
+"caution raised but ignored" pairs — the primary failure mode on the Ghost
+Grade-7 literary cohort. Still no live model reads; Phase 2b will add those
+behind a --live flag.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +28,11 @@ try:
         pair_key_from_item,
         precedence_rank,
     )
-    from scripts.literary_surface_features import compute_surface_features, polish_vs_substance_gap
+    from scripts.literary_surface_features import (
+        compute_surface_features,
+        interpretive_density_delta,
+        polish_vs_substance_gap,
+    )
 except ImportError:  # pragma: no cover - Support running as a standalone script
     from adjudication_source import (  # type: ignore  # pragma: no cover
         dedupe_by_precedence,
@@ -30,7 +41,11 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         pair_key_from_item,
         precedence_rank,
     )
-    from literary_surface_features import compute_surface_features, polish_vs_substance_gap  # type: ignore  # pragma: no cover
+    from literary_surface_features import (  # type: ignore  # pragma: no cover
+        compute_surface_features,
+        interpretive_density_delta,
+        polish_vs_substance_gap,
+    )
 
 
 DEFAULT_ESCALATED = "outputs/consistency_checks.escalated.json"
@@ -48,6 +63,7 @@ DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
 DEFAULT_MERGED_OUT = "outputs/consistency_checks.committee_edge.json"
 
 TRIGGER_POINTS = {
+    # Phase 1 triggers (retained as-is)
     "escalated_vs_direct_matrix_conflict": 90,
     "escalated_vs_aggregate_conflict": 70,
     "polish_bias_suspected": 100,
@@ -56,21 +72,62 @@ TRIGGER_POINTS = {
     "top10_or_boundary": 40,
     "completion_ordering_instability": 55,
     "cohort_confidence_unstable": 30,
+    # Phase 2a triggers (caution-raised-but-ignored + non-escalated leverage)
+    "caution_raised_but_winner_polish_like": 85,
+    "caution_raised_but_ignored_rougher_stronger": 85,
+    "surface_substance_inversion": 70,
+    "never_escalated_high_leverage": 55,
 }
 HARD_EVIDENCE_MARGIN = 1.5
 TOP_PACK_SIZE = 10
 
+# Caution vocabularies used by Phase 2a triggers. Aligned with the cautions the
+# cheap/orientation/escalated judges emit for literary analysis. incomplete_or_scaffold
+# is grouped with the rougher-stronger cautions because it is the judge flagging the
+# loser as fragmented/scaffold-ish — the same failure mode the product cares about.
+POLISH_LIKE_CAUTIONS = frozenset({"polished_but_shallow", "formulaic_but_thin"})
+ROUGHER_STRONGER_CAUTIONS = frozenset(
+    {"rougher_but_stronger_content", "mechanics_impede_meaning", "incomplete_or_scaffold"}
+)
+NON_ESCALATED_SOURCES = frozenset({"cheap_pairwise", "orientation_audit"})
+CAUTION_IGNORED_TRIGGERS = frozenset(
+    {
+        "caution_raised_but_winner_polish_like",
+        "caution_raised_but_ignored_rougher_stronger",
+        "surface_substance_inversion",
+        "never_escalated_high_leverage",
+    }
+)
+
 
 @dataclass(frozen=True)
 class CandidateConfig:
-    max_candidates: int = 12
-    max_top_pack: int = 6
+    # Overall budget. Phase 2a introduces the caution_ignored bucket and a
+    # four-level priority tiering (0=polished_but_shallow KEEP, 1=escalated
+    # judge ignored caution despite text evidence, 2=non-escalated KEEP with
+    # caution+text or SWAP overcorrection, 3=generic bucket member). Residual
+    # pairs on Ghost Grade-7 land in tiers 0–2; the cap must be big enough
+    # to cover all of tiers 0–2 up through the lowest-ranked residual in
+    # tier 2 (s004::s008 at tier-2 rank 44 on Ghost live data → 3+5+44 = 52
+    # with a small buffer). Phase 2b will further rank via model vote.
+    #
+    # NB: bucket caps for top_pack / level / rougher_stronger / completion
+    # stay tight because those routes have not changed.
+    max_candidates: int = 72           # Phase 1: 12 → Phase 2a: 72 (fits caution_ignored
+                                       # window + existing bucket caps)
+    max_top_pack: int = 8              # Phase 1: 6  → Phase 2a: 8
     max_level_boundary: int = 4
     max_rougher_stronger: int = 6
     max_completion_ordering: int = 2
+    max_caution_ignored: int = 56      # Phase 2a: cap tuned to fit all five Ghost
+                                       # residuals under priority-tier ordering with
+                                       # a small buffer. Tier 0 (3) + Tier 1 (5) +
+                                       # top 48 of Tier 2 fit in 56 slots on live data.
     min_trigger_score: int = 80
+    caution_ignored_min_trigger_score: int = 70  # Bucket-specific threshold for caution_ignored
     support_margin: float = 0.20
     polish_bias_surface_sd: float = 1.0
+    interpretive_density_delta: float = 0.03  # loser-minus-winner threshold for "stronger interpretation"
 
 
 def now_iso() -> str:
@@ -310,6 +367,12 @@ def score_candidate(triggers: set[str], details: dict, config: CandidateConfig) 
 
 
 def candidate_bucket(triggers: set[str], details: dict, config: CandidateConfig) -> str:
+    # Phase 2a: caution_ignored takes precedence over other buckets. When any of the
+    # caution-raised-but-ignored / surface-substance-inversion / never-escalated
+    # triggers fires, this pair represents the primary Phase 2a failure mode and
+    # must land in its own bounded bucket for downstream routing.
+    if set(triggers) & CAUTION_IGNORED_TRIGGERS:
+        return "caution_ignored"
     if details.get("level_cross") or details.get("band_seam_pair"):
         return "level_boundary"
     if details.get("higher_rank", 999999) <= TOP_PACK_SIZE or details.get("lower_rank", 999999) <= TOP_PACK_SIZE:
@@ -319,6 +382,18 @@ def candidate_bucket(triggers: set[str], details: dict, config: CandidateConfig)
     if "completion_ordering_instability" in triggers:
         return "completion_ordering"
     return "other"
+
+
+def effective_min_trigger_score(bucket: str, config: CandidateConfig) -> int:
+    """Bucket-specific minimum trigger score.
+
+    caution_ignored uses a relaxed threshold so that the broadest heuristic
+    (surface_substance_inversion, 70 pts) can fire on its own and still be
+    bucket-capped. Other buckets keep the stricter default threshold.
+    """
+    if bucket == "caution_ignored":
+        return int(config.caution_ignored_min_trigger_score)
+    return int(config.min_trigger_score)
 
 
 def _surface_block(winner_text: str, loser_text: str) -> dict:
@@ -390,13 +465,49 @@ def build_candidates(
         level_cross = bool(level_cross or escalation_trigger_details.get("level_cross"))
         top10_involved = bool(top10_involved or escalation_trigger_details.get("top10_involved"))
         top10_cross = bool(top10_cross or escalation_trigger_details.get("top10_cross"))
-        surface_features = _surface_block(texts_by_id.get(winner, ""), texts_by_id.get(loser, ""))
+        winner_text = texts_by_id.get(winner, "")
+        loser_text = texts_by_id.get(loser, "")
+        winner_features = compute_surface_features(winner_text)
+        loser_features = compute_surface_features(loser_text)
+        gap = polish_vs_substance_gap(winner_features, loser_features)
+        surface_features = {
+            "winner": winner_features.to_dict(),
+            "loser": loser_features.to_dict(),
+            "gap": gap,
+        }
+        density_delta_loser = interpretive_density_delta(winner_features, loser_features)
+        verb_delta_loser = loser_features.interpretive_verb_count - winner_features.interpretive_verb_count
         decision_basis = str(item.get("decision_basis") or "").strip()
         confidence = str(item.get("confidence") or "low").strip().lower()
         cautions = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
         cautions_set = {str(caution).strip() for caution in cautions}
+        source = normalize_source(item)
         direct_margin = direct_matrix_margin(matrix_map.get(pair_key, {}), winner, loser)
         support_margin = round(row_support(loser_row, student_count) - row_support(winner_row, student_count), 6)
+        completion_floor_flag = bool(
+            winner_row.get("_draft_completion_floor_applied") or loser_row.get("_draft_completion_floor_applied")
+        )
+
+        # Secondary "loser interpretation dominates" evidence the Phase 2a caution
+        # triggers use to reinforce the caution signal. We accept density delta OR
+        # verb-count delta — the latter catches short-essay cases where density
+        # is misleading. We do NOT relax on non-escalated source alone: the
+        # orientation_audit layer raises rougher_but_stronger_content on ~47% of
+        # pairs as boilerplate, so source alone is not discriminating (it'd flood
+        # the caution_ignored bucket with orientation-audit boilerplate).
+        loser_interpretation_dominant = bool(
+            density_delta_loser >= config.interpretive_density_delta
+            or verb_delta_loser >= 2
+        )
+        polished_but_shallow_raised = "polished_but_shallow" in cautions_set
+        # basis=completion pairs encode the completion-floor rule directly; the
+        # rougher-stronger caution on these pairs is almost always subordinate to
+        # the correct completion-based decision. Veto the Phase 2a caution and
+        # never-escalated triggers here to prevent completion-floor comparisons
+        # from flooding the bucket.
+        completion_basis_veto = decision_basis == "completion"
+        keep_decision = decision == "KEEP"
+        swap_decision = decision == "SWAP"
 
         triggers: set[str] = set()
         if direct_margin >= HARD_EVIDENCE_MARGIN:
@@ -406,7 +517,7 @@ def build_candidates(
         if (
             decision_basis in {"organization", "language_control"}
             and "polished_but_shallow" not in cautions_set
-            and surface_features["gap"]["polish_bias_flag"]
+            and gap["polish_bias_flag"]
         ):
             triggers.add("polish_bias_suspected")
         if (
@@ -420,12 +531,91 @@ def build_candidates(
         if top10_involved or level_cross or top10_cross:
             triggers.add("top10_or_boundary")
         if (
-            (winner_row.get("_draft_completion_floor_applied") or loser_row.get("_draft_completion_floor_applied"))
+            completion_floor_flag
             and decision_basis != "completion"
         ):
             triggers.add("completion_ordering_instability")
         if unstable_cohort and confidence == "low":
             triggers.add("cohort_confidence_unstable")
+
+        # --- Phase 2a triggers --------------------------------------------------
+        # "Caution raised but ignored" is the primary Phase 2a failure mode: the
+        # cheap/orientation/escalated judge explicitly flagged polish-bias or
+        # rougher-stronger risk, then still picked the surface-clean side with a
+        # KEEP decision. A SWAP on the same caution usually means the judge
+        # absorbed the signal correctly, so we only fire on KEEP (except the
+        # narrow SWAP-overcorrection branch in rougher_stronger below).
+        polish_like_caution_raised = bool(cautions_set & POLISH_LIKE_CAUTIONS)
+        if (
+            polish_like_caution_raised
+            and keep_decision
+            and not completion_basis_veto
+            and (loser_interpretation_dominant or polished_but_shallow_raised)
+        ):
+            triggers.add("caution_raised_but_winner_polish_like")
+
+        rougher_stronger_caution_raised = bool(cautions_set & ROUGHER_STRONGER_CAUTIONS)
+        # Two failure paths for rougher-stronger caution:
+        #   (a) KEEP that ignored the caution: judge flagged loser as
+        #       rougher-but-stronger, then kept the surface-clean winner anyway.
+        #   (b) SWAP overcorrection from a non-escalated judge: the caution
+        #       was raised, a SWAP followed, but interpretive density says the
+        #       new loser was actually the more interpretive side — the swap
+        #       went the wrong way. This mirrors the Ghost s019::s022 pattern
+        #       where orientation_audit flipped the seed order incorrectly.
+        rougher_stronger_keep_ignored = (
+            keep_decision and loser_interpretation_dominant
+        )
+        rougher_stronger_swap_overcorrection = (
+            swap_decision
+            and source in NON_ESCALATED_SOURCES
+            and density_delta_loser <= -config.interpretive_density_delta
+        )
+        if (
+            rougher_stronger_caution_raised
+            and not completion_basis_veto
+            and (rougher_stronger_keep_ignored or rougher_stronger_swap_overcorrection)
+        ):
+            triggers.add("caution_raised_but_ignored_rougher_stronger")
+
+        # Dedup: when the caution-raised trigger fires, the rougher_but_stronger
+        # _latent trigger is encoding the same signal (just via aggregate data
+        # instead of text+caution). Suppress the latent trigger to prevent
+        # score stacking from pushing borderline pairs above residual patterns.
+        if (
+            "caution_raised_but_ignored_rougher_stronger" in triggers
+            and "rougher_but_stronger_latent" in triggers
+        ):
+            triggers.discard("rougher_but_stronger_latent")
+
+        # surface_substance_inversion is the broadest heuristic and is intentionally
+        # strict (surface_delta ≥ polish_bias_surface_sd AND substance_delta ≤ 0). It
+        # lives in the caution_ignored bucket so it is always bucket-capped and
+        # heavily logged (see surface_substance_inversion_log below + the
+        # surface_substance_inversion_fires report list).
+        surface_substance_inversion_fires_here = bool(
+            gap["surface_delta"] >= config.polish_bias_surface_sd
+            and gap["substance_delta"] <= 0.0
+        )
+        if surface_substance_inversion_fires_here:
+            triggers.add("surface_substance_inversion")
+
+        # Tightened leverage: top10_involved alone (both seeds in top-10) is too
+        # broad — it fires on most Ghost pairs. Require an actual crossing
+        # (level_cross or top10_cross), a completion-floor edge, or a strong
+        # caution that signals the judge flagged rougher-stronger risk.
+        never_escalated_leverage_signal = bool(
+            level_cross
+            or top10_cross
+            or completion_floor_flag
+            or (cautions_set & {"rougher_but_stronger_content", "mechanics_impede_meaning"})
+        )
+        if (
+            source in NON_ESCALATED_SOURCES
+            and not completion_basis_veto
+            and never_escalated_leverage_signal
+        ):
+            triggers.add("never_escalated_high_leverage")
 
         details = {
             "escalated_decision_basis": decision_basis,
@@ -438,13 +628,73 @@ def build_candidates(
             "band_seam_pair": pair_key in band_seam_keys,
             "higher_rank": higher_rank,
             "lower_rank": lower_rank,
-            "winner_source": normalize_source(item),
+            "winner_source": source,
             "genre": genre,
+            # Phase 2a diagnostics — these land in committee_edge_candidates.json
+            # so humans can audit why each pair was (or was not) routed.
+            "interpretive_density_delta_loser": round(density_delta_loser, 6),
+            "interpretive_verb_delta_loser": int(verb_delta_loser),
+            "polish_like_caution_raised": polish_like_caution_raised,
+            "rougher_stronger_caution_raised": rougher_stronger_caution_raised,
+            "polished_but_shallow_raised": polished_but_shallow_raised,
+            "loser_interpretation_dominant": loser_interpretation_dominant,
+            "non_escalated_source": source in NON_ESCALATED_SOURCES,
+            "completion_basis_veto": completion_basis_veto,
+            "completion_floor_flag": completion_floor_flag,
+            "keep_decision": keep_decision,
+            "swap_decision": swap_decision,
         }
+
+        # Heavy logging for surface_substance_inversion: user explicitly asked this
+        # trigger be bucket-capped AND audited every time it fires. The log captures
+        # the deltas, cautions, source, and whether any caution was actually raised.
+        if surface_substance_inversion_fires_here:
+            details["surface_substance_inversion_log"] = {
+                "surface_delta": gap["surface_delta"],
+                "substance_delta": gap["substance_delta"],
+                "polish_bias_flag": gap["polish_bias_flag"],
+                "cautions_raised": sorted(cautions_set),
+                "any_caution_raised": bool(cautions_set),
+                "winner_source": source,
+                "higher_rank": higher_rank,
+                "lower_rank": lower_rank,
+            }
+
         score = score_candidate(triggers, details, config)
-        if score < config.min_trigger_score:
-            continue
         bucket = candidate_bucket(triggers, details, config)
+        if score < effective_min_trigger_score(bucket, config):
+            continue
+        # Caution_ignored priority tier. When the bucket is over-subscribed,
+        # residual-like signals should be selected before generic ones. Lower
+        # tier = higher priority. Tier 0 is the rarest pattern (polished_but_shallow
+        # caution explicitly raised), Tier 1 is "escalated judge ignored a caution
+        # despite text evidence" (the most rigorous layer still went polish-first),
+        # Tier 2 is "non-escalated judge ignored a caution with text evidence or
+        # SWAP overcorrection", Tier 3 is everything else in the bucket.
+        caution_ignored_priority_tier = 3
+        if bucket == "caution_ignored":
+            if polished_but_shallow_raised and keep_decision:
+                caution_ignored_priority_tier = 0
+            elif (
+                source == "escalated_adjudication"
+                and keep_decision
+                and (polish_like_caution_raised or rougher_stronger_caution_raised)
+                and loser_interpretation_dominant
+            ):
+                caution_ignored_priority_tier = 1
+            elif (
+                source in NON_ESCALATED_SOURCES
+                and (
+                    (keep_decision
+                     and (polish_like_caution_raised or rougher_stronger_caution_raised)
+                     and (loser_interpretation_dominant or polished_but_shallow_raised))
+                    or (swap_decision
+                        and rougher_stronger_caution_raised
+                        and density_delta_loser <= -config.interpretive_density_delta)
+                )
+            ):
+                caution_ignored_priority_tier = 2
+        details["caution_ignored_priority_tier"] = caution_ignored_priority_tier
         candidates.append(
             {
                 "pair": [higher, lower],
@@ -457,6 +707,7 @@ def build_candidates(
                 },
                 "bucket": bucket,
                 "committee_score": score,
+                "caution_ignored_priority_tier": caution_ignored_priority_tier,
                 "triggers": sorted(triggers),
                 "trigger_details": details,
                 "selection_reasons": sorted(set(escalation_detail.get("selection_reasons", [])) if isinstance(escalation_detail.get("selection_reasons"), list) else []),
@@ -477,9 +728,26 @@ def build_candidates(
     return sorted(candidates, key=lambda candidate: str(candidate.get("pair_key", "")))
 
 
-def candidate_priority(candidate: dict) -> tuple[int, int, int, str]:
+def candidate_priority(candidate: dict) -> tuple[int, int, int, int, str]:
     seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    # Caution-ignored tiering: pairs outside the caution_ignored bucket sort
+    # purely by score (tier=3 default), while caution_ignored pairs can claim
+    # a lower tier (0–2) if they match a residual-like pattern. This ensures
+    # the Ghost hard-pair residuals are selected before generic bucket members
+    # when the cap is tight. NB: do not use `x or 3` short-circuit here — it
+    # would collapse tier 0 (a falsy int) to tier 3.
+    raw_tier = candidate.get("caution_ignored_priority_tier")
+    if raw_tier is None:
+        tier = 3
+    else:
+        try:
+            tier = int(raw_tier)
+        except (TypeError, ValueError):
+            tier = 3
+    if candidate.get("bucket") != "caution_ignored":
+        tier = 3
     return (
+        tier,
         -int(candidate.get("committee_score", 0) or 0),
         int(seed_order.get("higher_rank", 999999) or 999999),
         int(seed_order.get("lower_rank", 999999) or 999999),
@@ -495,8 +763,16 @@ def select_within_budget(
         "level_boundary": max(0, int(config.max_level_boundary)),
         "rougher_stronger": max(0, int(config.max_rougher_stronger)),
         "completion_ordering": max(0, int(config.max_completion_ordering)),
+        "caution_ignored": max(0, int(config.max_caution_ignored)),
     }
-    bucket_counts = {"top_pack": 0, "level_boundary": 0, "rougher_stronger": 0, "completion_ordering": 0, "other": 0}
+    bucket_counts = {
+        "top_pack": 0,
+        "level_boundary": 0,
+        "rougher_stronger": 0,
+        "completion_ordering": 0,
+        "caution_ignored": 0,
+        "other": 0,
+    }
     selected = []
     skipped = []
     for raw in sorted(candidates, key=candidate_priority):
@@ -615,9 +891,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-level-boundary", type=int, default=CandidateConfig.max_level_boundary)
     parser.add_argument("--max-rougher-stronger", type=int, default=CandidateConfig.max_rougher_stronger)
     parser.add_argument("--max-completion-ordering", type=int, default=CandidateConfig.max_completion_ordering)
+    parser.add_argument("--max-caution-ignored", type=int, default=CandidateConfig.max_caution_ignored)
     parser.add_argument("--min-trigger-score", type=int, default=CandidateConfig.min_trigger_score)
+    parser.add_argument(
+        "--caution-ignored-min-trigger-score",
+        type=int,
+        default=CandidateConfig.caution_ignored_min_trigger_score,
+    )
     parser.add_argument("--support-margin", type=float, default=CandidateConfig.support_margin)
     parser.add_argument("--polish-bias-surface-sd", type=float, default=CandidateConfig.polish_bias_surface_sd)
+    parser.add_argument(
+        "--interpretive-density-delta",
+        type=float,
+        default=CandidateConfig.interpretive_density_delta,
+    )
     return parser
 
 
@@ -653,9 +940,12 @@ def main() -> int:
         max_level_boundary=args.max_level_boundary,
         max_rougher_stronger=args.max_rougher_stronger,
         max_completion_ordering=args.max_completion_ordering,
+        max_caution_ignored=args.max_caution_ignored,
         min_trigger_score=args.min_trigger_score,
+        caution_ignored_min_trigger_score=args.caution_ignored_min_trigger_score,
         support_margin=args.support_margin,
         polish_bias_surface_sd=args.polish_bias_surface_sd,
+        interpretive_density_delta=args.interpretive_density_delta,
     )
     genre = str(class_metadata.get("assignment_genre") or class_metadata.get("genre") or "literary_analysis").strip()
     student_ids = set()
@@ -712,9 +1002,38 @@ def main() -> int:
     }
     trigger_counts = Counter()
     bucket_counts = Counter()
+    surface_substance_inversion_fires = []
+    caution_ignored_selected = []
     for candidate in merged_candidates:
-        trigger_counts.update(candidate.get("triggers", []))
-        bucket_counts[str(candidate.get("bucket") or "other")] += 1
+        triggers_on_candidate = candidate.get("triggers", []) or []
+        trigger_counts.update(triggers_on_candidate)
+        bucket = str(candidate.get("bucket") or "other")
+        bucket_counts[bucket] += 1
+        # Heavy logging for surface_substance_inversion: every fire is recorded in a
+        # dedicated report list so humans can audit the broadest (and therefore
+        # noisiest) heuristic independently from the per-candidate diagnostics.
+        details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+        log = details.get("surface_substance_inversion_log") if isinstance(details.get("surface_substance_inversion_log"), dict) else None
+        if "surface_substance_inversion" in triggers_on_candidate and log is not None:
+            surface_substance_inversion_fires.append(
+                {
+                    "pair_key": candidate.get("pair_key"),
+                    "selection_status": candidate.get("selection_status"),
+                    "bucket": bucket,
+                    "committee_score": candidate.get("committee_score"),
+                    **log,
+                }
+            )
+        if bucket == "caution_ignored" and candidate.get("selection_status") == "selected":
+            caution_ignored_selected.append(
+                {
+                    "pair_key": candidate.get("pair_key"),
+                    "committee_score": candidate.get("committee_score"),
+                    "triggers": triggers_on_candidate,
+                    "escalated_cautions": details.get("escalated_cautions", []),
+                    "winner_source": details.get("winner_source"),
+                }
+            )
     report_payload = {
         "generated_at": generated_at,
         "phase": 1,
@@ -723,6 +1042,8 @@ def main() -> int:
         "trigger_counts": dict(sorted(trigger_counts.items())),
         "bucket_counts": dict(sorted(bucket_counts.items())),
         "budget": budget,
+        "surface_substance_inversion_fires": surface_substance_inversion_fires,
+        "caution_ignored_selected": caution_ignored_selected,
         "decisions": {
             "count": len(normalized_decisions),
             "overrides_escalated": sum(
