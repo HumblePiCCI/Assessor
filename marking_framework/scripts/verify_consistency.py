@@ -1128,6 +1128,7 @@ def judge_pair(
     selection_details: list[str] | None = None,
     anchor_dir: str | Path | None = None,
     orientation_context: str = "",
+    response_format: dict | None = None,
 ) -> dict:
     prompt = build_prompt(
         rubric,
@@ -1149,7 +1150,7 @@ def judge_pair(
         temperature=0.0,
         reasoning=reasoning,
         routing_path=routing,
-        text_format=RESPONSE_FORMAT,
+        text_format=response_format or RESPONSE_FORMAT,
         max_output_tokens=max_output_tokens,
     )
     content = extract_text(response)
@@ -1170,7 +1171,7 @@ def judge_pair(
             temperature=0.0,
             reasoning="low",
             routing_path=routing,
-            text_format=RESPONSE_FORMAT,
+            text_format=response_format or RESPONSE_FORMAT,
             max_output_tokens=max_output_tokens,
         )
         content = extract_text(repair_response)
@@ -1194,6 +1195,18 @@ def judge_pair(
     decision_basis = normalize_decision_basis(parsed.get("decision_basis"))
     cautions_applied = normalize_cautions(parsed.get("cautions_applied"))
     decision_checks = normalize_decision_checks(parsed.get("decision_checks"))
+    parsed_checks = parsed.get("decision_checks") if isinstance(parsed.get("decision_checks"), dict) else {}
+    for key in (
+        "interpretation_depth",
+        "proof_sufficiency",
+        "polish_trap",
+        "rougher_but_stronger_latent",
+        "alternate_theme_validity",
+        "mechanics_block_meaning",
+        "completion_floor_applied",
+    ):
+        if key in parsed_checks:
+            decision_checks[key] = parsed_checks.get(key)
     confidence, selfcheck_notes = confidence_downgrade_for_selfcheck(
         higher,
         lower,
@@ -1475,6 +1488,7 @@ def judge_pair_with_orientation_audit(
     anchor_dir: str | Path | None = None,
     orientation_audit: bool = True,
     student_count: int = 0,
+    response_format: dict | None = None,
 ) -> dict:
     primary = judge_pair(
         rubric,
@@ -1492,6 +1506,7 @@ def judge_pair_with_orientation_audit(
         selection_reasons=selection_reasons,
         selection_details=selection_details,
         anchor_dir=anchor_dir,
+        response_format=response_format,
     )
     audit_needed = should_orientation_audit_pair(genre, selection_reasons, higher, lower, student_count=student_count) or primary_self_declares_orientation_risk(genre, primary)
     if not orientation_audit or not audit_needed:
@@ -1519,6 +1534,7 @@ def judge_pair_with_orientation_audit(
         selection_reasons=reverse_reasons,
         selection_details=reverse_details,
         anchor_dir=anchor_dir,
+        response_format=response_format,
     )
     if primary.get("winner") == reverse.get("winner"):
         return attach_orientation_audit(

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -156,7 +157,11 @@ def anchor_resume_steps() -> list[dict]:
 
 def pipeline_step_command(step_id: str) -> list[str]:
     step = pipeline_step_map()[step_id]
-    return list(step["cmd"])
+    cmd = list(step["cmd"])
+    if step_id == "committee_edge_resolver" and os.environ.get("COMMITTEE_EDGE_LIVE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        if "--live" not in cmd:
+            cmd.append("--live")
+    return cmd
 
 
 def pipeline_step_graph_hash() -> str:

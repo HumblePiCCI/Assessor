@@ -44,6 +44,12 @@ def test_pipeline_steps_structure():
     assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
 
 
+def test_committee_edge_resolver_live_env_appends_flag(monkeypatch):
+    monkeypatch.setenv("COMMITTEE_EDGE_LIVE", "1")
+    cmd = step_runner.pipeline_step_command("committee_edge_resolver")
+    assert "--live" in cmd
+
+
 def test_can_stream_subprocess_detection():
     assert step_runner._can_stream_subprocess(subprocess.run) is True
     assert step_runner._can_stream_subprocess(lambda *_a, **_k: None) is False

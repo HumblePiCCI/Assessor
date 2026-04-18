@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--apply-pairs", action="store_true", help="Apply pairwise review decisions")
     parser.add_argument("--verify-consistency", action="store_true", help="Verify adjacent rank consistency")
     parser.add_argument("--apply-consistency", action="store_true", help="Apply high-confidence consistency swaps")
+    parser.add_argument("--committee-edge-live", action="store_true", help="Run live single-read committee-edge adjudication before rerank")
     parser.add_argument("--boundary-recheck", action="store_true", help="Recheck near-boundary essays and update pass1 scores")
     parser.add_argument("--boundary-margin", type=float, default=1.0, help="Boundary recheck margin in percentage points")
     parser.add_argument("--boundary-replicates", type=int, default=3, help="Boundary recheck replicate attempts")
@@ -144,7 +145,10 @@ def main() -> int:
         if args.apply_consistency:
             if run(step_cmd("pairwise_escalation", ["python3", "scripts/escalate_pairwise_adjudications.py"])) != 0:
                 return 1
-            if run(step_cmd("committee_edge_resolver", ["python3", "scripts/committee_edge_resolver.py"])) != 0:
+            cmd = step_cmd("committee_edge_resolver", ["python3", "scripts/committee_edge_resolver.py"])
+            if args.committee_edge_live and "--live" not in cmd:
+                cmd.append("--live")
+            if run(cmd) != 0:
                 return 1
             if run(step_cmd("rerank", ["python3", "scripts/global_rerank.py"])) != 0:
                 return 1

@@ -236,6 +236,33 @@ def test_hero_path_runs_committee_edge_resolver_between_escalation_and_rerank(tm
     assert escalation_idx < committee_idx < rerank_idx
 
 
+def test_hero_path_committee_edge_live_flag_appends_live(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+            "--committee-edge-live",
+        ],
+    )
+    assert hp.main() == 0
+    committee_cmd = next(call for call in calls if any("committee_edge_resolver.py" in str(part) for part in call))
+    assert "--live" in committee_cmd
+
+
 def test_hero_path_skips_committee_edge_resolver_without_apply_consistency(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     setup_assessor_dirs(tmp_path)

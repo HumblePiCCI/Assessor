@@ -14,6 +14,7 @@ import argparse
 import copy
 import csv
 import json
+import os
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.assessor_utils import load_file_text, resolve_input_path
     from scripts.adjudication_source import (
         dedupe_by_precedence,
         mark_superseded,
@@ -33,7 +35,9 @@ try:
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    from scripts import verify_consistency as vc
 except ImportError:  # pragma: no cover - Support running as a standalone script
+    from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
     from adjudication_source import (  # type: ignore  # pragma: no cover
         dedupe_by_precedence,
         mark_superseded,
@@ -46,6 +50,7 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    import verify_consistency as vc  # type: ignore  # pragma: no cover
 
 
 DEFAULT_ESCALATED = "outputs/consistency_checks.escalated.json"
@@ -57,10 +62,38 @@ DEFAULT_BAND_SEAM = "outputs/band_seam_report.json"
 DEFAULT_COHORT_CONFIDENCE = "outputs/cohort_confidence.json"
 DEFAULT_CLASS_METADATA = "inputs/class_metadata.json"
 DEFAULT_TEXTS = "processing/normalized_text"
+DEFAULT_RUBRIC = "inputs/rubric.md"
+DEFAULT_OUTLINE = "inputs/assignment_outline.md"
+DEFAULT_ROUTING = "config/llm_routing.json"
+DEFAULT_COMMITTEE_ANCHOR = "inputs/pairwise_anchors/literary_analysis.committee.json"
 DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
 DEFAULT_MERGED_OUT = "outputs/consistency_checks.committee_edge.json"
+DEFAULT_MAX_READS = 12
+
+COMMITTEE_RESPONSE_FORMAT = copy.deepcopy(vc.RESPONSE_FORMAT)
+COMMITTEE_DECISION_CHECKS = COMMITTEE_RESPONSE_FORMAT["schema"]["properties"]["decision_checks"]
+COMMITTEE_DECISION_CHECKS["properties"].update(
+    {
+        "interpretation_depth": {"type": "string", "enum": ["A", "B", "tie"]},
+        "proof_sufficiency": {"type": "string", "enum": ["A", "B", "tie"]},
+        "polish_trap": {"type": "boolean"},
+        "rougher_but_stronger_latent": {"type": "boolean"},
+        "alternate_theme_validity": {"type": "string", "enum": ["A", "B", "tie"]},
+        "mechanics_block_meaning": {"type": "boolean"},
+        "completion_floor_applied": {"type": "boolean"},
+    }
+)
+COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required"]) + [
+    "interpretation_depth",
+    "proof_sufficiency",
+    "polish_trap",
+    "rougher_but_stronger_latent",
+    "alternate_theme_validity",
+    "mechanics_block_meaning",
+    "completion_floor_applied",
+]
 
 TRIGGER_POINTS = {
     # Phase 1 triggers (retained as-is)
@@ -184,6 +217,23 @@ def load_decisions(path: Path | None) -> list[dict]:
     return normalized
 
 
+def load_blind_read_fixture(path: Path | None) -> dict[str, dict]:
+    if path is None:
+        return {}
+    payload = load_required_json(path)
+    raw_items = payload.get("reads")
+    if not isinstance(raw_items, list):
+        raw_items = payload.get("decisions") if isinstance(payload.get("decisions"), list) else []
+    fixture = {}
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        key = str(raw.get("pair_key") or pair_key_from_item(raw) or "").strip()
+        if key:
+            fixture[key] = copy.deepcopy(raw)
+    return fixture
+
+
 def load_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -239,6 +289,12 @@ def normalize_rows(rows: list[dict]) -> list[dict]:
         item["_draft_completion_floor_applied"] = truthy(row.get("draft_completion_floor_applied")) or "draft_completion_floor" in flags
         normalized.append(item)
     return sorted(normalized, key=lambda row: (int(row.get("seed_rank", 999999) or 999999), row["student_id"]))
+
+
+def task_config(routing: dict, task_name: str) -> dict:
+    tasks = routing.get("tasks", {}) if isinstance(routing.get("tasks"), dict) else {}
+    task = tasks.get(task_name, {}) if isinstance(tasks, dict) else {}
+    return task if isinstance(task, dict) else {}
 
 
 def seed_percentile(seed_rank: int, student_count: int) -> float:
@@ -800,6 +856,284 @@ def select_within_budget(
     }
 
 
+def committee_anchor_selection_details(path: Path) -> list[str]:
+    payload = load_optional_json(path)
+    if not payload:
+        return []
+    details = ["Committee literary calibration anchors are active for this blind read."]
+    axes = payload.get("decision_axes") if isinstance(payload.get("decision_axes"), list) else []
+    if axes:
+        details.append(
+            "Decision axes: "
+            + "; ".join(
+                f"{str(axis.get('id', '')).strip()}: {str(axis.get('prompt', '')).strip()}"
+                for axis in axes
+                if isinstance(axis, dict) and str(axis.get("id", "")).strip()
+            )
+        )
+    anchors = payload.get("anchors") if isinstance(payload.get("anchors"), list) else []
+    for anchor in anchors:
+        if not isinstance(anchor, dict):
+            continue
+        title = str(anchor.get("title", "") or "").strip()
+        rule = str(anchor.get("decision_rule", "") or "").strip()
+        if title and rule:
+            details.append(f"{title}: {rule}")
+    return [detail for detail in details if detail.strip()]
+
+
+def candidate_selection_detail_lines(candidate: dict) -> list[str]:
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    return [
+        "This is a blind committee read. Do not rely on prior pairwise decisions, seed order, aggregate rank, Borda support, or committee trigger labels as evidence.",
+        "Resolve the pair using the rubric, assignment, committee anchors, and essay texts only.",
+        f"Candidate bucket for audit logging: {candidate.get('bucket', '')}.",
+        f"Surface/substance deltas for audit logging only: {details.get('surface_substance_inversion_log', {}) or candidate.get('surface_features', {}).get('gap', {})}.",
+    ]
+
+
+def normalize_committee_read(candidate: dict, read: dict) -> dict:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    pair = [higher, lower]
+    item = copy.deepcopy(read)
+    winner = str(item.get("winner") or "").strip()
+    if winner not in {higher, lower}:
+        side = normalize_winner_side(item.get("winner_side"))
+        decision = "KEEP" if side == "A" else "SWAP" if side == "B" else normalize_decision(item.get("decision"))
+        winner = higher if decision == "KEEP" else lower
+    loser = lower if winner == higher else higher
+    winner_side = "A" if winner == higher else "B"
+    decision = "KEEP" if winner_side == "A" else "SWAP"
+    checks = item.get("decision_checks") if isinstance(item.get("decision_checks"), dict) else {}
+    checks = normalize_committee_decision_checks(checks)
+    item.update(
+        {
+            "pair": pair,
+            "pair_key": pair_key_from_item({"pair": pair}),
+            "seed_order": {
+                "higher": higher,
+                "lower": lower,
+                "higher_rank": int(seed_order.get("higher_rank", 999999) or 999999),
+                "lower_rank": int(seed_order.get("lower_rank", 999999) or 999999),
+            },
+            "winner": winner,
+            "loser": loser,
+            "winner_side": winner_side,
+            "decision": decision,
+            "confidence": vc.normalize_confidence(item.get("confidence")),
+            "decision_basis": vc.normalize_decision_basis(item.get("decision_basis")),
+            "cautions_applied": vc.normalize_cautions(item.get("cautions_applied")),
+            "decision_checks": checks,
+            "rationale": str(item.get("rationale", "") or "").strip(),
+        }
+    )
+    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+    metadata = dict(metadata)
+    metadata.setdefault("adjudication_source", "committee_read_a")
+    metadata.setdefault("committee_read", "A-blind")
+    item["model_metadata"] = metadata
+    return item
+
+
+def normalize_committee_decision_checks(value: dict) -> dict:
+    base = vc.normalize_decision_checks(value)
+    base["interpretation_depth"] = vc.normalize_side(value.get("interpretation_depth") or value.get("deeper_interpretation"))
+    base["proof_sufficiency"] = vc.normalize_side(value.get("proof_sufficiency") or value.get("better_text_evidence_explanation"))
+    base["polish_trap"] = truthy(value.get("polish_trap"))
+    base["rougher_but_stronger_latent"] = truthy(value.get("rougher_but_stronger_latent"))
+    base["alternate_theme_validity"] = vc.normalize_side(value.get("alternate_theme_validity"))
+    base["mechanics_block_meaning"] = truthy(value.get("mechanics_block_meaning"))
+    base["completion_floor_applied"] = truthy(value.get("completion_floor_applied"))
+    return base
+
+
+def run_blind_read_a(
+    candidate: dict,
+    rows_by_id: dict[str, dict],
+    texts: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    anchor_dir: Path,
+    committee_anchor: Path,
+) -> dict:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_id = str(seed_order.get("higher", "") or "").strip()
+    lower_id = str(seed_order.get("lower", "") or "").strip()
+    if higher_id not in rows_by_id or lower_id not in rows_by_id:
+        raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for blind read")
+    selection_details = committee_anchor_selection_details(committee_anchor) + candidate_selection_detail_lines(candidate)
+    judgment = vc.judge_pair_with_orientation_audit(
+        rubric,
+        outline,
+        rows_by_id[higher_id],
+        rows_by_id[lower_id],
+        texts.get(higher_id, ""),
+        texts.get(lower_id, ""),
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        metadata=metadata,
+        selection_reasons=["committee_edge_read_a_blind"],
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+        orientation_audit=False,
+        student_count=len(rows_by_id),
+        response_format=COMMITTEE_RESPONSE_FORMAT,
+    )
+    return normalize_committee_read(candidate, judgment)
+
+
+def read_from_fixture(candidate: dict, fixture_by_key: dict[str, dict]) -> dict | None:
+    key = str(candidate.get("pair_key") or "").strip()
+    if key not in fixture_by_key:
+        return None
+    return normalize_committee_read(candidate, fixture_by_key[key])
+
+
+def side_favors_winner(value, winner_side: str) -> bool:
+    return vc.normalize_side(value) == normalize_winner_side(winner_side)
+
+
+def read_a_override_decision(candidate: dict, read: dict) -> tuple[bool, str]:
+    current_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    read_winner = str(read.get("winner") or "").strip()
+    if not current_winner or not read_winner:
+        return False, "committee_read_a_incomplete"
+    if read_winner == current_winner:
+        return False, "committee_read_a_concurred"
+    confidence = vc.normalize_confidence(read.get("confidence"))
+    if confidence not in {"medium", "high"}:
+        return False, "committee_read_a_low_confidence"
+    checks = normalize_committee_decision_checks(read.get("decision_checks") if isinstance(read.get("decision_checks"), dict) else {})
+    if checks["mechanics_block_meaning"] or checks["completion_floor_applied"]:
+        return False, "committee_read_a_blocked_by_mechanics_or_completion"
+    winner_side = normalize_winner_side(read.get("winner_side"))
+    interpretation_favors_winner = side_favors_winner(checks.get("interpretation_depth"), winner_side)
+    if (
+        checks["polish_trap"]
+        or checks["rougher_but_stronger_latent"]
+        or (confidence == "high" and interpretation_favors_winner)
+    ):
+        return True, "committee_read_a_override"
+    return False, "committee_read_a_inconclusive"
+
+
+def decision_from_committee_read(candidate: dict, read: dict, reason: str) -> dict:
+    item = copy.deepcopy(read)
+    metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+    metadata = dict(metadata)
+    metadata.update(
+        {
+            "adjudication_source": "committee_edge",
+            "committee_read": "A-blind",
+            "committee_override_reason": reason,
+            "supersedes_pair_key": candidate.get("pair_key", ""),
+            "phase": "2b",
+        }
+    )
+    item["model_metadata"] = metadata
+    item["adjudication_source"] = "committee_edge"
+    item["committee_confidence"] = f"read_a_{vc.normalize_confidence(item.get('confidence'))}"
+    item["committee_edge_trace"] = {
+        "read": "A-blind",
+        "override_reason": reason,
+        "triggers": list(candidate.get("triggers", [])),
+        "committee_score": candidate.get("committee_score", 0),
+        "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
+    }
+    return item
+
+
+def run_read_a_path(
+    *,
+    selected: list[dict],
+    rows: list[dict],
+    texts_by_id: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    anchor_dir: Path,
+    committee_anchor: Path,
+    max_reads: int,
+    live: bool,
+    fixture_by_key: dict[str, dict],
+) -> tuple[list[dict], list[dict], dict]:
+    rows_by_id = {row["student_id"]: row for row in vc.prepare_rows(rows)}
+    read_results = []
+    decisions = []
+    read_cap = max(0, int(max_reads))
+    read_count = 0
+    for candidate in selected:
+        record = {
+            "pair_key": candidate.get("pair_key", ""),
+            "bucket": candidate.get("bucket", ""),
+            "committee_score": candidate.get("committee_score", 0),
+            "status": "",
+            "override_emitted": False,
+        }
+        if read_cap and read_count >= read_cap:
+            record["status"] = "max_reads_exceeded"
+            read_results.append(record)
+            continue
+        read = read_from_fixture(candidate, fixture_by_key)
+        if read is None and live:
+            read = run_blind_read_a(
+                candidate,
+                rows_by_id,
+                texts_by_id,
+                rubric,
+                outline,
+                metadata,
+                model=model,
+                routing=routing,
+                reasoning=reasoning,
+                max_output_tokens=max_output_tokens,
+                anchor_dir=anchor_dir,
+                committee_anchor=committee_anchor,
+            )
+        if read is None:
+            record["status"] = "not_read"
+            read_results.append(record)
+            continue
+        read_count += 1
+        should_override, reason = read_a_override_decision(candidate, read)
+        record.update(
+            {
+                "status": reason,
+                "read": read,
+                "override_emitted": bool(should_override),
+                "read_winner": read.get("winner", ""),
+                "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
+            }
+        )
+        if should_override:
+            decisions.append(decision_from_committee_read(candidate, read, reason))
+        read_results.append(record)
+    return decisions, read_results, {
+        "enabled": bool(live or fixture_by_key),
+        "live": bool(live),
+        "fixture": bool(fixture_by_key),
+        "max_reads": read_cap,
+        "read_count": read_count,
+        "override_count": len(decisions),
+        "skipped_max_reads": sum(1 for item in read_results if item.get("status") == "max_reads_exceeded"),
+    }
+
+
 def normalize_committee_decision(decision: dict, candidate_by_key: dict[str, dict]) -> dict:
     item = copy.deepcopy(decision)
     metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
@@ -867,6 +1201,11 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "cohort_confidence": str(args.cohort_confidence),
         "class_metadata": str(args.class_metadata),
         "texts": str(args.texts),
+        "rubric": str(args.rubric),
+        "outline": str(args.outline),
+        "routing": str(args.routing),
+        "committee_anchor": str(args.committee_anchor),
+        "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
     }
 
 
@@ -882,6 +1221,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--class-metadata", type=Path, default=Path(DEFAULT_CLASS_METADATA))
     parser.add_argument("--texts", type=Path, default=Path(DEFAULT_TEXTS))
     parser.add_argument("--decisions", type=Path, default=None, help="Optional Phase 1 fixture/manual committee decisions JSON.")
+    parser.add_argument("--blind-read-fixture", type=Path, default=None, help="Optional offline Read-A fixture keyed by pair_key; no model call.")
+    parser.add_argument("--live", action="store_true", help="Run live single-read committee adjudication for selected candidates.")
+    parser.add_argument("--max-reads", type=int, default=DEFAULT_MAX_READS, help="Maximum selected candidates to read in live/fixture mode.")
+    parser.add_argument("--rubric", type=Path, default=Path(DEFAULT_RUBRIC))
+    parser.add_argument("--outline", type=Path, default=Path(DEFAULT_OUTLINE))
+    parser.add_argument("--routing", type=Path, default=Path(DEFAULT_ROUTING))
+    parser.add_argument("--committee-anchor", type=Path, default=Path(DEFAULT_COMMITTEE_ANCHOR))
+    parser.add_argument("--model", default="", help="Override literary committee model")
+    parser.add_argument("--reasoning", default="", help="Override literary committee reasoning")
+    parser.add_argument("--max-output-tokens", type=int, default=0, help="Override literary committee max output tokens")
     parser.add_argument("--candidates-output", type=Path, default=Path(DEFAULT_CANDIDATES_OUT))
     parser.add_argument("--decisions-output", type=Path, default=Path(DEFAULT_DECISIONS_OUT))
     parser.add_argument("--report-output", type=Path, default=Path(DEFAULT_REPORT_OUT))
@@ -922,7 +1271,8 @@ def main() -> int:
         band_seam_report = load_optional_json(args.band_seam)
         cohort_confidence = load_optional_json(args.cohort_confidence)
         class_metadata = load_optional_json(args.class_metadata)
-        decisions = load_decisions(args.decisions)
+        manual_decisions = load_decisions(args.decisions)
+        blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
     except Exception as exc:
         report = {
             "generated_at": generated_at,
@@ -966,6 +1316,62 @@ def main() -> int:
     )
     selected, skipped, budget = select_within_budget(candidates, config=config)
     merged_candidates = selected + skipped
+    read_a_decisions = []
+    read_a_results = []
+    read_a_summary = {
+        "enabled": False,
+        "live": False,
+        "fixture": False,
+        "max_reads": int(args.max_reads),
+        "read_count": 0,
+        "override_count": 0,
+        "skipped_max_reads": 0,
+    }
+    if args.live or blind_read_fixture:
+        try:
+            routing_payload = load_optional_json(args.routing)
+            task = task_config(routing_payload, "literary_committee")
+            model = args.model or task.get("model") or routing_payload.get("default_model") or "gpt-5.4"
+            reasoning = args.reasoning or task.get("reasoning") or "high"
+            max_output_tokens = int(args.max_output_tokens or task.get("max_output_tokens") or 2000)
+            rubric = ""
+            outline = ""
+            if args.live:
+                rubric_path = resolve_input_path(args.rubric, "rubric")
+                outline_path = resolve_input_path(args.outline, "assignment_outline")
+                rubric = load_file_text(rubric_path)
+                outline = load_file_text(outline_path)
+                if not rubric.strip():
+                    raise ValueError(f"Rubric text is empty. Check file at {rubric_path}.")
+            read_a_decisions, read_a_results, read_a_summary = run_read_a_path(
+                selected=selected,
+                rows=rows,
+                texts_by_id=texts_by_id,
+                rubric=rubric,
+                outline=outline,
+                metadata=class_metadata,
+                model=model,
+                routing=str(args.routing),
+                reasoning=str(reasoning),
+                max_output_tokens=max_output_tokens,
+                anchor_dir=args.committee_anchor.parent,
+                committee_anchor=args.committee_anchor,
+                max_reads=args.max_reads,
+                live=bool(args.live),
+                fixture_by_key=blind_read_fixture,
+            )
+        except Exception as exc:
+            report = {
+                "generated_at": generated_at,
+                "phase": 2,
+                "passthrough": True,
+                "source_paths": source_paths,
+                "error": str(exc),
+                "read_a": read_a_summary,
+            }
+            write_json(args.report_output, report)
+            return 1
+    decisions = manual_decisions + read_a_decisions
     merged_payload = merged_checks_payload(
         escalated_payload=escalated_payload,
         escalated_checks=escalated_checks,
@@ -999,6 +1405,8 @@ def main() -> int:
         "passthrough": passthrough,
         "source_paths": source_paths,
         "decisions": normalized_decisions,
+        "read_a": read_a_summary,
+        "read_a_results": read_a_results,
     }
     trigger_counts = Counter()
     bucket_counts = Counter()
@@ -1058,6 +1466,7 @@ def main() -> int:
             ),
             "ambiguous": sum(1 for decision in normalized_decisions if str(decision.get("committee_confidence", "")).endswith("ambiguous")),
         },
+        "read_a": read_a_summary,
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)

@@ -644,6 +644,324 @@ def test_phase2a_surface_substance_inversion_fires_without_any_caution():
     assert log["winner_source"] == "escalated_adjudication"
 
 
+# -----------------------------------------------------------------------------
+# Phase 2b: single blind committee Read A
+# -----------------------------------------------------------------------------
+
+
+def test_phase2b_live_flag_off_preserves_phase1_passthrough(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    payload = ghost_residual_payload()
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["decisions"] == []
+
+
+def test_phase2b_blind_read_a_override_rule_applied():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+
+    def read(winner, confidence="medium", **checks):
+        return cer.normalize_committee_read(
+            candidate,
+            {
+                "winner": winner,
+                "confidence": confidence,
+                "decision_basis": "content_reasoning",
+                "decision_checks": {
+                    "deeper_interpretation": "B",
+                    "better_text_evidence_explanation": "B",
+                    "cleaner_or_more_formulaic": "A",
+                    "rougher_but_stronger_content": "B",
+                    "completion_advantage": "tie",
+                    "cleaner_wins_on_substance": "",
+                    "rougher_loses_because": "",
+                    "interpretation_depth": "B",
+                    "proof_sufficiency": "B",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "alternate_theme_validity": "B",
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                    **checks,
+                },
+            },
+        )
+
+    assert cer.read_a_override_decision(candidate, read("s009", polish_trap=True)) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", rougher_but_stronger_latent=True)) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="high", interpretation_depth="B")) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="low", polish_trap=True))[1] == "committee_read_a_low_confidence"
+    assert cer.read_a_override_decision(candidate, read("s009", polish_trap=True, mechanics_block_meaning=True))[1] == "committee_read_a_blocked_by_mechanics_or_completion"
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="high", interpretation_depth="tie"))[1] == "committee_read_a_inconclusive"
+
+
+def test_phase2b_read_a_concurrence_does_not_override():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+    read = cer.normalize_committee_read(
+        candidate,
+        {
+            "winner": "s015",
+            "confidence": "high",
+            "decision_basis": "evidence_development",
+            "decision_checks": {
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+            },
+        },
+    )
+    assert cer.read_a_override_decision(candidate, read) == (False, "committee_read_a_concurred")
+
+
+def test_phase2b_budget_cap_on_live_reads():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    selected, _skipped, _budget = cer.select_within_budget(candidates, config=cer.CandidateConfig())
+    fixture = cer.load_blind_read_fixture(FIXTURE_DIR / "ghost_residual_blind_reads.json")
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        live=False,
+        fixture_by_key=fixture,
+    )
+    assert summary["read_count"] == 2
+    assert len(decisions) == 2
+    assert any(item["status"] == "max_reads_exceeded" for item in read_results)
+
+
+def test_phase2b_merged_precedence_when_override(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--max-reads",
+            "5",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [item for item in merged["checks"] if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"]
+    assert len(committee_items) == 5
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["override_count"] == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+
+
+def test_phase2b_live_mode_uses_selected_candidates_and_monkeypatched_reader(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    routing = tmp_path / "config" / "llm_routing.json"
+    routing.parent.mkdir()
+    routing.write_text(json.dumps({"tasks": {"literary_committee": {"model": "strong", "reasoning": "high", "max_output_tokens": 500}}}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    calls = []
+
+    def fake_read(candidate, rows_by_id, texts, rubric, outline, metadata, **kwargs):
+        calls.append(candidate["pair_key"])
+        return cer.normalize_committee_read(
+            candidate,
+            {
+                "winner": (candidate["escalated_summary"]["loser"]),
+                "confidence": "high",
+                "decision_basis": "content_reasoning",
+                "decision_checks": {
+                    "interpretation_depth": "B",
+                    "proof_sufficiency": "B",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "alternate_theme_validity": "B",
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+            },
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--live",
+            "--max-reads",
+            "3",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--rubric",
+            str(inputs / "rubric.md"),
+            "--outline",
+            str(inputs / "assignment_outline.md"),
+            "--routing",
+            str(routing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert len(calls) == 3
+    assert decisions["read_a"]["live"] is True
+    assert decisions["read_a"]["read_count"] == 3
+    assert decisions["read_a"]["skipped_max_reads"] > 0
+
+
 def test_decisions_fixture_supersedes_escalated_in_merged_file(tmp_path, monkeypatch):
     outputs = tmp_path / "outputs"
     inputs = tmp_path / "inputs"
