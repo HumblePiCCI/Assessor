@@ -124,6 +124,151 @@ def test_passthrough_when_no_decisions_preserves_checks_identical(tmp_path, monk
     assert decisions["decisions"] == []
 
 
+def test_committee_anchor_selection_details_can_include_external_source_calibration(tmp_path):
+    anchor = tmp_path / "literary_analysis.committee.json"
+    source_pack = tmp_path / "sources.json"
+    anchor.write_text(
+        json.dumps(
+            {
+                "decision_axes": [{"id": "interpretation_depth", "prompt": "Which essay explains meaning?"}],
+                "anchors": [{"title": "Plot summary ceiling", "decision_rule": "Summary without explanation loses."}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_pack.write_text(
+        json.dumps(
+            {
+                "global_anchor_rules": [{"id": "guard", "rule": "Use source rules as calibration only."}],
+                "sources": [
+                    {
+                        "id": "public_source",
+                        "name": "Public Source",
+                        "provider": "State",
+                        "url": "https://example.org/source.pdf",
+                        "genres": ["literary_analysis"],
+                        "grades": [7],
+                        "scale": {"label": "teacher comments"},
+                        "rights_note": "Link only.",
+                        "calibration_rules": [
+                            {
+                                "id": "evidence_commentary",
+                                "applies_to": ["literary_analysis"],
+                                "rule": "Evidence must be explained before polish can decide.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    details = cer.committee_anchor_selection_details(
+        anchor,
+        source_calibration=source_pack,
+        genre="literary_analysis",
+        grade_level=7,
+    )
+
+    joined = "\n".join(details)
+    assert "Plot summary ceiling: Summary without explanation loses." in joined
+    assert "External teacher-scored calibration sources are active" in joined
+    assert "public_source:evidence_commentary" in joined
+
+
+def test_run_blind_read_a_passes_external_source_calibration_to_judge(tmp_path, monkeypatch):
+    anchor = tmp_path / "literary_analysis.committee.json"
+    source_pack = tmp_path / "sources.json"
+    anchor.write_text(json.dumps({"anchors": []}), encoding="utf-8")
+    source_pack.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "id": "cal_source",
+                        "name": "Calibration Source",
+                        "provider": "Teachers",
+                        "url": "https://example.org/calibration.pdf",
+                        "genres": ["literary_analysis"],
+                        "grades": [7],
+                        "scale": {"label": "teacher band"},
+                        "rights_note": "Link only.",
+                        "calibration_rules": [
+                            {
+                                "id": "commentary",
+                                "applies_to": ["literary_analysis"],
+                                "rule": "Commentary must explain evidence, not just name it.",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate = {
+        "pair_key": "s009::s015",
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 2, "lower_rank": 3},
+        "bucket": "caution_ignored",
+        "triggers": ["caution_raised_but_winner_polish_like"],
+        "trigger_details": {},
+    }
+    captured = {}
+
+    def fake_judge(*args, **kwargs):
+        captured["selection_details"] = kwargs["selection_details"]
+        return {
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "B explains the evidence.",
+            "criterion_notes": [],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "",
+                "rougher_loses_because": "",
+                "interpretation_depth": "B",
+                "proof_sufficiency": "B",
+                "polish_trap": True,
+                "rougher_but_stronger_latent": True,
+                "alternate_theme_validity": "B",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+            },
+        }
+
+    monkeypatch.setattr(cer.vc, "judge_pair_with_orientation_audit", fake_judge)
+    rows_by_id = {row["student_id"]: row for row in cer.vc.prepare_rows(base_rows())}
+
+    read = cer.run_blind_read_a(
+        candidate,
+        rows_by_id,
+        surface_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis", "grade_level": 7},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=500,
+        anchor_dir=tmp_path,
+        committee_anchor=anchor,
+        source_calibration=source_pack,
+    )
+
+    assert read["winner"] == "s009"
+    joined = "\n".join(captured["selection_details"])
+    assert "cal_source:commentary" in joined
+    assert "do not quote, reproduce, or infer any full source essay text" in joined
+
+
 def test_trigger_polish_bias_suspected_selects_pair():
     payload = fixture_payload()
     candidates = cer.build_candidates(

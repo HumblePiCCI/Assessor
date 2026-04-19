@@ -37,6 +37,12 @@ try:
         polish_vs_substance_gap,
     )
     from scripts.openai_client import extract_text, responses_create
+    from scripts.source_calibration import (
+        DEFAULT_SOURCE_CALIBRATION,
+        format_source_calibration_lines,
+        load_source_calibration,
+        parse_grade_level,
+    )
     from scripts import verify_consistency as vc
 except ImportError:  # pragma: no cover - Support running as a standalone script
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
@@ -53,6 +59,12 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         polish_vs_substance_gap,
     )
     from openai_client import extract_text, responses_create  # type: ignore  # pragma: no cover
+    from source_calibration import (  # type: ignore  # pragma: no cover
+        DEFAULT_SOURCE_CALIBRATION,
+        format_source_calibration_lines,
+        load_source_calibration,
+        parse_grade_level,
+    )
     import verify_consistency as vc  # type: ignore  # pragma: no cover
 
 
@@ -69,6 +81,7 @@ DEFAULT_RUBRIC = "inputs/rubric.md"
 DEFAULT_OUTLINE = "inputs/assignment_outline.md"
 DEFAULT_ROUTING = "config/llm_routing.json"
 DEFAULT_COMMITTEE_ANCHOR = "inputs/pairwise_anchors/literary_analysis.committee.json"
+DEFAULT_SOURCE_CALIBRATION_PATH = str(DEFAULT_SOURCE_CALIBRATION.relative_to(Path(__file__).resolve().parents[1]))
 DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
@@ -1087,11 +1100,17 @@ def select_within_budget(
     }
 
 
-def committee_anchor_selection_details(path: Path) -> list[str]:
+def committee_anchor_selection_details(
+    path: Path,
+    *,
+    source_calibration: Path | dict | None = None,
+    genre: str = "",
+    grade_level: int | None = None,
+) -> list[str]:
     payload = load_optional_json(path)
-    if not payload:
-        return []
-    details = ["Committee literary calibration anchors are active for this blind read."]
+    details = []
+    if payload:
+        details.append("Committee literary calibration anchors are active for this blind read.")
     axes = payload.get("decision_axes") if isinstance(payload.get("decision_axes"), list) else []
     if axes:
         details.append(
@@ -1110,7 +1129,29 @@ def committee_anchor_selection_details(path: Path) -> list[str]:
         rule = str(anchor.get("decision_rule", "") or "").strip()
         if title and rule:
             details.append(f"{title}: {rule}")
+    calibration_payload: dict = {}
+    if isinstance(source_calibration, dict):
+        calibration_payload = source_calibration
+    elif source_calibration is not None:
+        calibration_payload = load_source_calibration(source_calibration)
+    if calibration_payload:
+        details.extend(
+            format_source_calibration_lines(
+                calibration_payload,
+                genre=genre,
+                grade_level=grade_level,
+            )
+        )
     return [detail for detail in details if detail.strip()]
+
+
+def metadata_grade_level(metadata: dict) -> int | None:
+    return parse_grade_level(
+        metadata.get("grade_level")
+        or metadata.get("grade")
+        or metadata.get("course_grade")
+        or metadata.get("class_grade")
+    )
 
 
 def evidence_ledger_instruction_lines() -> list[str]:
@@ -1389,13 +1430,20 @@ def run_blind_read_a(
     max_output_tokens: int,
     anchor_dir: Path,
     committee_anchor: Path,
+    source_calibration: Path | dict | None = None,
 ) -> dict:
     seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
     higher_id = str(seed_order.get("higher", "") or "").strip()
     lower_id = str(seed_order.get("lower", "") or "").strip()
     if higher_id not in rows_by_id or lower_id not in rows_by_id:
         raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for blind read")
-    selection_details = committee_anchor_selection_details(committee_anchor) + candidate_selection_detail_lines(candidate)
+    genre = str(metadata.get("assignment_genre") or metadata.get("genre") or "")
+    selection_details = committee_anchor_selection_details(
+        committee_anchor,
+        source_calibration=source_calibration,
+        genre=genre,
+        grade_level=metadata_grade_level(metadata),
+    ) + candidate_selection_detail_lines(candidate)
     judgment = vc.judge_pair_with_orientation_audit(
         rubric,
         outline,
@@ -1407,7 +1455,7 @@ def run_blind_read_a(
         routing=routing,
         reasoning=reasoning,
         max_output_tokens=max_output_tokens,
-        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        genre=genre,
         metadata=metadata,
         selection_reasons=["committee_edge_read_a_blind"],
         selection_details=selection_details,
@@ -1573,14 +1621,21 @@ def run_blind_read_b(
     max_output_tokens: int,
     anchor_dir: Path,
     committee_anchor: Path,
+    source_calibration: Path | dict | None = None,
 ) -> dict:
     seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
     higher_id = str(seed_order.get("higher", "") or "").strip()
     lower_id = str(seed_order.get("lower", "") or "").strip()
     if higher_id not in rows_by_id or lower_id not in rows_by_id:
         raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for Read B")
+    genre = str(metadata.get("assignment_genre") or metadata.get("genre") or "")
     selection_details = (
-        committee_anchor_selection_details(committee_anchor)
+        committee_anchor_selection_details(
+            committee_anchor,
+            source_calibration=source_calibration,
+            genre=genre,
+            grade_level=metadata_grade_level(metadata),
+        )
         + read_b_selection_details(candidate, read_a)
     )
     judgment = vc.judge_pair_with_orientation_audit(
@@ -1594,7 +1649,7 @@ def run_blind_read_b(
         routing=routing,
         reasoning=reasoning,
         max_output_tokens=max_output_tokens,
-        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        genre=genre,
         metadata=metadata,
         selection_reasons=["committee_edge_read_b_polish_trap_audit"],
         selection_details=selection_details,
@@ -1816,6 +1871,7 @@ def group_calibration_prompt(
     outline: str,
     metadata: dict,
     committee_anchor: Path,
+    source_calibration: Path | dict | None = None,
 ) -> str:
     student_ids = [str(sid) for sid in neighborhood.get("student_ids", [])]
     student_count = len(rows_by_id)
@@ -1834,9 +1890,10 @@ def group_calibration_prompt(
             f"basis={detail.get('prior_basis', '')}; status={detail.get('read_status', '')}; "
             f"triggers={detail.get('triggers', [])}; cautions={detail.get('cautions', [])}"
         )
+    genre = str(metadata.get("assignment_genre") or metadata.get("genre") or "")
     class_context = json.dumps(
         {
-            "assignment_genre": metadata.get("assignment_genre") or metadata.get("genre") or "",
+            "assignment_genre": genre,
             "grade_level": metadata.get("grade_level") or metadata.get("grade") or "",
         },
         ensure_ascii=True,
@@ -1855,7 +1912,15 @@ def group_calibration_prompt(
             f"Class context: {class_context}",
             "Rubric:\n" + rubric.strip(),
             "Assignment outline:\n" + outline.strip(),
-            "Committee anchors:\n" + "\n".join(committee_anchor_selection_details(committee_anchor)),
+            "Committee anchors and external source calibration:\n"
+            + "\n".join(
+                committee_anchor_selection_details(
+                    committee_anchor,
+                    source_calibration=source_calibration,
+                    genre=genre,
+                    grade_level=metadata_grade_level(metadata),
+                )
+            ),
             "Cohort row context:\n" + "\n".join(row_brief(row, student_count) for row in rows),
             "Unresolved pairwise edges under calibration:\n" + "\n".join(pair_lines),
             "Essays:\n\n" + "\n\n---\n\n".join(essay_blocks),
@@ -1898,6 +1963,7 @@ def run_group_calibration(
     reasoning: str,
     max_output_tokens: int,
     committee_anchor: Path,
+    source_calibration: Path | dict | None = None,
 ) -> dict:
     group_max_output_tokens = max(int(max_output_tokens or 0), DEFAULT_GROUP_MAX_OUTPUT_TOKENS)
     prompt = group_calibration_prompt(
@@ -1908,6 +1974,7 @@ def run_group_calibration(
         outline=outline,
         metadata=metadata,
         committee_anchor=committee_anchor,
+        source_calibration=source_calibration,
     )
     response = responses_create(
         model=model,
@@ -2171,6 +2238,7 @@ def run_group_calibration_path(
     max_groups: int,
     max_students: int,
     existing_decision_keys: set[str],
+    source_calibration: Path | dict | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     rows_by_id = {str(row.get("student_id") or ""): row for row in vc.prepare_rows(rows)}
     neighborhoods = build_group_calibration_neighborhoods(
@@ -2205,6 +2273,7 @@ def run_group_calibration_path(
                 reasoning=reasoning,
                 max_output_tokens=max_output_tokens,
                 committee_anchor=committee_anchor,
+                source_calibration=source_calibration,
             )
             progress(
                 f"Group calibration complete neighborhood={neighborhood.get('neighborhood_id', '')} confidence={calibration.get('confidence', '')}",
@@ -2403,14 +2472,21 @@ def run_placement_read_c(
     max_output_tokens: int,
     anchor_dir: Path,
     committee_anchor: Path,
+    source_calibration: Path | dict | None = None,
 ) -> dict:
     seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
     higher_id = str(seed_order.get("higher", "") or "").strip()
     lower_id = str(seed_order.get("lower", "") or "").strip()
     if higher_id not in rows_by_id or lower_id not in rows_by_id:
         raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for Read C")
+    genre = str(metadata.get("assignment_genre") or metadata.get("genre") or "")
     selection_details = (
-        committee_anchor_selection_details(committee_anchor)
+        committee_anchor_selection_details(
+            committee_anchor,
+            source_calibration=source_calibration,
+            genre=genre,
+            grade_level=metadata_grade_level(metadata),
+        )
         + placement_context_lines(candidate, read_a, read_b, ab_reason, rows_by_id)
     )
     judgment = vc.judge_pair_with_orientation_audit(
@@ -2424,7 +2500,7 @@ def run_placement_read_c(
         routing=routing,
         reasoning=reasoning,
         max_output_tokens=max_output_tokens,
-        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        genre=genre,
         metadata=metadata,
         selection_reasons=["committee_edge_read_c_placement_calibration"],
         selection_details=selection_details,
@@ -2687,6 +2763,7 @@ def run_read_a_path(
     fixture_by_key: dict[str, dict],
     read_b_fixture: dict[str, dict] | None = None,
     read_c_fixture: dict[str, dict] | None = None,
+    source_calibration: Path | dict | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Run the committee read path.
 
@@ -2762,6 +2839,7 @@ def run_read_a_path(
                     max_output_tokens=max_output_tokens,
                     anchor_dir=anchor_dir,
                     committee_anchor=committee_anchor,
+                    source_calibration=source_calibration,
                 )
             except Exception as exc:
                 record["status"] = "read_a_error"
@@ -2841,6 +2919,7 @@ def run_read_a_path(
                         max_output_tokens=max_output_tokens,
                         anchor_dir=anchor_dir,
                         committee_anchor=committee_anchor,
+                        source_calibration=source_calibration,
                     )
                     progress(
                         f"Read B complete pair={candidate.get('pair_key', '')} winner={read_b.get('winner', '')} confidence={read_b.get('confidence', '')}",
@@ -2897,6 +2976,7 @@ def run_read_a_path(
                             max_output_tokens=max_output_tokens,
                             anchor_dir=anchor_dir,
                             committee_anchor=committee_anchor,
+                            source_calibration=source_calibration,
                         )
                         progress(
                             f"Read C complete pair={candidate.get('pair_key', '')} winner={read_c.get('winner', '')} confidence={read_c.get('confidence', '')}",
@@ -3040,6 +3120,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "outline": str(args.outline),
         "routing": str(args.routing),
         "committee_anchor": str(args.committee_anchor),
+        "source_calibration": str(args.source_calibration),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
@@ -3134,6 +3215,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outline", type=Path, default=Path(DEFAULT_OUTLINE))
     parser.add_argument("--routing", type=Path, default=Path(DEFAULT_ROUTING))
     parser.add_argument("--committee-anchor", type=Path, default=Path(DEFAULT_COMMITTEE_ANCHOR))
+    parser.add_argument(
+        "--source-calibration",
+        type=Path,
+        default=Path(DEFAULT_SOURCE_CALIBRATION_PATH),
+        help=(
+            "Copyright-safe external source calibration manifest. Used only by routed "
+            "committee reads; default broad pipeline remains model-free at this seam."
+        ),
+    )
     parser.add_argument("--model", default="", help="Override literary committee model")
     parser.add_argument("--reasoning", default="", help="Override literary committee reasoning")
     parser.add_argument("--max-output-tokens", type=int, default=0, help="Override literary committee max output tokens")
@@ -3295,6 +3385,7 @@ def main() -> int:
                 max_output_tokens=max_output_tokens,
                 anchor_dir=args.committee_anchor.parent,
                 committee_anchor=args.committee_anchor,
+                source_calibration=args.source_calibration,
                 max_reads=args.max_reads,
                 max_read_b=args.max_read_b,
                 max_read_c=args.max_read_c,
@@ -3324,6 +3415,7 @@ def main() -> int:
                     reasoning=str(reasoning),
                     max_output_tokens=max_output_tokens,
                     committee_anchor=args.committee_anchor,
+                    source_calibration=args.source_calibration,
                     live=bool(args.live),
                     live_group=not bool(args.no_live_group_calibration),
                     fixtures=group_calibration_fixture,
