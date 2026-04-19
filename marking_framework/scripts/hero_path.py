@@ -42,6 +42,7 @@ def main() -> int:
     parser.add_argument("--band-seam-adjudication", action="store_true", help="Adjudicate adjacent level seams before consistency reranking")
     parser.add_argument("--skip-grading", action="store_true", help="Skip automatic non-interactive grade curve generation")
     parser.add_argument("--publish-gate", action="store_true", help="Run publish quality gate")
+    parser.add_argument("--pairwise-eval", action="store_true", help="Evaluate routed hard-pair adjudication before publish/SOTA gates")
     parser.add_argument("--gate-config", default="config/accuracy_gate.json", help="Publish gate config JSON")
     parser.add_argument("--sota-gate", action="store_true", help="Run strict SOTA readiness gate")
     parser.add_argument("--sota-config", default="config/sota_gate.json", help="SOTA gate config JSON")
@@ -64,6 +65,7 @@ def main() -> int:
         args.band_seam_adjudication = True
         args.verify_consistency = True
         args.apply_consistency = True
+        args.pairwise_eval = True
         args.publish_gate = True
         args.sota_gate = True
 
@@ -152,6 +154,10 @@ def main() -> int:
                 return 1
             if run(step_cmd("rerank", ["python3", "scripts/global_rerank.py"])) != 0:
                 return 1
+
+    if args.pairwise_eval or args.publish_gate or args.sota_gate:
+        if run(step_cmd("pairwise_eval", ["python3", "scripts/evaluate_pairwise_adjudicator.py", "--judgments", "outputs/consistency_checks.committee_edge.json", "--output", "outputs/pairwise_adjudicator_eval.json"])) != 0:
+            return 1
 
     if args.publish_gate:
         cmd = step_cmd("quality_gate", ["python3", "scripts/publish_gate.py", "--gate-config", args.gate_config])

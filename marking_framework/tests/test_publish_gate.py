@@ -442,6 +442,30 @@ def test_publish_gate_helper_branches(tmp_path):
     )
     escalated_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_escalated.json")
     assert escalated_eval["escalated_path"] is True
+    (tmp_path / "pairwise_eval_committee.json").write_text(
+        json.dumps(
+            {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.committee_edge.json"},
+                "summary": {"pair_count": 1, "evaluated_count": 1, "accuracy": 1.0, "coverage": 1.0, "critical_accuracy": 1.0},
+                "pairs": [
+                    {
+                        "outcome": {
+                            "judgments": [
+                                {
+                                    "winner": "b",
+                                    "model_metadata": {"adjudication_source": "committee_edge"},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    committee_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_committee.json")
+    assert committee_eval["escalated_path"] is True
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():

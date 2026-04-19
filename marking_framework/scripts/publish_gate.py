@@ -338,7 +338,7 @@ def contains_escalated_pairwise_judgment(value) -> bool:
     if isinstance(value, dict):
         metadata = value.get("model_metadata") if isinstance(value.get("model_metadata"), dict) else {}
         source = str(metadata.get("adjudication_source") or value.get("adjudication_source") or "").strip()
-        if source == "escalated_adjudication":
+        if source in {"escalated_adjudication", "committee_edge"}:
             return True
         return any(contains_escalated_pairwise_judgment(item) for item in value.values())
     if isinstance(value, list):

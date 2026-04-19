@@ -43,10 +43,12 @@ Optional LLM assessors:
 - Escalate only unstable/high-leverage edges: `python3 scripts/escalate_pairwise_adjudications.py`
 - Resolve residual committee-edge overrides: `python3 scripts/committee_edge_resolver.py`
 - Apply deterministic rerank with committee-edge direct edges preferred: `python3 scripts/global_rerank.py --judgments outputs/consistency_checks.committee_edge.json`
+- Evaluate routed hard-pair performance before publish/SOTA gates: `python3 scripts/evaluate_pairwise_adjudicator.py --judgments outputs/consistency_checks.committee_edge.json --output outputs/pairwise_adjudicator_eval.json`
 - Review `outputs/pairwise_escalation_candidates.json` for the routed hard-pair selection.
 - Review `outputs/pairwise_escalations.json` for stronger-model teacher-grade decisions.
 - Review `outputs/consistency_checks.escalated.json` for the merged evidence file consumed by rerank.
 - Review `outputs/committee_edge_candidates.json` for residual unstable edges, including polish-bias, rougher-but-stronger, and bell-curve-leverage risks.
+- Review `outputs/pairwise_adjudicator_eval.json`; the publish gate expects the routed committee-edge path to meet hard-pair accuracy and polish-bias thresholds.
 - Phase 1 of the committee-edge resolver is scaffold only: it emits candidates and passes the merged judgments file through unchanged when no decisions are produced.
 - Live committee reads are opt-in with `python3 scripts/committee_edge_resolver.py --live --max-reads 12`; default pipeline runs remain deterministic/model-free at this seam. Live mode runs Read A for selected candidates, capped Read B polish-trap audits for Read-A outcomes that request an audit, capped Read C placement calibration for unresolved high-leverage A/B outcomes, and one small unresolved-neighborhood group calibration unless `--no-live-read-b`, `--no-live-read-c`, or `--no-live-group-calibration` is passed.
 - Offline committee-read fixtures can be replayed with `--blind-read-fixture`, `--read-b-fixture`, `--read-c-fixture`, and `--group-calibration-fixture` to test precedence, A/B/C resolution, group-neighborhood overrides, and rerank behavior without API calls.

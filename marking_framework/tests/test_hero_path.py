@@ -236,6 +236,37 @@ def test_hero_path_runs_committee_edge_resolver_between_escalation_and_rerank(tm
     assert escalation_idx < committee_idx < rerank_idx
 
 
+def test_hero_path_runs_pairwise_eval_before_publish_gate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+            "--publish-gate",
+        ],
+    )
+    assert hp.main() == 0
+    rendered = [" ".join(str(part) for part in call) for call in calls]
+    rerank_idx = next(idx for idx, call in enumerate(rendered) if "global_rerank.py" in call)
+    eval_idx = next(idx for idx, call in enumerate(rendered) if "evaluate_pairwise_adjudicator.py" in call)
+    gate_idx = next(idx for idx, call in enumerate(rendered) if "publish_gate.py" in call)
+    assert rerank_idx < eval_idx < gate_idx
+    assert "outputs/consistency_checks.committee_edge.json" in rendered[eval_idx]
+
+
 def test_hero_path_committee_edge_live_flag_appends_live(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     setup_assessor_dirs(tmp_path)
@@ -370,6 +401,7 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
     assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
+    assert any("evaluate_pairwise_adjudicator.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
     assert any("sota_gate.py" in str(part) for call in calls for part in call)
     assert any("review_and_grade.py" in str(part) for call in calls for part in call)
