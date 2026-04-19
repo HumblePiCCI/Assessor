@@ -819,7 +819,9 @@ def test_phase2b_budget_cap_on_live_reads():
         anchor_dir=FIXTURE_DIR,
         committee_anchor=FIXTURE_DIR / "missing.json",
         max_reads=2,
+        max_read_b=None,
         live=False,
+        live_read_b=False,
         fixture_by_key=fixture,
     )
     assert summary["read_count"] == 2
@@ -927,6 +929,7 @@ def test_phase2b_live_mode_uses_selected_candidates_and_monkeypatched_reader(tmp
         [
             "cer",
             "--live",
+            "--no-live-read-b",
             "--max-reads",
             "3",
             "--escalated",
@@ -1105,24 +1108,35 @@ def test_phase3a_read_priority_polished_but_shallow_keep_is_tier_0():
     # s003::s013: cheap_pairwise + polished_but_shallow caution + KEEP → Tier 0
     tier_polish = cer.committee_read_priority(_get_candidate(candidates, "s003::s013"))[0]
     assert tier_polish == 0
-    # s009::s015: escalated + formulaic_but_thin caution + KEEP → Tier 0 (either polish_like caution qualifies)
-    tier_formulaic = cer.committee_read_priority(_get_candidate(candidates, "s009::s015"))[0]
-    assert tier_formulaic == 0
 
 
-def test_phase3a_read_priority_non_escalated_caution_is_tier_1():
+def test_phase3a_read_priority_escalated_level_seam_is_tier_1():
     candidates = _build_ghost_candidates()
-    # s004::s008: cheap_pairwise + rougher_but_stronger_content + KEEP → Tier 1 (not polish-like caution)
-    tier_keep = cer.committee_read_priority(_get_candidate(candidates, "s004::s008"))[0]
-    assert tier_keep == 1
-    # s019::s022: orientation_audit + rougher_but_stronger_content + SWAP → Tier 1 (non-escalated SWAP)
+    # s009::s015: escalated + formulaic_but_thin caution + KEEP across a level seam.
+    tier_formulaic = cer.committee_read_priority(_get_candidate(candidates, "s009::s015"))[0]
+    assert tier_formulaic == 1
+    # s003::s009: escalated + incomplete_or_scaffold + loser interpretation dominant.
+    tier_incomplete = cer.committee_read_priority(_get_candidate(candidates, "s003::s009"))[0]
+    assert tier_incomplete == 1
+
+
+def test_phase3a_read_priority_orientation_swap_large_mover_is_tier_2():
+    candidates = _build_ghost_candidates()
+    # s019::s022: orientation_audit + rougher_but_stronger_content + SWAP + top-10 crossing.
     tier_swap = cer.committee_read_priority(_get_candidate(candidates, "s019::s022"))[0]
-    assert tier_swap == 1
+    assert tier_swap == 2
 
 
-def test_phase3a_read_priority_surface_inversion_without_polish_caution_is_tier_2():
+def test_phase3a_read_priority_cheap_rougher_crossing_is_tier_3():
+    candidates = _build_ghost_candidates()
+    # s004::s008: cheap_pairwise + rougher_but_stronger_content + KEEP + top-10 crossing.
+    tier_keep = cer.committee_read_priority(_get_candidate(candidates, "s004::s008"))[0]
+    assert tier_keep == 3
+
+
+def test_phase3a_read_priority_surface_inversion_without_polish_caution_is_tier_5():
     """A candidate with surface_substance_inversion but no polish/rougher caution and
-    an escalated source should land in Tier 2 (not Tier 0/1).
+    an escalated source should land in Tier 5 (after the residual-specific tiers).
     """
     check = {
         "pair": ["s015", "s009"],
@@ -1150,22 +1164,10 @@ def test_phase3a_read_priority_surface_inversion_without_polish_caution_is_tier_
     candidate = _get_candidate(candidates, "s009::s015")
     assert "surface_substance_inversion" in candidate["triggers"]
     assert not (set(candidate["trigger_details"]["escalated_cautions"]) & cer.POLISH_LIKE_CAUTIONS)
-    assert cer.committee_read_priority(candidate)[0] == 2
+    assert cer.committee_read_priority(candidate)[0] == 5
 
 
-def test_phase3a_read_priority_escalated_non_polish_caution_is_tier_3():
-    """s003::s009: escalated source + incomplete_or_scaffold + no surface inversion
-    → should fall to Tier 3 (remaining caution_ignored)."""
-    candidates = _build_ghost_candidates()
-    candidate = _get_candidate(candidates, "s003::s009")
-    cautions = set(candidate["trigger_details"]["escalated_cautions"])
-    # Precondition: not a polish-like caution, not surface inversion.
-    assert not (cautions & cer.POLISH_LIKE_CAUTIONS)
-    assert "surface_substance_inversion" not in candidate["triggers"]
-    assert cer.committee_read_priority(candidate)[0] == 3
-
-
-def test_phase3a_read_priority_non_caution_ignored_bucket_is_tier_4():
+def test_phase3a_read_priority_non_caution_ignored_bucket_is_tier_9():
     synthetic = {
         "pair_key": "a::b",
         "bucket": "top_pack",
@@ -1174,7 +1176,7 @@ def test_phase3a_read_priority_non_caution_ignored_bucket_is_tier_4():
         "triggers": ["top10_or_boundary"],
         "trigger_details": {"winner_source": "escalated_adjudication", "keep_decision": True},
     }
-    assert cer.committee_read_priority(synthetic)[0] == 4
+    assert cer.committee_read_priority(synthetic)[0] == 9
 
 
 def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_path, monkeypatch):
@@ -1184,9 +1186,10 @@ def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_
     structural signals (cautions, source, decision, SSI trigger); no Ghost IDs.
     """
     residuals = _build_ghost_candidates()
-    # Synthetic filler candidates: caution_ignored bucket, Tier 3 (escalated
-    # source, no polish-like caution, no SSI, KEEP). Scored below the residual
-    # scores so they do not starve the residual reads even when sorted by tier.
+    # Synthetic filler candidates mimic the live Ghost failure: high-score
+    # orientation-audit KEEP edges with formulaic/rougher cautions. The old read
+    # sorter put these first because it sorted by trigger score; the fixed sorter
+    # puts residual-specific evidence patterns first.
     fillers = []
     for i in range(15):
         pair_key = f"f{i:02d}a::f{i:02d}b"
@@ -1195,9 +1198,14 @@ def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_
                 "pair": [f"f{i:02d}a", f"f{i:02d}b"],
                 "pair_key": pair_key,
                 "bucket": "caution_ignored",
-                "committee_score": 75,
-                "caution_ignored_priority_tier": 3,
-                "triggers": ["caution_raised_but_ignored_rougher_stronger"],
+                "committee_score": 500 - i,
+                "caution_ignored_priority_tier": 2,
+                "triggers": [
+                    "caution_raised_but_ignored_rougher_stronger",
+                    "caution_raised_but_winner_polish_like",
+                    "never_escalated_high_leverage",
+                    "surface_substance_inversion",
+                ],
                 "seed_order": {
                     "higher": f"f{i:02d}a",
                     "lower": f"f{i:02d}b",
@@ -1205,10 +1213,16 @@ def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_
                     "lower_rank": 120 + i,
                 },
                 "trigger_details": {
-                    "winner_source": "escalated_adjudication",
-                    "escalated_cautions": ["incomplete_or_scaffold"],
+                    "winner_source": "orientation_audit",
+                    "escalated_cautions": ["formulaic_but_thin", "rougher_but_stronger_content"],
                     "keep_decision": True,
-                    "surface_substance_inversion_log": None,
+                    "swap_decision": False,
+                    "top10_cross": False,
+                    "level_cross": False,
+                    "loser_interpretation_dominant": True,
+                    "polished_but_shallow_raised": False,
+                    "aggregate_support_margin": -0.05,
+                    "surface_substance_inversion_log": {"surface_delta": 2.0, "substance_delta": -0.5},
                 },
                 "escalated_summary": {
                     "winner": f"f{i:02d}a",
@@ -1418,6 +1432,122 @@ def test_phase3a_resolve_ab_mechanics_block_meaning_blocks_override():
     decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
     assert decision is None
     assert reason == "committee_read_b_blocked_by_mechanics_or_completion"
+
+
+def test_phase3b_resolve_ab_a_block_on_agreed_winner_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_blocked_by_a_mechanics_or_completion"
+
+
+def test_phase3b_live_read_b_runs_when_invoked(monkeypatch):
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        assert candidate_arg["pair_key"] == "s009::s015"
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_b(candidate_arg, read_a, *_args, **_kwargs):
+        assert candidate_arg["pair_key"] == "s009::s015"
+        assert read_a["winner"] == "s015"
+        return _make_read(candidate_arg, winner="s009", confidence="high", polish_trap=True)
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=1,
+        live=True,
+        live_read_b=True,
+        fixture_by_key={},
+    )
+
+    assert summary["read_count"] == 1
+    assert summary["read_b_live"] is True
+    assert summary["read_b_count"] == 1
+    assert summary["override_count"] == 1
+    assert decisions[0]["winner"] == "s009"
+    assert read_results[0]["status"] == "committee_read_b_override"
+    assert read_results[0]["read_b_invoked"] is True
+
+
+def test_phase3b_max_read_b_caps_live_audits(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [
+        _get_candidate(candidates, "s003::s013"),
+        _get_candidate(candidates, "s009::s015"),
+    ]
+    calls = {"b": 0}
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        calls["b"] += 1
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=1,
+        live=True,
+        live_read_b=True,
+        fixture_by_key={},
+    )
+
+    assert calls["b"] == 1
+    assert summary["read_count"] == 2
+    assert summary["read_b_count"] == 1
+    assert summary["skipped_max_read_b"] == 1
+    assert len(decisions) == 1
+    assert any(item.get("read_b_status") == "max_read_b_exceeded" for item in read_results)
 
 
 def test_phase3a_fixture_ab_all_five_residuals_flip(tmp_path, monkeypatch):

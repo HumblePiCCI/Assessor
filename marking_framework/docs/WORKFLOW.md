@@ -48,8 +48,8 @@ Optional LLM assessors:
 - Review `outputs/consistency_checks.escalated.json` for the merged evidence file consumed by rerank.
 - Review `outputs/committee_edge_candidates.json` for residual unstable edges, including polish-bias, rougher-but-stronger, and bell-curve-leverage risks.
 - Phase 1 of the committee-edge resolver is scaffold only: it emits candidates and passes the merged judgments file through unchanged when no decisions are produced.
-- Phase 2b can run a single blind committee read with `python3 scripts/committee_edge_resolver.py --live --max-reads 12`; this is opt-in only, and default pipeline runs remain deterministic/model-free at this seam.
-- Offline committee-read fixtures can be replayed with `--blind-read-fixture` to test precedence and rerank behavior without API calls.
+- Live committee reads are opt-in with `python3 scripts/committee_edge_resolver.py --live --max-reads 12`; default pipeline runs remain deterministic/model-free at this seam. Live mode runs Read A for selected candidates and, unless `--no-live-read-b` is passed, runs capped Read B polish-trap audits for Read-A outcomes that request an audit.
+- Offline committee-read fixtures can be replayed with `--blind-read-fixture` and `--read-b-fixture` to test precedence, A/B resolution, and rerank behavior without API calls.
 - The escalation step keeps skipped candidates in the candidate artifact when budget caps apply; skipped pairs are not marked as teacher-grade evidence.
 - Cross-band challengers just below the top pack are prioritized inside the escalation budget, because a flawed seam can otherwise hide the exact papers that need teacher-grade comparison against top anchors.
 - High-disagreement non-top-pack papers are also checked against top post-seam anchors, so rank/rubric variance can surface long-gap challengers before the final rerank.

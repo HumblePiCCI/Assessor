@@ -811,7 +811,7 @@ def candidate_priority(candidate: dict) -> tuple[int, int, int, int, str]:
     )
 
 
-def committee_read_priority(candidate: dict) -> tuple[int, int, int, int, str]:
+def committee_read_priority(candidate: dict) -> tuple[int, int, float, int, int, int, str]:
     """Per-read bucket reservation for Phase 3a.
 
     Distinct from `candidate_priority` (which drives selection into the budget).
@@ -822,16 +822,19 @@ def committee_read_priority(candidate: dict) -> tuple[int, int, int, int, str]:
     pairs.
 
     Read-tiers (lower = earlier read):
-      0: caution_ignored + polished_but_shallow / formulaic_but_thin caution + KEEP
-         (rarest, highest-signal polish trap — the caution was explicitly raised
-         and the judge still kept the surface-clean winner)
-      1: caution_ignored + non-escalated source (cheap_pairwise, orientation_audit)
-         + polish-like or rougher-stronger caution (the non-escalated layer
-         flagged the pair but did not route it to escalation; high leverage)
-      2: caution_ignored + surface_substance_inversion trigger fired (gap
-         geometry shows polish-over-substance even without an explicit caution)
-      3: remaining caution_ignored candidates
-      4: everything else
+      0: cheap direct KEEP with polished_but_shallow raised. This is the most
+         explicit "caution raised but ignored" polish trap.
+      1: escalated KEEP across a level seam or inside the top pack where the
+         loser is still interpretation-dominant. The stronger layer saw the
+         edge and still protected the weaker side.
+      2: orientation-audit SWAP with rougher/stronger caution and large top-pack
+         movement. This catches non-escalated swaps that can reshape the top 10.
+      3: cheap direct rougher/stronger top-pack crossings. These never reached
+         escalation and can otherwise starve behind high-score orientation pairs.
+      4: orientation-audit KEEP with a single polish-like caution.
+      5: remaining surface/substance inversions.
+      6: remaining caution_ignored candidates.
+      9: everything else.
     """
     details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
     triggers = set(candidate.get("triggers") or [])
@@ -840,23 +843,77 @@ def committee_read_priority(candidate: dict) -> tuple[int, int, int, int, str]:
     cautions = set(details.get("escalated_cautions") or [])
     source = str(details.get("winner_source") or "")
     keep_decision = bool(details.get("keep_decision"))
-    non_escalated = source in NON_ESCALATED_SOURCES
+    swap_decision = bool(details.get("swap_decision"))
+    top10_cross = bool(details.get("top10_cross"))
+    top10_involved = bool(details.get("top10_involved"))
+    level_cross = bool(details.get("level_cross"))
+    loser_interpretation_dominant = bool(details.get("loser_interpretation_dominant"))
+    polished_but_shallow_raised = bool(details.get("polished_but_shallow_raised"))
+    try:
+        aggregate_margin = float(details.get("aggregate_support_margin", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        aggregate_margin = 0.0
+    try:
+        higher_rank = int(seed_order.get("higher_rank", details.get("higher_rank", 999999)) or 999999)
+    except (TypeError, ValueError):
+        higher_rank = 999999
+    try:
+        lower_rank = int(seed_order.get("lower_rank", details.get("lower_rank", 999999)) or 999999)
+    except (TypeError, ValueError):
+        lower_rank = 999999
 
-    read_tier = 4
+    read_tier = 9
     if bucket == "caution_ignored":
-        read_tier = 3
-        if (cautions & POLISH_LIKE_CAUTIONS) and keep_decision:
+        read_tier = 6
+        if (
+            source == "cheap_pairwise"
+            and polished_but_shallow_raised
+            and keep_decision
+            and (top10_cross or level_cross)
+        ):
             read_tier = 0
-        elif non_escalated and (cautions & (POLISH_LIKE_CAUTIONS | ROUGHER_STRONGER_CAUTIONS)):
+        elif (
+            source == "escalated_adjudication"
+            and keep_decision
+            and loser_interpretation_dominant
+            and (level_cross or (top10_involved and lower_rank <= TOP_PACK_SIZE))
+            and (cautions & (POLISH_LIKE_CAUTIONS | ROUGHER_STRONGER_CAUTIONS))
+        ):
             read_tier = 1
-        elif "surface_substance_inversion" in triggers:
+        elif (
+            source == "orientation_audit"
+            and swap_decision
+            and top10_cross
+            and lower_rank >= TOP_PACK_SIZE + 2
+            and aggregate_margin >= 0.05
+            and (cautions & ROUGHER_STRONGER_CAUTIONS)
+        ):
             read_tier = 2
+        elif (
+            source == "cheap_pairwise"
+            and top10_cross
+            and (cautions & ROUGHER_STRONGER_CAUTIONS)
+            and ((keep_decision and loser_interpretation_dominant) or swap_decision)
+        ):
+            read_tier = 3
+        elif (
+            source == "orientation_audit"
+            and top10_cross
+            and keep_decision
+            and (cautions & POLISH_LIKE_CAUTIONS)
+            and not (cautions & ROUGHER_STRONGER_CAUTIONS)
+        ):
+            read_tier = 4
+        elif "surface_substance_inversion" in triggers:
+            read_tier = 5
 
     return (
         read_tier,
+        0 if (top10_cross or level_cross) else 1,
+        abs(aggregate_margin),
+        higher_rank,
+        lower_rank,
         -int(candidate.get("committee_score", 0) or 0),
-        int(seed_order.get("higher_rank", 999999) or 999999),
-        int(seed_order.get("lower_rank", 999999) or 999999),
         str(candidate.get("pair_key") or ""),
     )
 
@@ -1273,6 +1330,9 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
     prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
     a_winner = str(read_a.get("winner") or "").strip()
     b_winner = str(read_b.get("winner") or "").strip()
+    a_checks = normalize_committee_decision_checks(
+        read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
+    )
     b_checks = normalize_committee_decision_checks(
         read_b.get("decision_checks") if isinstance(read_b.get("decision_checks"), dict) else {}
     )
@@ -1285,6 +1345,14 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
 
     a_picked_loser = bool(a_winner) and bool(prior_winner) and a_winner != prior_winner
     b_picked_loser = bool(b_winner) and bool(prior_winner) and b_winner != prior_winner
+
+    if (
+        a_picked_loser
+        and b_picked_loser
+        and a_winner == b_winner
+        and (a_checks.get("mechanics_block_meaning") or a_checks.get("completion_floor_applied"))
+    ):
+        return None, "committee_read_ab_blocked_by_a_mechanics_or_completion"
 
     if a_picked_loser and b_picked_loser and a_winner == b_winner:
         if b_conf == "high":
@@ -1391,7 +1459,9 @@ def run_read_a_path(
     anchor_dir: Path,
     committee_anchor: Path,
     max_reads: int,
+    max_read_b: int | None,
     live: bool,
+    live_read_b: bool,
     fixture_by_key: dict[str, dict],
     read_b_fixture: dict[str, dict] | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
@@ -1406,20 +1476,19 @@ def run_read_a_path(
       - Always sorts `selected` by `committee_read_priority` before reading.
       - Runs Read A via `fixture_by_key` (if present) or via the live judge
         when `live=True`. If neither produces a read, records `not_read`.
-      - If `read_b_fixture` is provided AND `should_invoke_read_b` fires for
-        this pair, attempts to load Read B from fixture and applies
+      - If `should_invoke_read_b` fires, runs Read B from fixture when provided
+        or live when `live=True` and `live_read_b=True`; then applies
         `resolve_a_b` to decide whether to emit an override.
       - Otherwise falls back to Phase 2b A-only override gate.
-
-    Live Read B is intentionally NOT triggered here in Phase 3a; fixture-only
-    lets us validate A+B resolution offline before enabling live B calls.
     """
     rows_by_id = {row["student_id"]: row for row in vc.prepare_rows(rows)}
     read_results: list[dict] = []
     decisions: list[dict] = []
     read_cap = max(0, int(max_reads))
+    read_b_cap = read_cap if max_read_b is None else max(0, int(max_read_b))
     read_a_count = 0
     read_b_count = 0
+    read_b_skipped_cap = 0
     b_fixture = read_b_fixture or {}
     # Phase 3a: read order is set by per-read priority, not the selection order.
     ordered_selected = sorted(selected, key=committee_read_priority)
@@ -1476,7 +1545,30 @@ def run_read_a_path(
         read_b = None
         if should_run_b and b_fixture:
             read_b = read_b_from_fixture(candidate, b_fixture)
-            # Live Read B is intentionally not wired in Phase 3a — fixture only.
+            if read_b is None:
+                record["read_b_status"] = "fixture_missing"
+        elif should_run_b and live and live_read_b:
+            if read_b_cap and read_b_count >= read_b_cap:
+                read_b_skipped_cap += 1
+                record["read_b_status"] = "max_read_b_exceeded"
+            else:
+                read_b = run_blind_read_b(
+                    candidate,
+                    read,
+                    rows_by_id,
+                    texts_by_id,
+                    rubric,
+                    outline,
+                    metadata,
+                    model=model,
+                    routing=routing,
+                    reasoning=reasoning,
+                    max_output_tokens=max_output_tokens,
+                    anchor_dir=anchor_dir,
+                    committee_anchor=committee_anchor,
+                )
+        elif should_run_b:
+            record["read_b_status"] = "not_available"
 
         if read_b is not None:
             read_b_count += 1
@@ -1511,11 +1603,14 @@ def run_read_a_path(
         "live": bool(live),
         "fixture": bool(fixture_by_key),
         "read_b_fixture": bool(b_fixture),
+        "read_b_live": bool(live and live_read_b),
         "max_reads": read_cap,
+        "max_read_b": read_b_cap,
         "read_count": read_a_count,
         "read_b_count": read_b_count,
         "override_count": len(decisions),
         "skipped_max_reads": sum(1 for item in read_results if item.get("status") == "max_reads_exceeded"),
+        "skipped_max_read_b": read_b_skipped_cap,
     }
 
 
@@ -1618,8 +1713,19 @@ def build_parser() -> argparse.ArgumentParser:
             "Read B and A+B resolution rules decide whether to emit an override."
         ),
     )
-    parser.add_argument("--live", action="store_true", help="Run live single-read committee adjudication for selected candidates.")
+    parser.add_argument("--live", action="store_true", help="Run live committee adjudication for selected candidates.")
     parser.add_argument("--max-reads", type=int, default=DEFAULT_MAX_READS, help="Maximum selected candidates to read in live/fixture mode.")
+    parser.add_argument(
+        "--max-read-b",
+        type=int,
+        default=None,
+        help="Maximum live/fixture Read-B audits. Defaults to --max-reads; 0 means unlimited.",
+    )
+    parser.add_argument(
+        "--no-live-read-b",
+        action="store_true",
+        help="Disable live Read-B audits even when --live is set; fixture Read-B still works.",
+    )
     parser.add_argument("--rubric", type=Path, default=Path(DEFAULT_RUBRIC))
     parser.add_argument("--outline", type=Path, default=Path(DEFAULT_OUTLINE))
     parser.add_argument("--routing", type=Path, default=Path(DEFAULT_ROUTING))
@@ -1720,11 +1826,14 @@ def main() -> int:
         "live": False,
         "fixture": False,
         "read_b_fixture": False,
+        "read_b_live": False,
         "max_reads": int(args.max_reads),
+        "max_read_b": int(args.max_read_b if args.max_read_b is not None else args.max_reads),
         "read_count": 0,
         "read_b_count": 0,
         "override_count": 0,
         "skipped_max_reads": 0,
+        "skipped_max_read_b": 0,
     }
     if args.live or blind_read_fixture or read_b_fixture:
         try:
@@ -1756,7 +1865,9 @@ def main() -> int:
                 anchor_dir=args.committee_anchor.parent,
                 committee_anchor=args.committee_anchor,
                 max_reads=args.max_reads,
+                max_read_b=args.max_read_b,
                 live=bool(args.live),
+                live_read_b=not bool(args.no_live_read_b),
                 fixture_by_key=blind_read_fixture,
                 read_b_fixture=read_b_fixture,
             )
@@ -1806,6 +1917,14 @@ def main() -> int:
         "source_paths": source_paths,
         "decisions": normalized_decisions,
         "read_a": read_a_summary,
+        "read_b": {
+            "enabled": bool(read_a_summary.get("read_b_live") or read_a_summary.get("read_b_fixture")),
+            "live": bool(read_a_summary.get("read_b_live")),
+            "fixture": bool(read_a_summary.get("read_b_fixture")),
+            "max_reads": int(read_a_summary.get("max_read_b", 0) or 0),
+            "read_count": int(read_a_summary.get("read_b_count", 0) or 0),
+            "skipped_max_reads": int(read_a_summary.get("skipped_max_read_b", 0) or 0),
+        },
         "read_a_results": read_a_results,
     }
     trigger_counts = Counter()
@@ -1867,6 +1986,7 @@ def main() -> int:
             "ambiguous": sum(1 for decision in normalized_decisions if str(decision.get("committee_confidence", "")).endswith("ambiguous")),
         },
         "read_a": read_a_summary,
+        "read_b": decisions_payload["read_b"],
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)
