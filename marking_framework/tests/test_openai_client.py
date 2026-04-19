@@ -141,6 +141,43 @@ def test_openai_retries_without_temperature_on_unsupported_parameter(tmp_path, m
     assert oc.extract_usage(resp)["input_tokens"] == 1
 
 
+def test_openai_compatibility_retry_does_not_consume_single_retry_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "1")
+    routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    calls = {"count": 0}
+
+    def fake_urlopen(req, timeout=None):
+        calls["count"] += 1
+        payload = json.loads(req.data.decode("utf-8"))
+        if calls["count"] == 1:
+            assert "temperature" in payload
+            body = {
+                "error": {
+                    "message": "Unsupported parameter: 'temperature' is not supported with this model.",
+                    "type": "invalid_request_error",
+                    "param": "temperature",
+                    "code": None,
+                }
+            }
+            raise oc.urllib.error.HTTPError(req.full_url, 400, "Bad Request", hdrs=None, fp=BytesIO(json.dumps(body).encode("utf-8")))
+        assert "temperature" not in payload
+        return DummyResponse({"output": [{"type": "output_text", "text": "ok"}], "usage": {"input_tokens": 3}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    resp = oc.responses_create(
+        "gpt-5.4",
+        [{"role": "user", "content": "hi"}],
+        temperature=0.0,
+        reasoning="high",
+        routing_path=str(route_path),
+    )
+    assert calls["count"] == 2
+    assert oc.extract_usage(resp)["input_tokens"] == 3
+
+
 def test_openai_retries_transient_network_error(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}

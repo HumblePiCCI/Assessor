@@ -961,10 +961,15 @@ def test_phase2b_live_mode_uses_selected_candidates_and_monkeypatched_reader(tmp
 
     assert cer.main() == 0
     decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    live_trace = json.loads((outputs / "committee_edge_live_trace.json").read_text(encoding="utf-8"))
     assert len(calls) == 3
     assert decisions["read_a"]["live"] is True
     assert decisions["read_a"]["read_count"] == 3
     assert decisions["read_a"]["skipped_max_reads"] > 0
+    assert live_trace["phase"] == "3e"
+    assert live_trace["enabled"] is True
+    assert live_trace["read_a"]["read_count"] == 3
+    assert "ledger_guard" in live_trace
 
 
 def test_decisions_fixture_supersedes_escalated_in_merged_file(tmp_path, monkeypatch):
@@ -1103,6 +1108,35 @@ def _make_read(candidate, *, winner, confidence="high", cautions=None, **checks)
             "decision_checks": defaults,
         },
     )
+
+
+def _ledger(*, a_depth="weak", a_proof="weak", b_depth="weak", b_proof="weak", a_blocked=False, b_blocked=False):
+    return {
+        "A": {
+            "central_claim": "Essay A claim",
+            "specific_text_moments": ["moment A1"],
+            "explained_moment_count": 1,
+            "interpretation_depth": a_depth,
+            "proof_sufficiency": a_proof,
+            "plot_summary_only": a_depth in {"none", "weak"},
+            "formulaic_control_only": a_depth in {"none", "weak"},
+            "mechanics_block_meaning": a_blocked,
+            "completion_floor_applied": False,
+            "strongest_substance_reason": "A reason",
+        },
+        "B": {
+            "central_claim": "Essay B claim",
+            "specific_text_moments": ["moment B1", "moment B2", "moment B3"],
+            "explained_moment_count": 3,
+            "interpretation_depth": b_depth,
+            "proof_sufficiency": b_proof,
+            "plot_summary_only": False,
+            "formulaic_control_only": False,
+            "mechanics_block_meaning": b_blocked,
+            "completion_floor_applied": False,
+            "strongest_substance_reason": "B reason",
+        },
+    }
 
 
 def test_phase3a_read_priority_polished_but_shallow_keep_is_tier_0():
@@ -1325,6 +1359,179 @@ def test_phase3a_should_not_invoke_read_b_when_a_high_conf_clean_interp_to_winne
     should_run, reason = cer.should_invoke_read_b(candidate, read_a)
     assert should_run is False
     assert reason == "committee_read_b_not_needed"
+
+
+# -----------------------------------------------------------------------------
+# Phase 3e: evidence-ledger guard for self-contradictory committee reads
+# -----------------------------------------------------------------------------
+
+
+def test_phase3e_evidence_ledger_guard_flips_prior_concurrence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    # Read A preserves the prior winner (s015), but its own ledger says Essay B
+    # has stronger interpretation/proof and no blocker. The deterministic guard
+    # must flip to s009 instead of letting a polish-biased concurrence stand.
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="medium",
+        interpretation_depth="A",
+        proof_sufficiency="A",
+        evidence_ledger=_ledger(a_depth="weak", a_proof="adequate", b_depth="strong", b_proof="strong"),
+    )
+    guard_read, reason = cer.evidence_ledger_guard_decision(candidate, read_a, read_label="A")
+    assert reason == "committee_read_a_evidence_ledger_override"
+    assert guard_read is not None
+    assert guard_read["winner"] == "s009"
+    assert guard_read["winner_side"] == "B"
+    assert guard_read["decision"] == "SWAP"
+    assert guard_read["decision_checks"]["polish_trap"] is True
+    assert guard_read["decision_checks"]["rougher_but_stronger_latent"] is True
+    assert guard_read["evidence_ledger_guard"]["guard_winner"] == "s009"
+
+
+def test_phase3e_evidence_ledger_guard_does_not_flip_when_alternate_blocked():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(
+            a_depth="weak",
+            a_proof="adequate",
+            b_depth="strong",
+            b_proof="strong",
+            b_blocked=True,
+        ),
+    )
+    guard_read, reason = cer.evidence_ledger_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_ledger_guard_ledger_supports_winner"
+
+
+def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015")]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is more complete, but Jack has the stronger interpretation.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "deeper_interpretation": "A",
+                "better_text_evidence_explanation": "A",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "A",
+                "cleaner_wins_on_substance": "Logan is complete.",
+                "rougher_loses_because": "Jack is rougher.",
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(
+                    a_depth="weak",
+                    a_proof="adequate",
+                    b_depth="strong",
+                    b_proof="strong",
+                ),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_evidence_ledger_override"
+    assert read_results[0]["status"] == "committee_read_a_evidence_ledger_override"
+    assert read_results[0]["evidence_ledger_guard_emitted"] is True
+
+
+def test_phase3e_live_read_error_records_and_continues(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015"), _get_candidate(candidates, "s003::s013")]
+    calls = []
+
+    def flaky_read(candidate, *args, **kwargs):
+        calls.append(candidate["pair_key"])
+        if len(calls) == 1:
+            raise RuntimeError("temporary model failure")
+        return _make_read(
+            candidate,
+            winner=candidate["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", flaky_read)
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=None,
+        max_read_c=None,
+        live=True,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key={},
+    )
+    assert calls == [candidate["pair_key"] for candidate in sorted(selected, key=cer.committee_read_priority)]
+    assert read_results[0]["status"] == "read_a_error"
+    assert "temporary model failure" in read_results[0]["error"]
+    assert summary["read_attempt_count"] == 2
+    assert summary["read_a_error_count"] == 1
+    assert summary["read_count"] == 1
+    assert len(decisions) == 1
 
 
 def test_phase3a_resolve_ab_agree_high_conf_emits_override():

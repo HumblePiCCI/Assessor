@@ -1204,6 +1204,7 @@ def judge_pair(
         "alternate_theme_validity",
         "mechanics_block_meaning",
         "completion_floor_applied",
+        "evidence_ledger",
     ):
         if key in parsed_checks:
             decision_checks[key] = parsed_checks.get(key)

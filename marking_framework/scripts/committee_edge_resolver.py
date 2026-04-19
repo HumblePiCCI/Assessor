@@ -15,6 +15,7 @@ import copy
 import csv
 import json
 import os
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -72,6 +73,7 @@ DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
 DEFAULT_MERGED_OUT = "outputs/consistency_checks.committee_edge.json"
+DEFAULT_LIVE_TRACE_OUT = "outputs/committee_edge_live_trace.json"
 DEFAULT_MAX_READS = 12
 DEFAULT_MAX_GROUP_CALIBRATIONS = 1
 DEFAULT_MAX_GROUP_STUDENTS = 12
@@ -79,6 +81,34 @@ DEFAULT_GROUP_MAX_OUTPUT_TOKENS = 6000
 
 COMMITTEE_RESPONSE_FORMAT = copy.deepcopy(vc.RESPONSE_FORMAT)
 COMMITTEE_DECISION_CHECKS = COMMITTEE_RESPONSE_FORMAT["schema"]["properties"]["decision_checks"]
+LEDGER_SIDE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "central_claim": {"type": "string"},
+        "specific_text_moments": {"type": "array", "items": {"type": "string"}},
+        "explained_moment_count": {"type": "integer"},
+        "interpretation_depth": {"type": "string", "enum": ["none", "weak", "adequate", "strong"]},
+        "proof_sufficiency": {"type": "string", "enum": ["none", "weak", "adequate", "strong"]},
+        "plot_summary_only": {"type": "boolean"},
+        "formulaic_control_only": {"type": "boolean"},
+        "mechanics_block_meaning": {"type": "boolean"},
+        "completion_floor_applied": {"type": "boolean"},
+        "strongest_substance_reason": {"type": "string"},
+    },
+    "required": [
+        "central_claim",
+        "specific_text_moments",
+        "explained_moment_count",
+        "interpretation_depth",
+        "proof_sufficiency",
+        "plot_summary_only",
+        "formulaic_control_only",
+        "mechanics_block_meaning",
+        "completion_floor_applied",
+        "strongest_substance_reason",
+    ],
+    "additionalProperties": False,
+}
 COMMITTEE_DECISION_CHECKS["properties"].update(
     {
         "interpretation_depth": {"type": "string", "enum": ["A", "B", "tie"]},
@@ -88,6 +118,12 @@ COMMITTEE_DECISION_CHECKS["properties"].update(
         "alternate_theme_validity": {"type": "string", "enum": ["A", "B", "tie"]},
         "mechanics_block_meaning": {"type": "boolean"},
         "completion_floor_applied": {"type": "boolean"},
+        "evidence_ledger": {
+            "type": "object",
+            "properties": {"A": LEDGER_SIDE_SCHEMA, "B": LEDGER_SIDE_SCHEMA},
+            "required": ["A", "B"],
+            "additionalProperties": False,
+        },
     }
 )
 COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required"]) + [
@@ -98,6 +134,7 @@ COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required
     "alternate_theme_validity",
     "mechanics_block_meaning",
     "completion_floor_applied",
+    "evidence_ledger",
 ]
 
 GROUP_CALIBRATION_RESPONSE_FORMAT = {
@@ -242,6 +279,11 @@ def now_iso() -> str:
 def write_json(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def progress(message: str, *, enabled: bool):
+    if enabled:
+        print(f"[committee_edge] {message}", file=sys.stderr, flush=True)
 
 
 def load_required_json(path: Path) -> dict:
@@ -1071,9 +1113,29 @@ def committee_anchor_selection_details(path: Path) -> list[str]:
     return [detail for detail in details if detail.strip()]
 
 
+def evidence_ledger_instruction_lines() -> list[str]:
+    return [
+        (
+            "Before choosing winner_side, complete decision_checks.evidence_ledger for Essay A and Essay B. "
+            "The ledger must name each essay's central claim, specific text moments, explained-moment count, "
+            "interpretation depth, proof sufficiency, plot-summary-only status, formulaic-control-only status, "
+            "mechanics blocker, completion blocker, and strongest substance reason."
+        ),
+        (
+            "Do not choose a cleaner/formulaic essay when your own evidence ledger says the other essay has "
+            "stronger interpretation and at least equal proof, unless the other essay has mechanics_block_meaning "
+            "or completion_floor_applied."
+        ),
+        (
+            "If winner_side conflicts with the evidence ledger, the deterministic committee guard may supersede "
+            "your winner using the ledger you supplied."
+        ),
+    ]
+
+
 def candidate_selection_detail_lines(candidate: dict) -> list[str]:
     details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
-    return [
+    return evidence_ledger_instruction_lines() + [
         "This is a blind committee read. Do not rely on prior pairwise decisions, seed order, aggregate rank, Borda support, or committee trigger labels as evidence.",
         "Resolve the pair using the rubric, assignment, committee anchors, and essay texts only.",
         f"Candidate bucket for audit logging: {candidate.get('bucket', '')}.",
@@ -1135,7 +1197,182 @@ def normalize_committee_decision_checks(value: dict) -> dict:
     base["alternate_theme_validity"] = vc.normalize_side(value.get("alternate_theme_validity"))
     base["mechanics_block_meaning"] = truthy(value.get("mechanics_block_meaning"))
     base["completion_floor_applied"] = truthy(value.get("completion_floor_applied"))
+    base["evidence_ledger"] = normalize_evidence_ledger(value.get("evidence_ledger"))
     return base
+
+
+LEDGER_QUALITY = {"none": 0, "weak": 1, "adequate": 2, "strong": 3}
+
+
+def normalize_ledger_quality(value) -> str:
+    token = str(value or "").strip().lower()
+    return token if token in LEDGER_QUALITY else "none"
+
+
+def normalize_ledger_side(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    moments = value.get("specific_text_moments") if isinstance(value.get("specific_text_moments"), list) else []
+    return {
+        "central_claim": str(value.get("central_claim") or "").strip(),
+        "specific_text_moments": [str(moment or "").strip() for moment in moments if str(moment or "").strip()],
+        "explained_moment_count": max(0, int(num(value.get("explained_moment_count"), 0))),
+        "interpretation_depth": normalize_ledger_quality(value.get("interpretation_depth")),
+        "proof_sufficiency": normalize_ledger_quality(value.get("proof_sufficiency")),
+        "plot_summary_only": truthy(value.get("plot_summary_only")),
+        "formulaic_control_only": truthy(value.get("formulaic_control_only")),
+        "mechanics_block_meaning": truthy(value.get("mechanics_block_meaning")),
+        "completion_floor_applied": truthy(value.get("completion_floor_applied")),
+        "strongest_substance_reason": str(value.get("strongest_substance_reason") or "").strip(),
+    }
+
+
+def normalize_evidence_ledger(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    return {
+        "A": normalize_ledger_side(value.get("A")),
+        "B": normalize_ledger_side(value.get("B")),
+    }
+
+
+def ledger_side_blocked(side: dict) -> bool:
+    return bool(side.get("mechanics_block_meaning") or side.get("completion_floor_applied"))
+
+
+def ledger_quality_value(side: dict, key: str) -> int:
+    return LEDGER_QUALITY.get(normalize_ledger_quality(side.get(key)), 0)
+
+
+def ledger_side_score(side: dict) -> int:
+    score = ledger_quality_value(side, "interpretation_depth") * 3
+    score += ledger_quality_value(side, "proof_sufficiency") * 3
+    score += min(3, int(num(side.get("explained_moment_count"), 0)))
+    score += min(2, len(side.get("specific_text_moments") or []))
+    if str(side.get("central_claim") or "").strip():
+        score += 1
+    if side.get("plot_summary_only"):
+        score -= 3
+    if side.get("formulaic_control_only"):
+        score -= 2
+    if ledger_side_blocked(side):
+        score -= 100
+    return score
+
+
+def evidence_ledger_favors_side(ledger: dict, side: str, other: str) -> bool:
+    side = normalize_winner_side(side)
+    other = normalize_winner_side(other)
+    if not side or not other or side == other:
+        return False
+    normalized = normalize_evidence_ledger(ledger)
+    favored = normalized[side]
+    opposed = normalized[other]
+    if ledger_side_blocked(favored):
+        return False
+    if ledger_side_blocked(opposed):
+        return True
+    favored_depth = ledger_quality_value(favored, "interpretation_depth")
+    opposed_depth = ledger_quality_value(opposed, "interpretation_depth")
+    favored_proof = ledger_quality_value(favored, "proof_sufficiency")
+    opposed_proof = ledger_quality_value(opposed, "proof_sufficiency")
+    favored_moments = int(num(favored.get("explained_moment_count"), 0))
+    opposed_moments = int(num(opposed.get("explained_moment_count"), 0))
+    if favored_depth > opposed_depth and favored_proof >= opposed_proof:
+        return True
+    if favored_proof > opposed_proof and favored_depth >= opposed_depth:
+        return True
+    if (
+        favored_depth >= opposed_depth
+        and favored_proof >= opposed_proof
+        and favored_moments >= opposed_moments + 2
+    ):
+        return True
+    if (
+        ledger_side_score(favored) >= ledger_side_score(opposed) + 4
+        and (opposed.get("plot_summary_only") or opposed.get("formulaic_control_only"))
+    ):
+        return True
+    return False
+
+
+def evidence_ledger_guard_decision(candidate: dict, read: dict, *, read_label: str = "A") -> tuple[dict | None, str]:
+    """Flip a self-contradictory committee read when its own ledger proves the other side.
+
+    This guard is intentionally narrow: it only acts on routed high-risk edges,
+    only when the read preserved the current active winner, and only when the
+    ledger says the other essay wins on interpretation/proof without a mechanics
+    or completion blocker.
+    """
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    read_winner = str(read.get("winner") or "").strip()
+    if not prior_winner or not read_winner or read_winner != prior_winner:
+        return None, "evidence_ledger_guard_not_prior_concurrence"
+    confidence = vc.normalize_confidence(read.get("confidence"))
+    if confidence not in {"medium", "high"}:
+        return None, "evidence_ledger_guard_low_confidence"
+    bucket = str(candidate.get("bucket") or "")
+    triggers = set(candidate.get("triggers") or [])
+    if bucket != "caution_ignored" and not (triggers & CAUTION_IGNORED_TRIGGERS):
+        return None, "evidence_ledger_guard_not_high_risk"
+    checks = normalize_committee_decision_checks(
+        read.get("decision_checks") if isinstance(read.get("decision_checks"), dict) else {}
+    )
+    winner_side = normalize_winner_side(read.get("winner_side"))
+    loser_side = "B" if winner_side == "A" else "A" if winner_side == "B" else ""
+    if not winner_side or not loser_side:
+        return None, "evidence_ledger_guard_missing_side"
+    ledger = checks.get("evidence_ledger") if isinstance(checks.get("evidence_ledger"), dict) else {}
+    if not evidence_ledger_favors_side(ledger, loser_side, winner_side):
+        return None, "evidence_ledger_guard_ledger_supports_winner"
+    flipped = copy.deepcopy(read)
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    new_winner = higher if loser_side == "A" else lower
+    new_loser = lower if new_winner == higher else higher
+    flipped_checks = normalize_committee_decision_checks(flipped.get("decision_checks") if isinstance(flipped.get("decision_checks"), dict) else {})
+    flipped_checks["interpretation_depth"] = loser_side
+    flipped_checks["proof_sufficiency"] = loser_side
+    flipped_checks["alternate_theme_validity"] = loser_side
+    flipped_checks["polish_trap"] = True
+    flipped_checks["rougher_but_stronger_latent"] = True
+    flipped_checks["mechanics_block_meaning"] = False
+    flipped_checks["completion_floor_applied"] = False
+    cautions = set(flipped.get("cautions_applied") if isinstance(flipped.get("cautions_applied"), list) else [])
+    cautions.update({"rougher_but_stronger_content", "polished_but_shallow"})
+    flipped.update(
+        {
+            "winner": new_winner,
+            "loser": new_loser,
+            "winner_side": loser_side,
+            "decision": "KEEP" if loser_side == "A" else "SWAP",
+            "confidence": confidence,
+            "decision_basis": "content_reasoning",
+            "cautions_applied": sorted(cautions),
+            "decision_checks": flipped_checks,
+            "rationale": (
+                "Evidence-ledger guard: the committee read preserved the prior winner, "
+                "but its own ledger gives the other essay stronger interpretation/proof "
+                "with no mechanics or completion blocker. "
+                + str(flipped.get("rationale") or "").strip()
+            ).strip(),
+        }
+    )
+    metadata = dict(flipped.get("model_metadata") or {})
+    metadata["committee_read"] = f"{read_label}-evidence-ledger-guard"
+    metadata["adjudication_source"] = "committee_evidence_ledger_guard"
+    flipped["model_metadata"] = metadata
+    flipped["evidence_ledger_guard"] = {
+        "prior_winner": prior_winner,
+        "original_winner": read_winner,
+        "guard_winner": new_winner,
+        "guard_winner_side": loser_side,
+        "original_winner_side": winner_side,
+        "ledger_scores": {
+            loser_side: ledger_side_score(normalize_evidence_ledger(ledger)[loser_side]),
+            winner_side: ledger_side_score(normalize_evidence_ledger(ledger)[winner_side]),
+        },
+    }
+    return normalize_committee_read(candidate, flipped), f"committee_read_{str(read_label).lower()}_evidence_ledger_override"
 
 
 def run_blind_read_a(
@@ -1290,7 +1527,6 @@ def read_b_selection_details(candidate: dict, read_a: dict) -> list[str]:
     """
     details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
     escalated_summary = candidate.get("escalated_summary") if isinstance(candidate.get("escalated_summary"), dict) else {}
-    prior_winner = str(escalated_summary.get("winner") or "").strip()
     prior_basis = str(escalated_summary.get("decision_basis") or "").strip()
     prior_source = str(escalated_summary.get("adjudication_source") or "").strip()
     prior_cautions = sorted(details.get("escalated_cautions") or [])
@@ -1301,14 +1537,15 @@ def read_b_selection_details(candidate: dict, read_a: dict) -> list[str]:
         read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
     )
     a_cautions = sorted(read_a.get("cautions_applied") or [])
-    return [
+    return evidence_ledger_instruction_lines() + [
         "This is a Read B adversarial polish-trap audit. The prior pairwise decision and Read A are AUDIT TARGETS, not authority.",
         "Key question: Is the current winner winning because of PROOF, or because it is CLEANER / more FORMULAIC?",
         "If proof sufficiency does not survive scrutiny, swap the decision. If interpretation depth does not survive scrutiny, keep the decision.",
         "Do NOT defer to Read A or the prior. Re-read both essays and decide based on the rubric, assignment outline, committee anchors, and texts only.",
         (
-            "Prior pairwise decision (audit target): "
-            f"winner={prior_winner}; basis={prior_basis}; source={prior_source}; cautions={prior_cautions}."
+            "Prior pairwise decision context (audit target, not authority): "
+            f"basis={prior_basis}; source={prior_source}; cautions={prior_cautions}. "
+            "The prior winner is intentionally omitted from this prompt detail; decide from the essays and ledger."
         ),
         (
             "Read A judgment (audit target): "
@@ -1952,6 +2189,10 @@ def run_group_calibration_path(
         calibration = group_calibration_from_fixture(neighborhood, fixtures, index)
         source = "fixture" if calibration is not None else ""
         if calibration is None and live and live_group:
+            progress(
+                f"Group calibration {index + 1}/{max_groups} neighborhood={neighborhood.get('neighborhood_id', '')} students={len(neighborhood.get('student_ids', []))}",
+                enabled=True,
+            )
             calibration = run_group_calibration(
                 neighborhood,
                 rows_by_id,
@@ -1964,6 +2205,10 @@ def run_group_calibration_path(
                 reasoning=reasoning,
                 max_output_tokens=max_output_tokens,
                 committee_anchor=committee_anchor,
+            )
+            progress(
+                f"Group calibration complete neighborhood={neighborhood.get('neighborhood_id', '')} confidence={calibration.get('confidence', '')}",
+                enabled=True,
             )
             source = "live"
         result = {
@@ -2079,7 +2324,7 @@ def placement_context_lines(
     b_checks = normalize_committee_decision_checks(
         read_b.get("decision_checks") if read_b is not None and isinstance(read_b.get("decision_checks"), dict) else {}
     )
-    lines = [
+    lines = evidence_ledger_instruction_lines() + [
         "This is Read C placement calibration. Use cohort context to test whether the pairwise result creates a defensible top/middle/bottom placement.",
         "Do not treat seed rank, Borda, composite score, or prior judgments as authority. Use them only to identify the neighborhood and the consequence of the edge.",
         "If A/B both preserved the prior on a caution_ignored edge, explicitly ask whether they overvalued complete/formulaic proof against stronger literary interpretation.",
@@ -2242,6 +2487,10 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
     if b_checks.get("mechanics_block_meaning") or b_checks.get("completion_floor_applied"):
         return None, "committee_read_b_blocked_by_mechanics_or_completion"
 
+    b_guard_read, b_guard_reason = evidence_ledger_guard_decision(candidate, read_b, read_label="B")
+    if b_guard_read is not None:
+        return b_guard_read, b_guard_reason
+
     b_trap = bool(b_checks.get("polish_trap") or b_checks.get("rougher_but_stronger_latent"))
 
     a_picked_loser = bool(a_winner) and bool(prior_winner) and a_winner != prior_winner
@@ -2302,6 +2551,9 @@ def resolve_a_b_c(
     )
     if c_checks.get("mechanics_block_meaning") or c_checks.get("completion_floor_applied"):
         return None, "committee_read_c_blocked_by_mechanics_or_completion"
+    c_guard_read, c_guard_reason = evidence_ledger_guard_decision(candidate, read_c, read_label="C")
+    if c_guard_read is not None:
+        return c_guard_read, c_guard_reason
     for prior_read in (read_a, read_b):
         if str(prior_read.get("winner") or "").strip() != c_winner:
             continue
@@ -2374,6 +2626,8 @@ def decision_from_committee_read(
         "committee_score": candidate.get("committee_score", 0),
         "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
     }
+    if isinstance(item.get("evidence_ledger_guard"), dict):
+        trace["evidence_ledger_guard"] = item["evidence_ledger_guard"]
     if read_a is not None:
         a_checks = normalize_committee_decision_checks(
             read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
@@ -2459,6 +2713,7 @@ def run_read_a_path(
     read_cap = max(0, int(max_reads))
     read_b_cap = read_cap if max_read_b is None else max(0, int(max_read_b))
     read_c_cap = read_cap if max_read_c is None else max(0, int(max_read_c))
+    read_a_attempt_count = 0
     read_a_count = 0
     read_b_count = 0
     read_c_count = 0
@@ -2480,25 +2735,46 @@ def run_read_a_path(
             "read_b_invoked": False,
             "read_c_invoked": False,
         }
-        if read_cap and read_a_count >= read_cap:
+        if read_cap and read_a_attempt_count >= read_cap:
             record["status"] = "max_reads_exceeded"
             read_results.append(record)
             continue
         read = read_from_fixture(candidate, fixture_by_key)
-        if read is None and live:
-            read = run_blind_read_a(
-                candidate,
-                rows_by_id,
-                texts_by_id,
-                rubric,
-                outline,
-                metadata,
-                model=model,
-                routing=routing,
-                reasoning=reasoning,
-                max_output_tokens=max_output_tokens,
-                anchor_dir=anchor_dir,
-                committee_anchor=committee_anchor,
+        if read is not None:
+            read_a_attempt_count += 1
+        elif live:
+            read_a_attempt_count += 1
+            progress(
+                f"Read A {read_a_attempt_count}/{read_cap or len(ordered_selected)} pair={candidate.get('pair_key', '')}",
+                enabled=True,
+            )
+            try:
+                read = run_blind_read_a(
+                    candidate,
+                    rows_by_id,
+                    texts_by_id,
+                    rubric,
+                    outline,
+                    metadata,
+                    model=model,
+                    routing=routing,
+                    reasoning=reasoning,
+                    max_output_tokens=max_output_tokens,
+                    anchor_dir=anchor_dir,
+                    committee_anchor=committee_anchor,
+                )
+            except Exception as exc:
+                record["status"] = "read_a_error"
+                record["error"] = str(exc)
+                progress(
+                    f"Read A error pair={candidate.get('pair_key', '')}: {str(exc)[:240]}",
+                    enabled=True,
+                )
+                read_results.append(record)
+                continue
+            progress(
+                f"Read A complete pair={candidate.get('pair_key', '')} winner={read.get('winner', '')} confidence={read.get('confidence', '')}",
+                enabled=True,
             )
         if read is None:
             record["status"] = "not_read"
@@ -2515,6 +2791,23 @@ def run_read_a_path(
                 "read_a_override_reason": reason_a,
             }
         )
+        ledger_guard_read, ledger_guard_reason = evidence_ledger_guard_decision(candidate, read, read_label="A")
+        record["evidence_ledger_guard_reason"] = ledger_guard_reason
+        record["evidence_ledger_guard_emitted"] = bool(ledger_guard_read)
+        if ledger_guard_read is not None:
+            record["status"] = ledger_guard_reason
+            record["override_emitted"] = True
+            record["ledger_guard_read"] = ledger_guard_read
+            decisions.append(
+                decision_from_committee_read(
+                    candidate,
+                    ledger_guard_read,
+                    ledger_guard_reason,
+                    read_a=read,
+                )
+            )
+            read_results.append(record)
+            continue
 
         # Decide whether Read B should audit this pair.
         should_run_b, b_invocation_reason = should_invoke_read_b(candidate, read)
@@ -2529,21 +2822,37 @@ def run_read_a_path(
                 read_b_skipped_cap += 1
                 record["read_b_status"] = "max_read_b_exceeded"
             else:
-                read_b = run_blind_read_b(
-                    candidate,
-                    read,
-                    rows_by_id,
-                    texts_by_id,
-                    rubric,
-                    outline,
-                    metadata,
-                    model=model,
-                    routing=routing,
-                    reasoning=reasoning,
-                    max_output_tokens=max_output_tokens,
-                    anchor_dir=anchor_dir,
-                    committee_anchor=committee_anchor,
+                progress(
+                    f"Read B {read_b_count + 1}/{read_b_cap or read_cap or len(ordered_selected)} pair={candidate.get('pair_key', '')} reason={b_invocation_reason}",
+                    enabled=True,
                 )
+                try:
+                    read_b = run_blind_read_b(
+                        candidate,
+                        read,
+                        rows_by_id,
+                        texts_by_id,
+                        rubric,
+                        outline,
+                        metadata,
+                        model=model,
+                        routing=routing,
+                        reasoning=reasoning,
+                        max_output_tokens=max_output_tokens,
+                        anchor_dir=anchor_dir,
+                        committee_anchor=committee_anchor,
+                    )
+                    progress(
+                        f"Read B complete pair={candidate.get('pair_key', '')} winner={read_b.get('winner', '')} confidence={read_b.get('confidence', '')}",
+                        enabled=True,
+                    )
+                except Exception as exc:
+                    record["read_b_status"] = "read_b_error"
+                    record["read_b_error"] = str(exc)
+                    progress(
+                        f"Read B error pair={candidate.get('pair_key', '')}: {str(exc)[:240]}",
+                        enabled=True,
+                    )
         elif should_run_b:
             record["read_b_status"] = "not_available"
 
@@ -2567,23 +2876,39 @@ def run_read_a_path(
                     read_c_skipped_cap += 1
                     record["read_c_status"] = "max_read_c_exceeded"
                 else:
-                    read_c = run_placement_read_c(
-                        candidate,
-                        read,
-                        read_b,
-                        ab_reason,
-                        rows_by_id,
-                        texts_by_id,
-                        rubric,
-                        outline,
-                        metadata,
-                        model=model,
-                        routing=routing,
-                        reasoning=reasoning,
-                        max_output_tokens=max_output_tokens,
-                        anchor_dir=anchor_dir,
-                        committee_anchor=committee_anchor,
+                    progress(
+                        f"Read C {read_c_count + 1}/{read_c_cap or read_cap or len(ordered_selected)} pair={candidate.get('pair_key', '')} reason={c_invocation_reason}",
+                        enabled=True,
                     )
+                    try:
+                        read_c = run_placement_read_c(
+                            candidate,
+                            read,
+                            read_b,
+                            ab_reason,
+                            rows_by_id,
+                            texts_by_id,
+                            rubric,
+                            outline,
+                            metadata,
+                            model=model,
+                            routing=routing,
+                            reasoning=reasoning,
+                            max_output_tokens=max_output_tokens,
+                            anchor_dir=anchor_dir,
+                            committee_anchor=committee_anchor,
+                        )
+                        progress(
+                            f"Read C complete pair={candidate.get('pair_key', '')} winner={read_c.get('winner', '')} confidence={read_c.get('confidence', '')}",
+                            enabled=True,
+                        )
+                    except Exception as exc:
+                        record["read_c_status"] = "read_c_error"
+                        record["read_c_error"] = str(exc)
+                        progress(
+                            f"Read C error pair={candidate.get('pair_key', '')}: {str(exc)[:240]}",
+                            enabled=True,
+                        )
             elif decision_read is None and should_run_c:
                 record["read_c_status"] = "not_available"
 
@@ -2630,6 +2955,7 @@ def run_read_a_path(
         "max_reads": read_cap,
         "max_read_b": read_b_cap,
         "max_read_c": read_c_cap,
+        "read_attempt_count": read_a_attempt_count,
         "read_count": read_a_count,
         "read_b_count": read_b_count,
         "read_c_count": read_c_count,
@@ -2637,6 +2963,9 @@ def run_read_a_path(
         "skipped_max_reads": sum(1 for item in read_results if item.get("status") == "max_reads_exceeded"),
         "skipped_max_read_b": read_b_skipped_cap,
         "skipped_max_read_c": read_c_skipped_cap,
+        "read_a_error_count": sum(1 for item in read_results if item.get("status") == "read_a_error"),
+        "read_b_error_count": sum(1 for item in read_results if item.get("read_b_status") == "read_b_error"),
+        "read_c_error_count": sum(1 for item in read_results if item.get("read_c_status") == "read_c_error"),
     }
 
 
@@ -2715,6 +3044,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
         "group_calibration_fixture": str(args.group_calibration_fixture) if args.group_calibration_fixture else "",
+        "live_trace": str(args.live_trace_output),
     }
 
 
@@ -2811,6 +3141,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decisions-output", type=Path, default=Path(DEFAULT_DECISIONS_OUT))
     parser.add_argument("--report-output", type=Path, default=Path(DEFAULT_REPORT_OUT))
     parser.add_argument("--merged-output", type=Path, default=Path(DEFAULT_MERGED_OUT))
+    parser.add_argument("--live-trace-output", type=Path, default=None)
     parser.add_argument("--max-candidates", type=int, default=CandidateConfig.max_candidates)
     parser.add_argument("--max-top-pack", type=int, default=CandidateConfig.max_top_pack)
     parser.add_argument("--max-level-boundary", type=int, default=CandidateConfig.max_level_boundary)
@@ -2836,6 +3167,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.live_trace_output is None:
+        args.live_trace_output = args.decisions_output.with_name(Path(DEFAULT_LIVE_TRACE_OUT).name)
     generated_at = now_iso()
     source_paths = artifact_source_paths(args)
     try:
@@ -2908,6 +3241,7 @@ def main() -> int:
         "max_reads": int(args.max_reads),
         "max_read_b": int(args.max_read_b if args.max_read_b is not None else args.max_reads),
         "max_read_c": int(args.max_read_c if args.max_read_c is not None else args.max_reads),
+        "read_attempt_count": 0,
         "read_count": 0,
         "read_b_count": 0,
         "read_c_count": 0,
@@ -2915,6 +3249,9 @@ def main() -> int:
         "skipped_max_reads": 0,
         "skipped_max_read_b": 0,
         "skipped_max_read_c": 0,
+        "read_a_error_count": 0,
+        "read_b_error_count": 0,
+        "read_c_error_count": 0,
     }
     group_decisions: list[dict] = []
     group_results: list[dict] = []
@@ -3005,6 +3342,23 @@ def main() -> int:
                 "group_calibration": group_summary,
             }
             write_json(args.report_output, report)
+            write_json(
+                args.live_trace_output,
+                {
+                    "generated_at": generated_at,
+                    "phase": "3e",
+                    "passthrough": True,
+                    "source_paths": source_paths,
+                    "enabled": bool(args.live or blind_read_fixture or read_b_fixture or read_c_fixture or group_calibration_fixture),
+                    "error": str(exc),
+                    "read_a": read_a_summary,
+                    "group_calibration": group_summary,
+                    "ledger_guard": {"evaluated_count": 0, "override_count": 0, "statuses": {}},
+                    "read_results": read_a_results,
+                    "group_calibration_results": group_results,
+                    "decision_pair_keys": [],
+                },
+            )
             return 1
     decisions = manual_decisions + read_a_decisions + group_decisions
     merged_payload = merged_checks_payload(
@@ -3060,6 +3414,30 @@ def main() -> int:
         "read_a_results": read_a_results,
         "group_calibration": group_summary,
         "group_calibration_results": group_results,
+    }
+    ledger_guard_statuses = Counter(
+        str(record.get("evidence_ledger_guard_reason") or "not_evaluated")
+        for record in read_a_results
+        if isinstance(record, dict)
+    )
+    live_trace_payload = {
+        "generated_at": generated_at,
+        "phase": "3e",
+        "passthrough": passthrough,
+        "source_paths": source_paths,
+        "enabled": bool(read_a_summary.get("enabled") or group_summary.get("enabled")),
+        "read_a": read_a_summary,
+        "read_b": decisions_payload["read_b"],
+        "read_c": decisions_payload["read_c"],
+        "group_calibration": group_summary,
+        "ledger_guard": {
+            "evaluated_count": sum(1 for record in read_a_results if isinstance(record, dict) and "evidence_ledger_guard_reason" in record),
+            "override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("evidence_ledger_guard_emitted")),
+            "statuses": dict(sorted(ledger_guard_statuses.items())),
+        },
+        "read_results": read_a_results,
+        "group_calibration_results": group_results,
+        "decision_pair_keys": [decision.get("pair_key", "") for decision in normalized_decisions],
     }
     trigger_counts = Counter()
     bucket_counts = Counter()
@@ -3122,11 +3500,13 @@ def main() -> int:
         "read_a": read_a_summary,
         "read_b": decisions_payload["read_b"],
         "read_c": decisions_payload["read_c"],
+        "ledger_guard": live_trace_payload["ledger_guard"],
         "group_calibration": group_summary,
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)
     write_json(args.decisions_output, decisions_payload)
+    write_json(args.live_trace_output, live_trace_payload)
     write_json(args.report_output, report_payload)
     write_json(args.merged_output, merged_payload)
     return 0
