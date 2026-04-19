@@ -1038,3 +1038,568 @@ def test_main_returns_1_when_escalated_file_missing(tmp_path, monkeypatch):
     )
     assert cer.main() == 1
     assert "not found" in json.loads(report.read_text(encoding="utf-8"))["error"]
+
+
+# -----------------------------------------------------------------------------
+# Phase 3a: multi-read (Read A + Read B polish-trap auditor) + residual-first
+# read priority
+# -----------------------------------------------------------------------------
+
+
+def _build_ghost_candidates():
+    """Build the full Phase 2a candidate list for the Ghost residual cohort."""
+    return cer.build_candidates(
+        escalated_checks=ghost_residual_payload()["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+
+
+def _get_candidate(candidates, pair_key):
+    return next(c for c in candidates if c["pair_key"] == pair_key)
+
+
+def _read_a_from_fixture(candidate, fixture_name="ghost_residual_blind_reads.json"):
+    fixture = cer.load_blind_read_fixture(FIXTURE_DIR / fixture_name)
+    return cer.read_from_fixture(candidate, fixture)
+
+
+def _make_read(candidate, *, winner, confidence="high", cautions=None, **checks):
+    defaults = {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+    defaults.update(checks)
+    return cer.normalize_committee_read(
+        candidate,
+        {
+            "winner": winner,
+            "confidence": confidence,
+            "decision_basis": "content_reasoning",
+            "cautions_applied": list(cautions or []),
+            "decision_checks": defaults,
+        },
+    )
+
+
+def test_phase3a_read_priority_polished_but_shallow_keep_is_tier_0():
+    candidates = _build_ghost_candidates()
+    # s003::s013: cheap_pairwise + polished_but_shallow caution + KEEP → Tier 0
+    tier_polish = cer.committee_read_priority(_get_candidate(candidates, "s003::s013"))[0]
+    assert tier_polish == 0
+    # s009::s015: escalated + formulaic_but_thin caution + KEEP → Tier 0 (either polish_like caution qualifies)
+    tier_formulaic = cer.committee_read_priority(_get_candidate(candidates, "s009::s015"))[0]
+    assert tier_formulaic == 0
+
+
+def test_phase3a_read_priority_non_escalated_caution_is_tier_1():
+    candidates = _build_ghost_candidates()
+    # s004::s008: cheap_pairwise + rougher_but_stronger_content + KEEP → Tier 1 (not polish-like caution)
+    tier_keep = cer.committee_read_priority(_get_candidate(candidates, "s004::s008"))[0]
+    assert tier_keep == 1
+    # s019::s022: orientation_audit + rougher_but_stronger_content + SWAP → Tier 1 (non-escalated SWAP)
+    tier_swap = cer.committee_read_priority(_get_candidate(candidates, "s019::s022"))[0]
+    assert tier_swap == 1
+
+
+def test_phase3a_read_priority_surface_inversion_without_polish_caution_is_tier_2():
+    """A candidate with surface_substance_inversion but no polish/rougher caution and
+    an escalated source should land in Tier 2 (not Tier 0/1).
+    """
+    check = {
+        "pair": ["s015", "s009"],
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 1, "lower_rank": 9},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "winner": "s015",
+        "loser": "s009",
+        "confidence": "medium",
+        "decision_basis": "content_reasoning",
+        "cautions_applied": [],
+        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = _get_candidate(candidates, "s009::s015")
+    assert "surface_substance_inversion" in candidate["triggers"]
+    assert not (set(candidate["trigger_details"]["escalated_cautions"]) & cer.POLISH_LIKE_CAUTIONS)
+    assert cer.committee_read_priority(candidate)[0] == 2
+
+
+def test_phase3a_read_priority_escalated_non_polish_caution_is_tier_3():
+    """s003::s009: escalated source + incomplete_or_scaffold + no surface inversion
+    → should fall to Tier 3 (remaining caution_ignored)."""
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s003::s009")
+    cautions = set(candidate["trigger_details"]["escalated_cautions"])
+    # Precondition: not a polish-like caution, not surface inversion.
+    assert not (cautions & cer.POLISH_LIKE_CAUTIONS)
+    assert "surface_substance_inversion" not in candidate["triggers"]
+    assert cer.committee_read_priority(candidate)[0] == 3
+
+
+def test_phase3a_read_priority_non_caution_ignored_bucket_is_tier_4():
+    synthetic = {
+        "pair_key": "a::b",
+        "bucket": "top_pack",
+        "committee_score": 120,
+        "seed_order": {"higher_rank": 1, "lower_rank": 2},
+        "triggers": ["top10_or_boundary"],
+        "trigger_details": {"winner_source": "escalated_adjudication", "keep_decision": True},
+    }
+    assert cer.committee_read_priority(synthetic)[0] == 4
+
+
+def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_path, monkeypatch):
+    """Acceptance: given a synthetic cohort where 5 residual-shaped pairs share the
+    priority space with 15 non-residual caution_ignored fillers, --max-reads 12
+    must read all five residual-shaped pairs. The priority function uses only
+    structural signals (cautions, source, decision, SSI trigger); no Ghost IDs.
+    """
+    residuals = _build_ghost_candidates()
+    # Synthetic filler candidates: caution_ignored bucket, Tier 3 (escalated
+    # source, no polish-like caution, no SSI, KEEP). Scored below the residual
+    # scores so they do not starve the residual reads even when sorted by tier.
+    fillers = []
+    for i in range(15):
+        pair_key = f"f{i:02d}a::f{i:02d}b"
+        fillers.append(
+            {
+                "pair": [f"f{i:02d}a", f"f{i:02d}b"],
+                "pair_key": pair_key,
+                "bucket": "caution_ignored",
+                "committee_score": 75,
+                "caution_ignored_priority_tier": 3,
+                "triggers": ["caution_raised_but_ignored_rougher_stronger"],
+                "seed_order": {
+                    "higher": f"f{i:02d}a",
+                    "lower": f"f{i:02d}b",
+                    "higher_rank": 100 + i,
+                    "lower_rank": 120 + i,
+                },
+                "trigger_details": {
+                    "winner_source": "escalated_adjudication",
+                    "escalated_cautions": ["incomplete_or_scaffold"],
+                    "keep_decision": True,
+                    "surface_substance_inversion_log": None,
+                },
+                "escalated_summary": {
+                    "winner": f"f{i:02d}a",
+                    "loser": f"f{i:02d}b",
+                    "winner_side": "A",
+                    "decision": "KEEP",
+                    "confidence": "high",
+                    "decision_basis": "content_reasoning",
+                    "adjudication_source": "escalated_adjudication",
+                },
+                "selection_status": "selected",
+                "selection_reasons": [],
+                "surface_features": {"winner": {}, "loser": {}, "gap": {}},
+                "skip_reason": "",
+            }
+        )
+    selected = residuals + fillers
+    ordered = sorted(selected, key=cer.committee_read_priority)
+    top_12_pair_keys = {c["pair_key"] for c in ordered[:12]}
+    for pk in GHOST_RESIDUAL_PAIR_KEYS:
+        assert pk in top_12_pair_keys, f"residual {pk} not in top 12 reads"
+
+
+def test_phase3a_should_invoke_read_b_on_a_concur_with_caution_ignored():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    # A concurs with the prior winner (s015) → B must audit because bucket = caution_ignored
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_a_concurred_on_caution_ignored"
+
+
+def test_phase3a_should_invoke_read_b_on_interp_vs_proof_split():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s019::s022")
+    # s019::s022: seed.higher=s022 (A side), seed.lower=s019 (B side). Prior winner=s019.
+    # A picks the LOSER per prior (s022) → no concur, so check (1) does not fire.
+    # A's own checks show interp favors loser (B=s019) and proof favors winner (A=s022) —
+    # the classic polish-trap signature: the pick "wins on proof" but lacks interpretive depth.
+    # Escalated cautions include rougher_but_stronger_content (NOT polish-like),
+    # so check (3) won't pre-empt check (2).
+    read_a = _make_read(
+        candidate,
+        winner="s022",
+        confidence="medium",
+        interpretation_depth="B",  # loser side for A.winner=s022
+        proof_sufficiency="A",  # winner side for A.winner=s022
+    )
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_interp_vs_proof_split"
+
+
+def test_phase3a_should_invoke_read_b_on_polish_like_caution_present_in_escalated():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s003::s013")  # escalated_cautions includes polished_but_shallow
+    read_a = _make_read(candidate, winner="s013", confidence="high")
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_polish_like_caution_raised"
+
+
+def test_phase3a_should_invoke_read_b_on_rougher_latent_without_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s003::s009")
+    # A flagged rougher_but_stronger_latent but was LOW conf → Phase 2b gate does not fire
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="low",  # blocks Phase 2b override even with trap signal
+        rougher_but_stronger_latent=True,
+    )
+    # Preconditions for the test.
+    assert cer.read_a_override_decision(candidate, read_a)[0] is False
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_rougher_latent_without_override"
+
+
+def test_phase3a_should_not_invoke_read_b_when_a_high_conf_clean_interp_to_winner():
+    """When A is high conf, interpretation favors winner, and no polish caution is
+    present anywhere, Read B should not audit (A already settled the pair clean).
+    """
+    candidates = _build_ghost_candidates()
+    # s019::s022 has escalated_cautions=[rougher_but_stronger_content] (not polish-like).
+    candidate = _get_candidate(candidates, "s019::s022")
+    read_a = _make_read(
+        candidate,
+        winner="s022",  # not the prior winner (s019) → a_picked_loser=True
+        confidence="high",
+        interpretation_depth="A",  # winner_side=A → interp favors winner
+        proof_sufficiency="A",
+        # No polish_trap / rougher_but_stronger_latent / polish_like caution anywhere on A.
+    )
+    # Precondition: A overrides under Phase 2b.
+    assert cer.read_a_override_decision(candidate, read_a)[0] is True
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is False
+    assert reason == "committee_read_b_not_needed"
+
+
+def test_phase3a_resolve_ab_agree_high_conf_emits_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert reason == "committee_read_ab_agree_override"
+    assert decision is read_b
+    assert decision["winner"] == "s009"
+
+
+def test_phase3a_resolve_ab_agree_medium_conf_requires_polish_trap_signal():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high")
+    # Medium without trap → weak agreement
+    read_b_weak = _make_read(candidate, winner="s009", confidence="medium")
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b_weak)
+    assert decision is None
+    assert reason == "committee_read_ab_weak_agreement"
+    # Medium WITH trap → override
+    read_b_trap = _make_read(candidate, winner="s009", confidence="medium", polish_trap=True)
+    decision2, reason2 = cer.resolve_a_b(candidate, read_a, read_b_trap)
+    assert reason2 == "committee_read_ab_agree_override"
+    assert decision2 is read_b_trap
+
+
+def test_phase3a_resolve_ab_agree_low_conf_no_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high")
+    read_b = _make_read(candidate, winner="s009", confidence="low", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_weak_agreement"
+
+
+def test_phase3a_resolve_ab_both_concur_with_prior_no_edge():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")  # concurs with prior
+    read_b = _make_read(candidate, winner="s015")
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_concurred"
+
+
+def test_phase3a_resolve_ab_split_a_loser_b_prior_no_edge():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)  # A overrides
+    read_b = _make_read(candidate, winner="s015", confidence="high", polish_trap=True)  # B reverts
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_split_b_confirms_prior"
+
+
+def test_phase3a_resolve_ab_b_overturns_concur_with_trap_emits_b_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")  # A concurred with prior
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert reason == "committee_read_b_override"
+    assert decision is read_b
+
+
+def test_phase3a_resolve_ab_b_overturns_concur_without_trap_is_ambiguous():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")
+    read_b = _make_read(candidate, winner="s009", confidence="high")  # no trap flagged
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_split_no_trap"
+
+
+def test_phase3a_resolve_ab_completion_floor_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)
+    read_b = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        completion_floor_applied=True,
+    )
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_b_blocked_by_mechanics_or_completion"
+
+
+def test_phase3a_resolve_ab_mechanics_block_meaning_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)
+    read_b = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_b_blocked_by_mechanics_or_completion"
+
+
+def test_phase3a_fixture_ab_all_five_residuals_flip(tmp_path, monkeypatch):
+    """End-to-end: with both A and B fixtures, all five Ghost residual-shaped
+    pairs flip to the loser. Some flip via A+B agreement (polish-like caution),
+    the rest flip via A-only Phase 2b override (B's invocation conditions not met).
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_read_b.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    # All five residual pairs have an override edge.
+    assert len(committee_items) == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    # Read A was called at least for all 5; Read B ran for at least the 2 pairs
+    # where polish-like cautions trigger invocation (s009::s015 formulaic_but_thin,
+    # s003::s013 polished_but_shallow). The other 3 go via A-only.
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["read_b_count"] >= 2
+    assert decisions["read_a"]["override_count"] == 5
+    # At least the A+B confirmed overrides are tagged phase=3a.
+    phase_3a_items = [
+        item for item in committee_items
+        if str(item.get("model_metadata", {}).get("phase", "")) == "3a"
+    ]
+    assert len(phase_3a_items) >= 2
+    for item in phase_3a_items:
+        assert item["model_metadata"]["committee_read"] == "A+B"
+        assert "read_a" in item["committee_edge_trace"]
+        assert "read_b" in item["committee_edge_trace"]
+
+
+def test_phase3a_passthrough_preserved_without_fixtures_or_live(tmp_path, monkeypatch):
+    """Default (no --live, no fixtures) still yields byte-identical passthrough."""
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    payload = ghost_residual_payload()
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["read_a"]["read_b_fixture"] is False
+    assert decisions["decisions"] == []
+
+
+def test_phase3a_a_only_fixture_without_b_still_overrides_via_phase2b(tmp_path, monkeypatch):
+    """With only --blind-read-fixture (no --read-b-fixture), Phase 2b A-only
+    behavior stands. Confirms Phase 3a does not disrupt Phase 2b runs and that
+    `read_b_count` is 0.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert decisions["read_a"]["read_b_fixture"] is False
+    assert decisions["read_a"]["read_b_count"] == 0
+    # Phase 2b A-only still emits 5 overrides on the Ghost residual fixture.
+    assert decisions["read_a"]["override_count"] == 5

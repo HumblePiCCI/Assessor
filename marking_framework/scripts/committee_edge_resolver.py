@@ -811,6 +811,56 @@ def candidate_priority(candidate: dict) -> tuple[int, int, int, int, str]:
     )
 
 
+def committee_read_priority(candidate: dict) -> tuple[int, int, int, int, str]:
+    """Per-read bucket reservation for Phase 3a.
+
+    Distinct from `candidate_priority` (which drives selection into the budget).
+    This function orders already-selected candidates for the order they are
+    *read* by the committee. The goal: residual-shaped pairs (polish-trap
+    patterns) are read first, regardless of how they placed in generic bucket
+    selection, so a tight --max-reads budget does not starve the high-signal
+    pairs.
+
+    Read-tiers (lower = earlier read):
+      0: caution_ignored + polished_but_shallow / formulaic_but_thin caution + KEEP
+         (rarest, highest-signal polish trap — the caution was explicitly raised
+         and the judge still kept the surface-clean winner)
+      1: caution_ignored + non-escalated source (cheap_pairwise, orientation_audit)
+         + polish-like or rougher-stronger caution (the non-escalated layer
+         flagged the pair but did not route it to escalation; high leverage)
+      2: caution_ignored + surface_substance_inversion trigger fired (gap
+         geometry shows polish-over-substance even without an explicit caution)
+      3: remaining caution_ignored candidates
+      4: everything else
+    """
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    triggers = set(candidate.get("triggers") or [])
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    bucket = str(candidate.get("bucket") or "other")
+    cautions = set(details.get("escalated_cautions") or [])
+    source = str(details.get("winner_source") or "")
+    keep_decision = bool(details.get("keep_decision"))
+    non_escalated = source in NON_ESCALATED_SOURCES
+
+    read_tier = 4
+    if bucket == "caution_ignored":
+        read_tier = 3
+        if (cautions & POLISH_LIKE_CAUTIONS) and keep_decision:
+            read_tier = 0
+        elif non_escalated and (cautions & (POLISH_LIKE_CAUTIONS | ROUGHER_STRONGER_CAUTIONS)):
+            read_tier = 1
+        elif "surface_substance_inversion" in triggers:
+            read_tier = 2
+
+    return (
+        read_tier,
+        -int(candidate.get("committee_score", 0) or 0),
+        int(seed_order.get("higher_rank", 999999) or 999999),
+        int(seed_order.get("lower_rank", 999999) or 999999),
+        str(candidate.get("pair_key") or ""),
+    )
+
+
 def select_within_budget(
     candidates: list[dict], *, config: CandidateConfig
 ) -> tuple[list[dict], list[dict], dict]:
@@ -1028,29 +1078,301 @@ def read_a_override_decision(candidate: dict, read: dict) -> tuple[bool, str]:
     return False, "committee_read_a_inconclusive"
 
 
-def decision_from_committee_read(candidate: dict, read: dict, reason: str) -> dict:
+def should_invoke_read_b(candidate: dict, read_a: dict) -> tuple[bool, str]:
+    """Phase 3a: decide whether the polish-trap auditor (Read B) should run.
+
+    Read B is invoked when ANY of these signals is present in Read A or the
+    candidate — each indicates the pair is at real risk of a polish trap that
+    a second, adversarial read should audit:
+
+      1. A concurred with the prior winner AND the pair is caution_ignored
+         (the high-leverage bucket; we do not want A-only concurrence to settle
+         residual-shaped pairs).
+      2. A's decision_checks show interpretation_depth favoring the loser but
+         proof_sufficiency favoring the winner — the classic polish-trap
+         signature: "clean proof, shallow thinking".
+      3. A's cautions_applied (or the candidate's escalated_cautions) include
+         polished_but_shallow or formulaic_but_thin.
+      4. A's decision_checks flagged rougher_but_stronger_latent=True but the
+         Phase 2b override gate did not fire (e.g. A was low confidence).
+
+    Returns (should_run, reason).
+    """
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    read_winner = str(read_a.get("winner") or "").strip()
+    if not prior_winner or not read_winner:
+        return False, "committee_read_b_not_invoked_incomplete_a"
+
+    bucket = str(candidate.get("bucket") or "other")
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    escalated_cautions = set(details.get("escalated_cautions") or [])
+    a_checks = normalize_committee_decision_checks(
+        read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
+    )
+    a_cautions = set(read_a.get("cautions_applied") or [])
+
+    # (1) concur on caution_ignored
+    a_concurred = read_winner == prior_winner
+    if a_concurred and bucket == "caution_ignored":
+        return True, "committee_read_b_a_concurred_on_caution_ignored"
+
+    # (2) interpretation favors loser BUT proof favors winner (polish trap signature)
+    winner_side = normalize_winner_side(read_a.get("winner_side"))
+    loser_side = "B" if winner_side == "A" else "A" if winner_side == "B" else ""
+    interp_side = vc.normalize_side(a_checks.get("interpretation_depth"))
+    proof_side = vc.normalize_side(a_checks.get("proof_sufficiency"))
+    if (
+        winner_side
+        and loser_side
+        and interp_side == loser_side
+        and proof_side == winner_side
+    ):
+        return True, "committee_read_b_interp_vs_proof_split"
+
+    # (3) polish-like caution raised anywhere
+    if (a_cautions | escalated_cautions) & POLISH_LIKE_CAUTIONS:
+        return True, "committee_read_b_polish_like_caution_raised"
+
+    # (4) rougher_but_stronger_latent=True but A did not override
+    a_override, _ = read_a_override_decision(candidate, read_a)
+    if bool(a_checks.get("rougher_but_stronger_latent")) and not a_override:
+        return True, "committee_read_b_rougher_latent_without_override"
+
+    return False, "committee_read_b_not_needed"
+
+
+def read_b_selection_details(candidate: dict, read_a: dict) -> list[str]:
+    """Adversarial prompt bits for Read B.
+
+    Read B receives Read A and the prior pairwise decision as AUDIT TARGETS —
+    not as authorities. The prompt frames B's task as answering a single
+    adversarial question: is the current winner winning because of proof, or
+    because it is cleaner / more formulaic?
+    """
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    escalated_summary = candidate.get("escalated_summary") if isinstance(candidate.get("escalated_summary"), dict) else {}
+    prior_winner = str(escalated_summary.get("winner") or "").strip()
+    prior_basis = str(escalated_summary.get("decision_basis") or "").strip()
+    prior_source = str(escalated_summary.get("adjudication_source") or "").strip()
+    prior_cautions = sorted(details.get("escalated_cautions") or [])
+    a_winner = str(read_a.get("winner") or "").strip()
+    a_basis = str(read_a.get("decision_basis") or "").strip()
+    a_confidence = str(read_a.get("confidence") or "").strip()
+    a_checks = normalize_committee_decision_checks(
+        read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
+    )
+    a_cautions = sorted(read_a.get("cautions_applied") or [])
+    return [
+        "This is a Read B adversarial polish-trap audit. The prior pairwise decision and Read A are AUDIT TARGETS, not authority.",
+        "Key question: Is the current winner winning because of PROOF, or because it is CLEANER / more FORMULAIC?",
+        "If proof sufficiency does not survive scrutiny, swap the decision. If interpretation depth does not survive scrutiny, keep the decision.",
+        "Do NOT defer to Read A or the prior. Re-read both essays and decide based on the rubric, assignment outline, committee anchors, and texts only.",
+        (
+            "Prior pairwise decision (audit target): "
+            f"winner={prior_winner}; basis={prior_basis}; source={prior_source}; cautions={prior_cautions}."
+        ),
+        (
+            "Read A judgment (audit target): "
+            f"winner={a_winner}; basis={a_basis}; confidence={a_confidence}; cautions={a_cautions}; "
+            f"interpretation_depth={a_checks.get('interpretation_depth') or 'tie'}; "
+            f"proof_sufficiency={a_checks.get('proof_sufficiency') or 'tie'}; "
+            f"polish_trap={bool(a_checks.get('polish_trap'))}; "
+            f"rougher_but_stronger_latent={bool(a_checks.get('rougher_but_stronger_latent'))}."
+        ),
+    ]
+
+
+def run_blind_read_b(
+    candidate: dict,
+    read_a: dict,
+    rows_by_id: dict[str, dict],
+    texts: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    anchor_dir: Path,
+    committee_anchor: Path,
+) -> dict:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_id = str(seed_order.get("higher", "") or "").strip()
+    lower_id = str(seed_order.get("lower", "") or "").strip()
+    if higher_id not in rows_by_id or lower_id not in rows_by_id:
+        raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for Read B")
+    selection_details = (
+        committee_anchor_selection_details(committee_anchor)
+        + read_b_selection_details(candidate, read_a)
+    )
+    judgment = vc.judge_pair_with_orientation_audit(
+        rubric,
+        outline,
+        rows_by_id[higher_id],
+        rows_by_id[lower_id],
+        texts.get(higher_id, ""),
+        texts.get(lower_id, ""),
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        metadata=metadata,
+        selection_reasons=["committee_edge_read_b_polish_trap_audit"],
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+        # Orientation audit is off: the adversarial framing already reverses
+        # the "whose winner is correct" test; a second orientation flip on top
+        # would scramble the audit signal.
+        orientation_audit=False,
+        student_count=len(rows_by_id),
+        response_format=COMMITTEE_RESPONSE_FORMAT,
+    )
+    read = normalize_committee_read(candidate, judgment)
+    metadata_out = dict(read.get("model_metadata") or {})
+    metadata_out["committee_read"] = "B-polish-trap-audit"
+    metadata_out["adjudication_source"] = "committee_read_b"
+    read["model_metadata"] = metadata_out
+    return read
+
+
+def read_b_from_fixture(candidate: dict, fixture_by_key: dict[str, dict]) -> dict | None:
+    key = str(candidate.get("pair_key") or "").strip()
+    if key not in fixture_by_key:
+        return None
+    read = normalize_committee_read(candidate, fixture_by_key[key])
+    metadata = dict(read.get("model_metadata") or {})
+    metadata["committee_read"] = "B-polish-trap-audit"
+    metadata["adjudication_source"] = "committee_read_b"
+    read["model_metadata"] = metadata
+    return read
+
+
+def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | None, str]:
+    """Apply the Phase 3a A+B resolution rule.
+
+    Returns (decision_read_or_None, reason). When the first element is not
+    None it is the committee read (A or B) that should be emitted as the
+    override edge. When None, no edge is emitted.
+
+    Rules:
+      - B blocks first: if B's decision_checks flag mechanics_block_meaning or
+        completion_floor_applied, no override is emitted.
+      - A and B agree on the loser → emit B override (high conf unconditional;
+        medium conf only when polish_trap or rougher_but_stronger_latent is set).
+        Low conf never emits even on agreement: A+B must stand on confidence.
+      - A and B agree on the prior → concurrence, no edge.
+      - A picked loser, B reverted to prior → split; no edge.
+      - A picked prior, B picked loser → B overturns A:
+          * emit B override only when B confidence is high AND B flagged
+            polish_trap or rougher_but_stronger_latent.
+          * Otherwise split (no trap / weak B), no edge.
+    """
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    a_winner = str(read_a.get("winner") or "").strip()
+    b_winner = str(read_b.get("winner") or "").strip()
+    b_checks = normalize_committee_decision_checks(
+        read_b.get("decision_checks") if isinstance(read_b.get("decision_checks"), dict) else {}
+    )
+    b_conf = vc.normalize_confidence(read_b.get("confidence"))
+
+    if b_checks.get("mechanics_block_meaning") or b_checks.get("completion_floor_applied"):
+        return None, "committee_read_b_blocked_by_mechanics_or_completion"
+
+    b_trap = bool(b_checks.get("polish_trap") or b_checks.get("rougher_but_stronger_latent"))
+
+    a_picked_loser = bool(a_winner) and bool(prior_winner) and a_winner != prior_winner
+    b_picked_loser = bool(b_winner) and bool(prior_winner) and b_winner != prior_winner
+
+    if a_picked_loser and b_picked_loser and a_winner == b_winner:
+        if b_conf == "high":
+            return read_b, "committee_read_ab_agree_override"
+        if b_conf == "medium" and b_trap:
+            return read_b, "committee_read_ab_agree_override"
+        return None, "committee_read_ab_weak_agreement"
+
+    if not a_picked_loser and not b_picked_loser:
+        return None, "committee_read_ab_concurred"
+
+    if a_picked_loser and not b_picked_loser:
+        # A wanted to override, B reverts to the prior winner → no edge.
+        return None, "committee_read_ab_split_b_confirms_prior"
+
+    # A picked prior, B overturns to loser.
+    if b_conf == "high" and b_trap:
+        return read_b, "committee_read_b_override"
+    return None, "committee_read_ab_split_no_trap"
+
+
+def decision_from_committee_read(
+    candidate: dict,
+    read: dict,
+    reason: str,
+    *,
+    read_a: dict | None = None,
+    read_b: dict | None = None,
+) -> dict:
     item = copy.deepcopy(read)
     metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
     metadata = dict(metadata)
+    # Determine which read produced the override (for metadata tagging).
+    source_read_label = str(metadata.get("committee_read") or "A-blind")
+    committee_read_label = source_read_label
+    phase_label = "2b"
+    confidence_label_prefix = "read_a"
+    if read_b is not None and read is read_b:
+        committee_read_label = "A+B"
+        phase_label = "3a"
+        confidence_label_prefix = "read_b"
+    elif read_a is not None and read_b is not None and read is read_a:
+        # A's read chosen as the emit payload, but A+B both ran (should not
+        # normally happen under resolve_a_b, which emits B's read; kept for
+        # flexibility).
+        committee_read_label = "A+B"
+        phase_label = "3a"
+        confidence_label_prefix = "read_a"
     metadata.update(
         {
             "adjudication_source": "committee_edge",
-            "committee_read": "A-blind",
+            "committee_read": committee_read_label,
             "committee_override_reason": reason,
             "supersedes_pair_key": candidate.get("pair_key", ""),
-            "phase": "2b",
+            "phase": phase_label,
         }
     )
     item["model_metadata"] = metadata
     item["adjudication_source"] = "committee_edge"
-    item["committee_confidence"] = f"read_a_{vc.normalize_confidence(item.get('confidence'))}"
-    item["committee_edge_trace"] = {
-        "read": "A-blind",
+    item["committee_confidence"] = f"{confidence_label_prefix}_{vc.normalize_confidence(item.get('confidence'))}"
+    trace = {
+        "read": committee_read_label,
         "override_reason": reason,
         "triggers": list(candidate.get("triggers", [])),
         "committee_score": candidate.get("committee_score", 0),
         "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
     }
+    if read_a is not None:
+        a_checks = normalize_committee_decision_checks(
+            read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
+        )
+        trace["read_a"] = {
+            "winner": read_a.get("winner", ""),
+            "confidence": vc.normalize_confidence(read_a.get("confidence")),
+            "polish_trap": bool(a_checks.get("polish_trap")),
+            "rougher_but_stronger_latent": bool(a_checks.get("rougher_but_stronger_latent")),
+        }
+    if read_b is not None:
+        b_checks = normalize_committee_decision_checks(
+            read_b.get("decision_checks") if isinstance(read_b.get("decision_checks"), dict) else {}
+        )
+        trace["read_b"] = {
+            "winner": read_b.get("winner", ""),
+            "confidence": vc.normalize_confidence(read_b.get("confidence")),
+            "polish_trap": bool(b_checks.get("polish_trap")),
+            "rougher_but_stronger_latent": bool(b_checks.get("rougher_but_stronger_latent")),
+        }
+    item["committee_edge_trace"] = trace
     return item
 
 
@@ -1071,21 +1393,48 @@ def run_read_a_path(
     max_reads: int,
     live: bool,
     fixture_by_key: dict[str, dict],
+    read_b_fixture: dict[str, dict] | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
+    """Run the committee read path.
+
+    Phase 2b shipped this as single-read (A-only). Phase 3a extends it to
+    multi-read with an optional polish-trap auditor (Read B). Selection of
+    read order now uses `committee_read_priority` so residual-shaped pairs
+    are read first regardless of the upstream bucket ordering.
+
+    Behavior:
+      - Always sorts `selected` by `committee_read_priority` before reading.
+      - Runs Read A via `fixture_by_key` (if present) or via the live judge
+        when `live=True`. If neither produces a read, records `not_read`.
+      - If `read_b_fixture` is provided AND `should_invoke_read_b` fires for
+        this pair, attempts to load Read B from fixture and applies
+        `resolve_a_b` to decide whether to emit an override.
+      - Otherwise falls back to Phase 2b A-only override gate.
+
+    Live Read B is intentionally NOT triggered here in Phase 3a; fixture-only
+    lets us validate A+B resolution offline before enabling live B calls.
+    """
     rows_by_id = {row["student_id"]: row for row in vc.prepare_rows(rows)}
-    read_results = []
-    decisions = []
+    read_results: list[dict] = []
+    decisions: list[dict] = []
     read_cap = max(0, int(max_reads))
-    read_count = 0
-    for candidate in selected:
+    read_a_count = 0
+    read_b_count = 0
+    b_fixture = read_b_fixture or {}
+    # Phase 3a: read order is set by per-read priority, not the selection order.
+    ordered_selected = sorted(selected, key=committee_read_priority)
+    for candidate in ordered_selected:
+        read_tier = committee_read_priority(candidate)[0]
         record = {
             "pair_key": candidate.get("pair_key", ""),
             "bucket": candidate.get("bucket", ""),
             "committee_score": candidate.get("committee_score", 0),
+            "read_priority_tier": read_tier,
             "status": "",
             "override_emitted": False,
+            "read_b_invoked": False,
         }
-        if read_cap and read_count >= read_cap:
+        if read_cap and read_a_count >= read_cap:
             record["status"] = "max_reads_exceeded"
             read_results.append(record)
             continue
@@ -1109,26 +1458,62 @@ def run_read_a_path(
             record["status"] = "not_read"
             read_results.append(record)
             continue
-        read_count += 1
-        should_override, reason = read_a_override_decision(candidate, read)
+        read_a_count += 1
+        should_override_a, reason_a = read_a_override_decision(candidate, read)
         record.update(
             {
-                "status": reason,
                 "read": read,
-                "override_emitted": bool(should_override),
                 "read_winner": read.get("winner", ""),
                 "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
+                "read_a_override_candidate": bool(should_override_a),
+                "read_a_override_reason": reason_a,
             }
         )
-        if should_override:
-            decisions.append(decision_from_committee_read(candidate, read, reason))
+
+        # Decide whether Read B should audit this pair.
+        should_run_b, b_invocation_reason = should_invoke_read_b(candidate, read)
+        record["read_b_invocation_reason"] = b_invocation_reason
+        read_b = None
+        if should_run_b and b_fixture:
+            read_b = read_b_from_fixture(candidate, b_fixture)
+            # Live Read B is intentionally not wired in Phase 3a — fixture only.
+
+        if read_b is not None:
+            read_b_count += 1
+            record["read_b_invoked"] = True
+            record["read_b"] = read_b
+            record["read_b_winner"] = read_b.get("winner", "")
+            decision_read, ab_reason = resolve_a_b(candidate, read, read_b)
+            record["status"] = ab_reason
+            record["override_emitted"] = decision_read is not None
+            if decision_read is not None:
+                decisions.append(
+                    decision_from_committee_read(
+                        candidate,
+                        decision_read,
+                        ab_reason,
+                        read_a=read,
+                        read_b=read_b,
+                    )
+                )
+            read_results.append(record)
+            continue
+
+        # Read B was not invoked (condition did not fire, or no fixture entry
+        # available): fall back to Phase 2b A-only override gate.
+        record["status"] = reason_a
+        record["override_emitted"] = bool(should_override_a)
+        if should_override_a:
+            decisions.append(decision_from_committee_read(candidate, read, reason_a))
         read_results.append(record)
     return decisions, read_results, {
-        "enabled": bool(live or fixture_by_key),
+        "enabled": bool(live or fixture_by_key or b_fixture),
         "live": bool(live),
         "fixture": bool(fixture_by_key),
+        "read_b_fixture": bool(b_fixture),
         "max_reads": read_cap,
-        "read_count": read_count,
+        "read_count": read_a_count,
+        "read_b_count": read_b_count,
         "override_count": len(decisions),
         "skipped_max_reads": sum(1 for item in read_results if item.get("status") == "max_reads_exceeded"),
     }
@@ -1206,6 +1591,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "routing": str(args.routing),
         "committee_anchor": str(args.committee_anchor),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
+        "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
     }
 
 
@@ -1222,6 +1608,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--texts", type=Path, default=Path(DEFAULT_TEXTS))
     parser.add_argument("--decisions", type=Path, default=None, help="Optional Phase 1 fixture/manual committee decisions JSON.")
     parser.add_argument("--blind-read-fixture", type=Path, default=None, help="Optional offline Read-A fixture keyed by pair_key; no model call.")
+    parser.add_argument(
+        "--read-b-fixture",
+        type=Path,
+        default=None,
+        help=(
+            "Optional offline Read-B (polish-trap auditor) fixture keyed by pair_key. "
+            "Phase 3a multi-read: when provided, eligible candidates are audited by "
+            "Read B and A+B resolution rules decide whether to emit an override."
+        ),
+    )
     parser.add_argument("--live", action="store_true", help="Run live single-read committee adjudication for selected candidates.")
     parser.add_argument("--max-reads", type=int, default=DEFAULT_MAX_READS, help="Maximum selected candidates to read in live/fixture mode.")
     parser.add_argument("--rubric", type=Path, default=Path(DEFAULT_RUBRIC))
@@ -1273,6 +1669,7 @@ def main() -> int:
         class_metadata = load_optional_json(args.class_metadata)
         manual_decisions = load_decisions(args.decisions)
         blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
+        read_b_fixture = load_blind_read_fixture(args.read_b_fixture)
     except Exception as exc:
         report = {
             "generated_at": generated_at,
@@ -1322,12 +1719,14 @@ def main() -> int:
         "enabled": False,
         "live": False,
         "fixture": False,
+        "read_b_fixture": False,
         "max_reads": int(args.max_reads),
         "read_count": 0,
+        "read_b_count": 0,
         "override_count": 0,
         "skipped_max_reads": 0,
     }
-    if args.live or blind_read_fixture:
+    if args.live or blind_read_fixture or read_b_fixture:
         try:
             routing_payload = load_optional_json(args.routing)
             task = task_config(routing_payload, "literary_committee")
@@ -1359,6 +1758,7 @@ def main() -> int:
                 max_reads=args.max_reads,
                 live=bool(args.live),
                 fixture_by_key=blind_read_fixture,
+                read_b_fixture=read_b_fixture,
             )
         except Exception as exc:
             report = {
