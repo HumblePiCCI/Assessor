@@ -820,8 +820,10 @@ def test_phase2b_budget_cap_on_live_reads():
         committee_anchor=FIXTURE_DIR / "missing.json",
         max_reads=2,
         max_read_b=None,
+        max_read_c=None,
         live=False,
         live_read_b=False,
+        live_read_c=False,
         fixture_by_key=fixture,
     )
     assert summary["read_count"] == 2
@@ -1450,6 +1452,213 @@ def test_phase3b_resolve_ab_a_block_on_agreed_winner_blocks_override():
     assert reason == "committee_read_ab_blocked_by_a_mechanics_or_completion"
 
 
+def test_phase3c_should_invoke_read_c_on_ab_concurred_caution_ignored():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    should_run, reason = cer.should_invoke_read_c(
+        candidate,
+        read_a,
+        read_b,
+        "committee_read_ab_concurred",
+    )
+    assert should_run is True
+    assert reason == "committee_read_c_ab_concurred_on_caution_ignored"
+
+
+def test_phase3c_resolve_abc_high_conf_placement_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        rougher_but_stronger_latent=True,
+    )
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_concurred",
+    )
+    assert decision is read_c
+    assert reason == "committee_read_c_placement_override"
+
+
+def test_phase3c_resolve_abc_requires_high_confidence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(candidate, winner="s009", confidence="medium", polish_trap=True)
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_concurred",
+    )
+    assert decision is None
+    assert reason == "committee_read_c_not_high_confidence"
+
+
+def test_phase3c_prior_read_block_on_c_winner_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        rougher_but_stronger_latent=True,
+    )
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_split_b_confirms_prior",
+    )
+    assert decision is None
+    assert reason == "committee_read_c_blocked_by_prior_read_mechanics_or_completion"
+
+
+def test_phase3c_live_read_c_runs_after_ab_concurrence(monkeypatch):
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_c(candidate_arg, _read_a, _read_b, ab_reason, *_args, **_kwargs):
+        assert ab_reason == "committee_read_ab_concurred"
+        return _make_read(
+            candidate_arg,
+            winner="s009",
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+    monkeypatch.setattr(cer, "run_placement_read_c", fake_read_c)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=1,
+        max_read_c=1,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 1
+    assert summary["read_c_count"] == 1
+    assert summary["override_count"] == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_read"] == "A+B+C"
+    assert read_results[0]["status"] == "committee_read_c_placement_override"
+    assert read_results[0]["read_c_invoked"] is True
+
+
+def test_phase3c_max_read_c_caps_live_placement_reads(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [
+        _get_candidate(candidates, "s003::s013"),
+        _get_candidate(candidates, "s009::s015"),
+    ]
+    calls = {"c": 0}
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_c(candidate_arg, _read_a, _read_b, _ab_reason, *_args, **_kwargs):
+        calls["c"] += 1
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+    monkeypatch.setattr(cer, "run_placement_read_c", fake_read_c)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=2,
+        max_read_c=1,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert calls["c"] == 1
+    assert summary["read_count"] == 2
+    assert summary["read_b_count"] == 2
+    assert summary["read_c_count"] == 1
+    assert summary["skipped_max_read_c"] == 1
+    assert len(decisions) == 1
+    assert any(item.get("read_c_status") == "max_read_c_exceeded" for item in read_results)
+
+
 def test_phase3b_live_read_b_runs_when_invoked(monkeypatch):
     candidates = _build_ghost_candidates()
     candidate = _get_candidate(candidates, "s009::s015")
@@ -1481,8 +1690,10 @@ def test_phase3b_live_read_b_runs_when_invoked(monkeypatch):
         committee_anchor=FIXTURE_DIR / "missing.json",
         max_reads=1,
         max_read_b=1,
+        max_read_c=None,
         live=True,
         live_read_b=True,
+        live_read_c=True,
         fixture_by_key={},
     )
 
@@ -1537,8 +1748,10 @@ def test_phase3b_max_read_b_caps_live_audits(monkeypatch):
         committee_anchor=FIXTURE_DIR / "missing.json",
         max_reads=2,
         max_read_b=1,
+        max_read_c=None,
         live=True,
         live_read_b=True,
+        live_read_c=True,
         fixture_by_key={},
     )
 
@@ -1626,6 +1839,77 @@ def test_phase3a_fixture_ab_all_five_residuals_flip(tmp_path, monkeypatch):
         assert item["model_metadata"]["committee_read"] == "A+B"
         assert "read_a" in item["committee_edge_trace"]
         assert "read_b" in item["committee_edge_trace"]
+
+
+def test_phase3c_fixture_c_flips_residuals_after_ab_concurrence(tmp_path, monkeypatch):
+    """End-to-end: when A/B both preserve the prior on residual-shaped pairs,
+    Read C placement calibration can still emit the five gold override edges.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-c-fixture",
+            str(FIXTURE_DIR / "ghost_residual_read_c.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    assert len(committee_items) == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["read_b_count"] == 5
+    assert decisions["read_a"]["read_c_count"] == 5
+    assert decisions["read_c"]["read_count"] == 5
+    assert decisions["read_a"]["override_count"] == 5
+    for item in committee_items:
+        assert item["model_metadata"]["committee_read"] == "A+B+C"
+        assert item["model_metadata"]["phase"] == "3b"
+        assert "read_c" in item["committee_edge_trace"]
 
 
 def test_phase3a_passthrough_preserved_without_fixtures_or_live(tmp_path, monkeypatch):

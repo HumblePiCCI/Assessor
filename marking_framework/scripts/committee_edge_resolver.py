@@ -2,10 +2,10 @@
 """Routed committee-edge adjudication.
 
 Phase 1 shipped the scaffold (passthrough + precedence + basic triggers).
-Phase 2a (this revision) calibrates the trigger set so the resolver routes
-"caution raised but ignored" pairs — the primary failure mode on the Ghost
-Grade-7 literary cohort. Still no live model reads; Phase 2b will add those
-behind a --live flag.
+Phase 2a calibrated the trigger set so the resolver routes "caution raised
+but ignored" pairs — the primary failure mode on the Ghost Grade-7 literary
+cohort. Later phases add routed live committee reads behind explicit flags:
+Read A blind, Read B polish-trap audit, and Read C placement calibration.
 """
 
 from __future__ import annotations
@@ -1307,6 +1307,184 @@ def read_b_from_fixture(candidate: dict, fixture_by_key: dict[str, dict]) -> dic
     return read
 
 
+def row_brief(row: dict, student_count: int) -> str:
+    student_id = str(row.get("student_id") or "").strip()
+    seed_rank = int(num(row.get("seed_rank"), student_count) or student_count)
+    level = str(row.get("_level") or row.get("adjusted_level") or row.get("level") or "").strip()
+    composite = normalize_metric(row.get("_composite_score") or row.get("composite_score"))
+    borda = normalize_metric(row.get("_borda_feature") or row.get("borda_percent") or row.get("borda_points"))
+    support = row_support(row, student_count)
+    return (
+        f"{student_id}: seed_rank={seed_rank}, level={level or 'unknown'}, "
+        f"composite={composite:.3f}, borda={borda:.3f}, support={support:.3f}"
+    )
+
+
+def placement_context_lines(
+    candidate: dict,
+    read_a: dict,
+    read_b: dict | None,
+    ab_reason: str,
+    rows_by_id: dict[str, dict],
+) -> list[str]:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_id = str(seed_order.get("higher", "") or "").strip()
+    lower_id = str(seed_order.get("lower", "") or "").strip()
+    sorted_rows = sorted(
+        rows_by_id.values(),
+        key=lambda row: (int(num(row.get("seed_rank"), 999999) or 999999), str(row.get("student_id") or "")),
+    )
+    student_count = len(sorted_rows)
+    rank_by_id = {str(row.get("student_id") or ""): idx for idx, row in enumerate(sorted_rows)}
+    context_ids: set[str] = {higher_id, lower_id}
+    for student_id in (higher_id, lower_id):
+        idx = rank_by_id.get(student_id)
+        if idx is None:
+            continue
+        for neighbor in sorted_rows[max(0, idx - 2): min(student_count, idx + 3)]:
+            neighbor_id = str(neighbor.get("student_id") or "").strip()
+            if neighbor_id:
+                context_ids.add(neighbor_id)
+    context_rows = [
+        row for row in sorted_rows
+        if str(row.get("student_id") or "").strip() in context_ids
+    ]
+    prior = candidate.get("escalated_summary") if isinstance(candidate.get("escalated_summary"), dict) else {}
+    a_checks = normalize_committee_decision_checks(
+        read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
+    )
+    b_checks = normalize_committee_decision_checks(
+        read_b.get("decision_checks") if read_b is not None and isinstance(read_b.get("decision_checks"), dict) else {}
+    )
+    lines = [
+        "This is Read C placement calibration. Use cohort context to test whether the pairwise result creates a defensible top/middle/bottom placement.",
+        "Do not treat seed rank, Borda, composite score, or prior judgments as authority. Use them only to identify the neighborhood and the consequence of the edge.",
+        "If A/B both preserved the prior on a caution_ignored edge, explicitly ask whether they overvalued complete/formulaic proof against stronger literary interpretation.",
+        f"Prior active winner={prior.get('winner', '')}; prior basis={prior.get('decision_basis', '')}; prior confidence={prior.get('confidence', '')}.",
+        (
+            "Read A audit target: "
+            f"winner={read_a.get('winner', '')}; confidence={vc.normalize_confidence(read_a.get('confidence'))}; "
+            f"interpretation_depth={a_checks.get('interpretation_depth')}; proof_sufficiency={a_checks.get('proof_sufficiency')}; "
+            f"polish_trap={bool(a_checks.get('polish_trap'))}; rougher_but_stronger_latent={bool(a_checks.get('rougher_but_stronger_latent'))}; "
+            f"mechanics_block_meaning={bool(a_checks.get('mechanics_block_meaning'))}; completion_floor_applied={bool(a_checks.get('completion_floor_applied'))}."
+        ),
+        (
+            "Read B audit target: "
+            f"winner={read_b.get('winner', '') if read_b else ''}; confidence={vc.normalize_confidence(read_b.get('confidence')) if read_b else ''}; "
+            f"interpretation_depth={b_checks.get('interpretation_depth')}; proof_sufficiency={b_checks.get('proof_sufficiency')}; "
+            f"polish_trap={bool(b_checks.get('polish_trap'))}; rougher_but_stronger_latent={bool(b_checks.get('rougher_but_stronger_latent'))}; "
+            f"mechanics_block_meaning={bool(b_checks.get('mechanics_block_meaning'))}; completion_floor_applied={bool(b_checks.get('completion_floor_applied'))}; "
+            f"A/B resolution={ab_reason}."
+        ),
+        "Placement neighborhood: " + " | ".join(row_brief(row, student_count) for row in context_rows),
+        "Return the stronger essay as winner only if that winner's placement is defensible against nearby papers; if the edge should not move, keep the prior winner.",
+    ]
+    return [line for line in lines if line.strip()]
+
+
+def should_invoke_read_c(candidate: dict, read_a: dict, read_b: dict | None, ab_reason: str) -> tuple[bool, str]:
+    """Decide whether the placement-aware tiebreaker should run.
+
+    Read C is deliberately narrower than Read B. It is for high-leverage edges
+    where pairwise A/B still leaves an unstable placement: concurrence on a
+    caution_ignored edge, split/weak A+B outcomes, or completion/mechanics
+    blockers on a pair that can move the top pack or cross a level boundary.
+    """
+    if read_b is None:
+        return False, "committee_read_c_not_invoked_without_read_b"
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    bucket = str(candidate.get("bucket") or "")
+    high_leverage = bool(
+        details.get("top10_cross")
+        or details.get("level_cross")
+        or details.get("top10_involved")
+        or bucket == "caution_ignored"
+    )
+    if not high_leverage:
+        return False, "committee_read_c_not_high_leverage"
+    if ab_reason == "committee_read_ab_concurred" and bucket == "caution_ignored":
+        return True, "committee_read_c_ab_concurred_on_caution_ignored"
+    if ab_reason in {
+        "committee_read_ab_split_b_confirms_prior",
+        "committee_read_ab_split_no_trap",
+        "committee_read_ab_weak_agreement",
+    }:
+        return True, "committee_read_c_unresolved_ab_split"
+    if ab_reason in {
+        "committee_read_b_blocked_by_mechanics_or_completion",
+        "committee_read_ab_blocked_by_a_mechanics_or_completion",
+    }:
+        return True, "committee_read_c_completion_or_mechanics_block_on_leverage_edge"
+    return False, "committee_read_c_not_needed"
+
+
+def run_placement_read_c(
+    candidate: dict,
+    read_a: dict,
+    read_b: dict,
+    ab_reason: str,
+    rows_by_id: dict[str, dict],
+    texts: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    anchor_dir: Path,
+    committee_anchor: Path,
+) -> dict:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher_id = str(seed_order.get("higher", "") or "").strip()
+    lower_id = str(seed_order.get("lower", "") or "").strip()
+    if higher_id not in rows_by_id or lower_id not in rows_by_id:
+        raise ValueError(f"Candidate {candidate.get('pair_key', '')}: missing row for Read C")
+    selection_details = (
+        committee_anchor_selection_details(committee_anchor)
+        + placement_context_lines(candidate, read_a, read_b, ab_reason, rows_by_id)
+    )
+    judgment = vc.judge_pair_with_orientation_audit(
+        rubric,
+        outline,
+        rows_by_id[higher_id],
+        rows_by_id[lower_id],
+        texts.get(higher_id, ""),
+        texts.get(lower_id, ""),
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=str(metadata.get("assignment_genre") or metadata.get("genre") or ""),
+        metadata=metadata,
+        selection_reasons=["committee_edge_read_c_placement_calibration"],
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+        orientation_audit=False,
+        student_count=len(rows_by_id),
+        response_format=COMMITTEE_RESPONSE_FORMAT,
+    )
+    read = normalize_committee_read(candidate, judgment)
+    metadata_out = dict(read.get("model_metadata") or {})
+    metadata_out["committee_read"] = "C-placement-calibration"
+    metadata_out["adjudication_source"] = "committee_read_c"
+    read["model_metadata"] = metadata_out
+    return read
+
+
+def read_c_from_fixture(candidate: dict, fixture_by_key: dict[str, dict]) -> dict | None:
+    key = str(candidate.get("pair_key") or "").strip()
+    if key not in fixture_by_key:
+        return None
+    read = normalize_committee_read(candidate, fixture_by_key[key])
+    metadata = dict(read.get("model_metadata") or {})
+    metadata["committee_read"] = "C-placement-calibration"
+    metadata["adjudication_source"] = "committee_read_c"
+    read["model_metadata"] = metadata
+    return read
+
+
 def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | None, str]:
     """Apply the Phase 3a A+B resolution rule.
 
@@ -1374,6 +1552,54 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
     return None, "committee_read_ab_split_no_trap"
 
 
+def resolve_a_b_c(
+    candidate: dict,
+    read_a: dict,
+    read_b: dict,
+    read_c: dict,
+    ab_reason: str,
+) -> tuple[dict | None, str]:
+    """Apply the Phase 3b placement-calibration rule.
+
+    Read C is allowed to overturn an unresolved A/B result only when it is a
+    high-confidence placement judgment, does not block its own winner on
+    mechanics/completion, and gives a substantive reason for moving the edge.
+    """
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    c_winner = str(read_c.get("winner") or "").strip()
+    if not prior_winner or not c_winner:
+        return None, "committee_read_c_incomplete"
+    if c_winner == prior_winner:
+        return None, "committee_read_c_confirms_prior"
+    c_conf = vc.normalize_confidence(read_c.get("confidence"))
+    if c_conf != "high":
+        return None, "committee_read_c_not_high_confidence"
+    c_checks = normalize_committee_decision_checks(
+        read_c.get("decision_checks") if isinstance(read_c.get("decision_checks"), dict) else {}
+    )
+    if c_checks.get("mechanics_block_meaning") or c_checks.get("completion_floor_applied"):
+        return None, "committee_read_c_blocked_by_mechanics_or_completion"
+    for prior_read in (read_a, read_b):
+        if str(prior_read.get("winner") or "").strip() != c_winner:
+            continue
+        prior_checks = normalize_committee_decision_checks(
+            prior_read.get("decision_checks") if isinstance(prior_read.get("decision_checks"), dict) else {}
+        )
+        if prior_checks.get("mechanics_block_meaning") or prior_checks.get("completion_floor_applied"):
+            return None, "committee_read_c_blocked_by_prior_read_mechanics_or_completion"
+    c_winner_side = normalize_winner_side(read_c.get("winner_side"))
+    interpretation_favors_winner = side_favors_winner(c_checks.get("interpretation_depth"), c_winner_side)
+    proof_favors_winner = side_favors_winner(c_checks.get("proof_sufficiency"), c_winner_side)
+    has_substantive_basis = bool(
+        c_checks.get("polish_trap")
+        or c_checks.get("rougher_but_stronger_latent")
+        or (interpretation_favors_winner and proof_favors_winner)
+    )
+    if not has_substantive_basis:
+        return None, "committee_read_c_no_substantive_basis"
+    return read_c, "committee_read_c_placement_override"
+
+
 def decision_from_committee_read(
     candidate: dict,
     read: dict,
@@ -1381,6 +1607,7 @@ def decision_from_committee_read(
     *,
     read_a: dict | None = None,
     read_b: dict | None = None,
+    read_c: dict | None = None,
 ) -> dict:
     item = copy.deepcopy(read)
     metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
@@ -1390,7 +1617,11 @@ def decision_from_committee_read(
     committee_read_label = source_read_label
     phase_label = "2b"
     confidence_label_prefix = "read_a"
-    if read_b is not None and read is read_b:
+    if read_c is not None and read is read_c:
+        committee_read_label = "A+B+C"
+        phase_label = "3b"
+        confidence_label_prefix = "read_c"
+    elif read_b is not None and read is read_b:
         committee_read_label = "A+B"
         phase_label = "3a"
         confidence_label_prefix = "read_b"
@@ -1440,6 +1671,18 @@ def decision_from_committee_read(
             "polish_trap": bool(b_checks.get("polish_trap")),
             "rougher_but_stronger_latent": bool(b_checks.get("rougher_but_stronger_latent")),
         }
+    if read_c is not None:
+        c_checks = normalize_committee_decision_checks(
+            read_c.get("decision_checks") if isinstance(read_c.get("decision_checks"), dict) else {}
+        )
+        trace["read_c"] = {
+            "winner": read_c.get("winner", ""),
+            "confidence": vc.normalize_confidence(read_c.get("confidence")),
+            "polish_trap": bool(c_checks.get("polish_trap")),
+            "rougher_but_stronger_latent": bool(c_checks.get("rougher_but_stronger_latent")),
+            "interpretation_depth": c_checks.get("interpretation_depth", ""),
+            "proof_sufficiency": c_checks.get("proof_sufficiency", ""),
+        }
     item["committee_edge_trace"] = trace
     return item
 
@@ -1460,10 +1703,13 @@ def run_read_a_path(
     committee_anchor: Path,
     max_reads: int,
     max_read_b: int | None,
+    max_read_c: int | None,
     live: bool,
     live_read_b: bool,
+    live_read_c: bool,
     fixture_by_key: dict[str, dict],
     read_b_fixture: dict[str, dict] | None = None,
+    read_c_fixture: dict[str, dict] | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Run the committee read path.
 
@@ -1479,6 +1725,9 @@ def run_read_a_path(
       - If `should_invoke_read_b` fires, runs Read B from fixture when provided
         or live when `live=True` and `live_read_b=True`; then applies
         `resolve_a_b` to decide whether to emit an override.
+      - If A/B remains unresolved on a high-leverage placement edge, runs
+        Read C from fixture or live when enabled and applies
+        `resolve_a_b_c`.
       - Otherwise falls back to Phase 2b A-only override gate.
     """
     rows_by_id = {row["student_id"]: row for row in vc.prepare_rows(rows)}
@@ -1486,10 +1735,14 @@ def run_read_a_path(
     decisions: list[dict] = []
     read_cap = max(0, int(max_reads))
     read_b_cap = read_cap if max_read_b is None else max(0, int(max_read_b))
+    read_c_cap = read_cap if max_read_c is None else max(0, int(max_read_c))
     read_a_count = 0
     read_b_count = 0
+    read_c_count = 0
     read_b_skipped_cap = 0
+    read_c_skipped_cap = 0
     b_fixture = read_b_fixture or {}
+    c_fixture = read_c_fixture or {}
     # Phase 3a: read order is set by per-read priority, not the selection order.
     ordered_selected = sorted(selected, key=committee_read_priority)
     for candidate in ordered_selected:
@@ -1502,6 +1755,7 @@ def run_read_a_path(
             "status": "",
             "override_emitted": False,
             "read_b_invoked": False,
+            "read_c_invoked": False,
         }
         if read_cap and read_a_count >= read_cap:
             record["status"] = "max_reads_exceeded"
@@ -1577,6 +1831,49 @@ def run_read_a_path(
             record["read_b_winner"] = read_b.get("winner", "")
             decision_read, ab_reason = resolve_a_b(candidate, read, read_b)
             record["status"] = ab_reason
+
+            read_c = None
+            should_run_c, c_invocation_reason = should_invoke_read_c(candidate, read, read_b, ab_reason)
+            record["read_c_invocation_reason"] = c_invocation_reason
+            if decision_read is None and should_run_c and c_fixture:
+                read_c = read_c_from_fixture(candidate, c_fixture)
+                if read_c is None:
+                    record["read_c_status"] = "fixture_missing"
+            elif decision_read is None and should_run_c and live and live_read_c:
+                if read_c_cap and read_c_count >= read_c_cap:
+                    read_c_skipped_cap += 1
+                    record["read_c_status"] = "max_read_c_exceeded"
+                else:
+                    read_c = run_placement_read_c(
+                        candidate,
+                        read,
+                        read_b,
+                        ab_reason,
+                        rows_by_id,
+                        texts_by_id,
+                        rubric,
+                        outline,
+                        metadata,
+                        model=model,
+                        routing=routing,
+                        reasoning=reasoning,
+                        max_output_tokens=max_output_tokens,
+                        anchor_dir=anchor_dir,
+                        committee_anchor=committee_anchor,
+                    )
+            elif decision_read is None and should_run_c:
+                record["read_c_status"] = "not_available"
+
+            if read_c is not None:
+                read_c_count += 1
+                record["read_c_invoked"] = True
+                record["read_c"] = read_c
+                record["read_c_winner"] = read_c.get("winner", "")
+                c_decision_read, c_reason = resolve_a_b_c(candidate, read, read_b, read_c, ab_reason)
+                record["status"] = c_reason
+                decision_read = c_decision_read
+                ab_reason = c_reason
+
             record["override_emitted"] = decision_read is not None
             if decision_read is not None:
                 decisions.append(
@@ -1586,6 +1883,7 @@ def run_read_a_path(
                         ab_reason,
                         read_a=read,
                         read_b=read_b,
+                        read_c=read_c,
                     )
                 )
             read_results.append(record)
@@ -1603,14 +1901,19 @@ def run_read_a_path(
         "live": bool(live),
         "fixture": bool(fixture_by_key),
         "read_b_fixture": bool(b_fixture),
+        "read_c_fixture": bool(c_fixture),
         "read_b_live": bool(live and live_read_b),
+        "read_c_live": bool(live and live_read_c),
         "max_reads": read_cap,
         "max_read_b": read_b_cap,
+        "max_read_c": read_c_cap,
         "read_count": read_a_count,
         "read_b_count": read_b_count,
+        "read_c_count": read_c_count,
         "override_count": len(decisions),
         "skipped_max_reads": sum(1 for item in read_results if item.get("status") == "max_reads_exceeded"),
         "skipped_max_read_b": read_b_skipped_cap,
+        "skipped_max_read_c": read_c_skipped_cap,
     }
 
 
@@ -1687,6 +1990,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "committee_anchor": str(args.committee_anchor),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
+        "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
     }
 
 
@@ -1713,6 +2017,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Read B and A+B resolution rules decide whether to emit an override."
         ),
     )
+    parser.add_argument(
+        "--read-c-fixture",
+        type=Path,
+        default=None,
+        help=(
+            "Optional offline Read-C placement-calibration fixture keyed by pair_key. "
+            "Read C runs only for unresolved high-leverage A/B outcomes."
+        ),
+    )
     parser.add_argument("--live", action="store_true", help="Run live committee adjudication for selected candidates.")
     parser.add_argument("--max-reads", type=int, default=DEFAULT_MAX_READS, help="Maximum selected candidates to read in live/fixture mode.")
     parser.add_argument(
@@ -1725,6 +2038,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-live-read-b",
         action="store_true",
         help="Disable live Read-B audits even when --live is set; fixture Read-B still works.",
+    )
+    parser.add_argument(
+        "--max-read-c",
+        type=int,
+        default=None,
+        help="Maximum live/fixture Read-C placement audits. Defaults to --max-reads; 0 means unlimited.",
+    )
+    parser.add_argument(
+        "--no-live-read-c",
+        action="store_true",
+        help="Disable live Read-C placement audits even when --live is set; fixture Read-C still works.",
     )
     parser.add_argument("--rubric", type=Path, default=Path(DEFAULT_RUBRIC))
     parser.add_argument("--outline", type=Path, default=Path(DEFAULT_OUTLINE))
@@ -1776,6 +2100,7 @@ def main() -> int:
         manual_decisions = load_decisions(args.decisions)
         blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
         read_b_fixture = load_blind_read_fixture(args.read_b_fixture)
+        read_c_fixture = load_blind_read_fixture(args.read_c_fixture)
     except Exception as exc:
         report = {
             "generated_at": generated_at,
@@ -1826,16 +2151,21 @@ def main() -> int:
         "live": False,
         "fixture": False,
         "read_b_fixture": False,
+        "read_c_fixture": False,
         "read_b_live": False,
+        "read_c_live": False,
         "max_reads": int(args.max_reads),
         "max_read_b": int(args.max_read_b if args.max_read_b is not None else args.max_reads),
+        "max_read_c": int(args.max_read_c if args.max_read_c is not None else args.max_reads),
         "read_count": 0,
         "read_b_count": 0,
+        "read_c_count": 0,
         "override_count": 0,
         "skipped_max_reads": 0,
         "skipped_max_read_b": 0,
+        "skipped_max_read_c": 0,
     }
-    if args.live or blind_read_fixture or read_b_fixture:
+    if args.live or blind_read_fixture or read_b_fixture or read_c_fixture:
         try:
             routing_payload = load_optional_json(args.routing)
             task = task_config(routing_payload, "literary_committee")
@@ -1866,10 +2196,13 @@ def main() -> int:
                 committee_anchor=args.committee_anchor,
                 max_reads=args.max_reads,
                 max_read_b=args.max_read_b,
+                max_read_c=args.max_read_c,
                 live=bool(args.live),
                 live_read_b=not bool(args.no_live_read_b),
+                live_read_c=not bool(args.no_live_read_c),
                 fixture_by_key=blind_read_fixture,
                 read_b_fixture=read_b_fixture,
+                read_c_fixture=read_c_fixture,
             )
         except Exception as exc:
             report = {
@@ -1924,6 +2257,14 @@ def main() -> int:
             "max_reads": int(read_a_summary.get("max_read_b", 0) or 0),
             "read_count": int(read_a_summary.get("read_b_count", 0) or 0),
             "skipped_max_reads": int(read_a_summary.get("skipped_max_read_b", 0) or 0),
+        },
+        "read_c": {
+            "enabled": bool(read_a_summary.get("read_c_live") or read_a_summary.get("read_c_fixture")),
+            "live": bool(read_a_summary.get("read_c_live")),
+            "fixture": bool(read_a_summary.get("read_c_fixture")),
+            "max_reads": int(read_a_summary.get("max_read_c", 0) or 0),
+            "read_count": int(read_a_summary.get("read_c_count", 0) or 0),
+            "skipped_max_reads": int(read_a_summary.get("skipped_max_read_c", 0) or 0),
         },
         "read_a_results": read_a_results,
     }
@@ -1987,6 +2328,7 @@ def main() -> int:
         },
         "read_a": read_a_summary,
         "read_b": decisions_payload["read_b"],
+        "read_c": decisions_payload["read_c"],
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)

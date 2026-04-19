@@ -1,0 +1,130 @@
+{
+  "generated_at": "2026-04-19T00:00:00+00:00",
+  "reads": [
+    {
+      "pair_key": "s009::s015",
+      "winner": "s015",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": ["formulaic_but_thin"],
+      "rationale": "Prior-style read keeps Logan because it values complete evidence development over Jack's rougher interpretation.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "A appears more fully proven in pairwise isolation.",
+        "rougher_loses_because": "B appears underdeveloped in pairwise isolation.",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s009",
+      "winner": "s003",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": ["incomplete_or_scaffold"],
+      "rationale": "Prior-style read keeps Easton because Jack looks less complete in pairwise isolation.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "A appears more complete.",
+        "rougher_loses_because": "B appears scaffolded.",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s013",
+      "winner": "s003",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": ["polished_but_shallow"],
+      "rationale": "Prior-style read keeps Easton because it gives more explicit event proof.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "A appears more organized.",
+        "rougher_loses_because": "B appears thinner in proof.",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s019::s022",
+      "winner": "s019",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Prior-style read keeps Naomi because it treats the trust interpretation as more developed.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s004::s008",
+      "winner": "s004",
+      "confidence": "high",
+      "decision_basis": "task_alignment",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Prior-style read keeps Farris because Hudson L's leadership frame looks broader in pairwise isolation.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "A appears more aligned.",
+        "rougher_loses_because": "B appears looser.",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    }
+  ]
+}
