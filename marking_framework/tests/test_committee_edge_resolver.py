@@ -1912,6 +1912,351 @@ def test_phase3c_fixture_c_flips_residuals_after_ab_concurrence(tmp_path, monkey
         assert "read_c" in item["committee_edge_trace"]
 
 
+def _prior_group_read_results():
+    return [
+        {
+            "pair_key": pair_key,
+            "bucket": "caution_ignored",
+            "status": "committee_read_c_confirms_prior",
+            "override_emitted": False,
+            "read_b_invoked": True,
+            "read_c_invoked": True,
+        }
+        for pair_key in GHOST_RESIDUAL_PAIR_KEYS
+    ]
+
+
+def test_phase3d_build_group_neighborhood_from_unresolved_results():
+    candidates = _build_ghost_candidates()
+    neighborhoods = cer.build_group_calibration_neighborhoods(
+        selected=candidates,
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        max_groups=1,
+        max_students=12,
+    )
+    assert len(neighborhoods) == 1
+    neighborhood = neighborhoods[0]
+    assert set(neighborhood["pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert set(neighborhood["student_ids"]) == {
+        "s003", "s004", "s008", "s009", "s013", "s015", "s019", "s022"
+    }
+    assert neighborhood["read_result_statuses"]["s009::s015"] == "committee_read_c_confirms_prior"
+
+
+def test_phase3d_group_calibration_emits_pair_overrides():
+    candidates = _build_ghost_candidates()
+    fixtures = cer.load_group_calibration_fixture(FIXTURE_DIR / "ghost_residual_group_calibration.json")
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=candidates,
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=fixtures,
+        max_groups=1,
+        max_students=12,
+        existing_decision_keys=set(),
+    )
+    winners = {decision["pair_key"]: decision["winner"] for decision in decisions}
+    expected_winners = {
+        "s003::s009": "s009",
+        "s003::s013": "s013",
+        "s004::s008": "s008",
+        "s009::s015": "s009",
+        "s019::s022": "s022",
+    }
+    assert expected_winners.items() <= winners.items()
+    assert summary["read_count"] == 1
+    assert summary["override_count"] > 5
+    assert set(results[0]["override_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert results[0]["support_pair_keys"]
+    for decision in decisions:
+        assert decision["model_metadata"]["committee_read"] == "group-neighborhood-calibration"
+        assert decision["model_metadata"]["phase"] == "3d"
+        assert decision["committee_confidence"] in {"group_high", "group_edge_high"}
+
+
+def test_phase3d_group_calibration_skips_low_confidence():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s009", "s015"],
+            "confidence": "medium",
+            "rationale": "Medium confidence is not enough for group override.",
+            "placement_notes": [],
+        },
+    )
+    assert cer.decision_from_group_calibration(candidate, calibration) is None
+
+
+def test_phase3d_group_edge_decision_can_override_medium_group_order():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "medium",
+            "rationale": "Overall order is medium confidence.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "The hard pair itself is high confidence.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        },
+    )
+    decision = cer.decision_from_group_edge_decision(
+        candidate,
+        calibration["edge_decisions"][0],
+        calibration,
+    )
+    assert decision is not None
+    assert decision["winner"] == "s009"
+    assert decision["committee_confidence"] == "group_edge_high"
+    assert decision["model_metadata"]["committee_override_reason"] == "committee_group_edge_decision_override"
+
+
+def test_phase3d_live_group_calibration_repairs_invalid_json(monkeypatch):
+    rows = {row["student_id"]: row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+        "trigger_details": [],
+    }
+    calls = []
+
+    def fake_responses_create(*, model, messages, temperature, reasoning, routing_path, text_format, max_output_tokens):
+        calls.append({"messages": messages, "reasoning": reasoning})
+        if len(calls) == 1:
+            return {"output": [{"type": "output_text", "text": "not json"}]}
+        return {
+            "output": [
+                {
+                    "type": "output_text",
+                    "text": json.dumps(
+                        {
+                            "ordered_student_ids": ["s009", "s015"],
+                            "confidence": "high",
+                            "rationale": "Repair returned valid group order.",
+                            "placement_notes": [],
+                            "edge_decisions": [
+                                {
+                                    "pair_key": "s009::s015",
+                                    "winner": "s009",
+                                    "confidence": "high",
+                                    "rationale": "Pair edge repaired.",
+                                    "polish_trap": True,
+                                    "rougher_but_stronger_latent": True,
+                                    "mechanics_block_meaning": False,
+                                    "completion_floor_applied": False,
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(cer, "responses_create", fake_responses_create)
+    calibration = cer.run_group_calibration(
+        neighborhood,
+        rows,
+        ghost_residual_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis"},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+    assert calibration["ordered_student_ids"] == ["s009", "s015"]
+    assert calibration["confidence"] == "high"
+    assert len(calls) == 2
+    assert calls[1]["reasoning"] == "low"
+    assert "Previous invalid output" in calls[1]["messages"][0]["content"]
+
+
+def test_phase3d_live_group_calibration_repairs_missing_edge_decisions(monkeypatch):
+    rows = {row["student_id"]: row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+        "trigger_details": [],
+    }
+    calls = []
+
+    def fake_responses_create(*, model, messages, temperature, reasoning, routing_path, text_format, max_output_tokens):
+        calls.append(messages[0]["content"])
+        if len(calls) == 1:
+            return {
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {
+                                "ordered_student_ids": ["s015", "s009"],
+                                "confidence": "medium",
+                                "rationale": "Missing edge decisions.",
+                                "placement_notes": [],
+                                "edge_decisions": [],
+                            }
+                        ),
+                    }
+                ]
+            }
+        return {
+            "output": [
+                {
+                    "type": "output_text",
+                    "text": json.dumps(
+                        {
+                            "ordered_student_ids": ["s009", "s015"],
+                            "confidence": "high",
+                            "rationale": "Semantic repair returned required edge decisions.",
+                            "placement_notes": [],
+                            "edge_decisions": [
+                                {
+                                    "pair_key": "s009::s015",
+                                    "winner": "s009",
+                                    "confidence": "high",
+                                    "rationale": "Required pair was repaired.",
+                                    "polish_trap": True,
+                                    "rougher_but_stronger_latent": True,
+                                    "mechanics_block_meaning": False,
+                                    "completion_floor_applied": False,
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(cer, "responses_create", fake_responses_create)
+    calibration = cer.run_group_calibration(
+        neighborhood,
+        rows,
+        ghost_residual_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis"},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+    assert calibration["edge_decisions"][0]["pair_key"] == "s009::s015"
+    assert len(calls) == 2
+    assert "edge_decisions omitted required pair_keys" in calls[1]
+
+
+def test_phase3d_fixture_group_flips_residuals_after_abc_concurrence(tmp_path, monkeypatch):
+    """End-to-end: if A/B/C all keep the prior wrong residual winners, the
+    group-neighborhood calibration can still emit the five gold override edges.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-c-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--group-calibration-fixture",
+            str(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    committee_keys = {item["pair_key"] for item in committee_items}
+    assert len(committee_items) > 5
+    assert set(GHOST_RESIDUAL_PAIR_KEYS) <= committee_keys
+    assert set(GHOST_RESIDUAL_PAIR_KEYS) <= set(merged["committee_edge"]["superseded_pair_keys"])
+    assert decisions["read_a"]["override_count"] == 0
+    assert decisions["group_calibration"]["read_count"] == 1
+    assert decisions["group_calibration"]["override_count"] > 5
+    assert set(decisions["group_calibration_results"][0]["override_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    for item in committee_items:
+        assert item["model_metadata"]["committee_read"] == "group-neighborhood-calibration"
+        assert item["model_metadata"]["phase"] == "3d"
+        assert item["committee_edge_trace"]["neighborhood_id"] == "group_1"
+
+
 def test_phase3a_passthrough_preserved_without_fixtures_or_live(tmp_path, monkeypatch):
     """Default (no --live, no fixtures) still yields byte-identical passthrough."""
     outputs = tmp_path / "outputs"

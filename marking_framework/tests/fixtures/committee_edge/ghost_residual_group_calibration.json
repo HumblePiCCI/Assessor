@@ -1,0 +1,114 @@
+{
+  "generated_at": "2026-04-19T00:00:00+00:00",
+  "calibrations": [
+    {
+      "neighborhood_id": "group_1",
+      "ordered_student_ids": [
+        "s009",
+        "s015",
+        "s013",
+        "s003",
+        "s022",
+        "s019",
+        "s008",
+        "s004"
+      ],
+      "confidence": "high",
+      "rationale": "Group calibration ranks the residual neighborhood by sustained literary interpretation and proof, not by isolated formulaic control. Jack and Kyle belong above the cleaner but thinner Easton comparisons, Sienna remains above Naomi because Naomi's more abstract interpretation is overcredited, and Hudson L belongs above Farris on developed meaning.",
+      "placement_notes": [
+        {
+          "student_id": "s009",
+          "placement_band": "top_pack_middle",
+          "reason": "Jack has the strongest rougher-but-substantive interpretation in the residual set."
+        },
+        {
+          "student_id": "s015",
+          "placement_band": "top_pack_middle",
+          "reason": "Logan is controlled but thinner and more repetitive than Jack."
+        },
+        {
+          "student_id": "s013",
+          "placement_band": "upper_middle",
+          "reason": "Kyle's identity/support reading is more meaningful than Easton's plot-forward control."
+        },
+        {
+          "student_id": "s003",
+          "placement_band": "upper_middle",
+          "reason": "Easton is complete but comparatively shallow."
+        },
+        {
+          "student_id": "s022",
+          "placement_band": "middle",
+          "reason": "Sienna is more textually grounded than Naomi despite being less ambitious."
+        },
+        {
+          "student_id": "s019",
+          "placement_band": "middle",
+          "reason": "Naomi's abstract interpretation is not consistently proven."
+        },
+        {
+          "student_id": "s008",
+          "placement_band": "lower_middle",
+          "reason": "Hudson L carries more real thematic meaning than Farris."
+        },
+        {
+          "student_id": "s004",
+          "placement_band": "lower_middle",
+          "reason": "Farris is cleaner but less interpretive."
+        }
+      ],
+      "edge_decisions": [
+        {
+          "pair_key": "s003::s009",
+          "winner": "s009",
+          "confidence": "high",
+          "rationale": "Jack's rougher trauma/healing interpretation is more meaningful than Easton's complete but plot-forward response.",
+          "polish_trap": true,
+          "rougher_but_stronger_latent": true,
+          "mechanics_block_meaning": false,
+          "completion_floor_applied": false
+        },
+        {
+          "pair_key": "s003::s013",
+          "winner": "s013",
+          "confidence": "high",
+          "rationale": "Kyle's identity/support reading has more literary meaning than Easton's polished but shallow control.",
+          "polish_trap": true,
+          "rougher_but_stronger_latent": true,
+          "mechanics_block_meaning": false,
+          "completion_floor_applied": false
+        },
+        {
+          "pair_key": "s004::s008",
+          "winner": "s008",
+          "confidence": "high",
+          "rationale": "Hudson L carries more developed thematic meaning than Farris despite rougher control.",
+          "polish_trap": true,
+          "rougher_but_stronger_latent": true,
+          "mechanics_block_meaning": false,
+          "completion_floor_applied": false
+        },
+        {
+          "pair_key": "s009::s015",
+          "winner": "s009",
+          "confidence": "high",
+          "rationale": "Jack's interpretation has more depth than Logan's repetitive consequences frame.",
+          "polish_trap": true,
+          "rougher_but_stronger_latent": true,
+          "mechanics_block_meaning": false,
+          "completion_floor_applied": false
+        },
+        {
+          "pair_key": "s019::s022",
+          "winner": "s022",
+          "confidence": "high",
+          "rationale": "Sienna is more textually grounded than Naomi's more abstract but overcredited reading.",
+          "polish_trap": true,
+          "rougher_but_stronger_latent": true,
+          "mechanics_block_meaning": false,
+          "completion_floor_applied": false
+        }
+      ]
+    }
+  ]
+}

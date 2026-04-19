@@ -35,6 +35,7 @@ try:
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    from scripts.openai_client import extract_text, responses_create
     from scripts import verify_consistency as vc
 except ImportError:  # pragma: no cover - Support running as a standalone script
     from assessor_utils import load_file_text, resolve_input_path  # pragma: no cover
@@ -50,6 +51,7 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    from openai_client import extract_text, responses_create  # type: ignore  # pragma: no cover
     import verify_consistency as vc  # type: ignore  # pragma: no cover
 
 
@@ -71,6 +73,9 @@ DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
 DEFAULT_MERGED_OUT = "outputs/consistency_checks.committee_edge.json"
 DEFAULT_MAX_READS = 12
+DEFAULT_MAX_GROUP_CALIBRATIONS = 1
+DEFAULT_MAX_GROUP_STUDENTS = 12
+DEFAULT_GROUP_MAX_OUTPUT_TOKENS = 6000
 
 COMMITTEE_RESPONSE_FORMAT = copy.deepcopy(vc.RESPONSE_FORMAT)
 COMMITTEE_DECISION_CHECKS = COMMITTEE_RESPONSE_FORMAT["schema"]["properties"]["decision_checks"]
@@ -94,6 +99,60 @@ COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required
     "mechanics_block_meaning",
     "completion_floor_applied",
 ]
+
+GROUP_CALIBRATION_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "ordered_student_ids": {"type": "array", "items": {"type": "string"}},
+            "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+            "rationale": {"type": "string"},
+            "placement_notes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "student_id": {"type": "string"},
+                        "placement_band": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["student_id", "placement_band", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+            "edge_decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "pair_key": {"type": "string"},
+                        "winner": {"type": "string"},
+                        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                        "rationale": {"type": "string"},
+                        "polish_trap": {"type": "boolean"},
+                        "rougher_but_stronger_latent": {"type": "boolean"},
+                        "mechanics_block_meaning": {"type": "boolean"},
+                        "completion_floor_applied": {"type": "boolean"},
+                    },
+                    "required": [
+                        "pair_key",
+                        "winner",
+                        "confidence",
+                        "rationale",
+                        "polish_trap",
+                        "rougher_but_stronger_latent",
+                        "mechanics_block_meaning",
+                        "completion_floor_applied",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["ordered_student_ids", "confidence", "rationale", "placement_notes", "edge_decisions"],
+        "additionalProperties": False,
+    },
+}
 
 TRIGGER_POINTS = {
     # Phase 1 triggers (retained as-is)
@@ -129,6 +188,19 @@ CAUTION_IGNORED_TRIGGERS = frozenset(
         "caution_raised_but_ignored_rougher_stronger",
         "surface_substance_inversion",
         "never_escalated_high_leverage",
+    }
+)
+UNRESOLVED_GROUP_STATUSES = frozenset(
+    {
+        "committee_read_ab_concurred",
+        "committee_read_ab_split_b_confirms_prior",
+        "committee_read_ab_split_no_trap",
+        "committee_read_ab_weak_agreement",
+        "committee_read_c_confirms_prior",
+        "committee_read_c_not_high_confidence",
+        "committee_read_c_no_substantive_basis",
+        "committee_read_c_not_available",
+        "committee_read_c_not_needed",
     }
 )
 
@@ -232,6 +304,16 @@ def load_blind_read_fixture(path: Path | None) -> dict[str, dict]:
         if key:
             fixture[key] = copy.deepcopy(raw)
     return fixture
+
+
+def load_group_calibration_fixture(path: Path | None) -> list[dict]:
+    if path is None:
+        return []
+    payload = load_required_json(path)
+    raw_items = payload.get("calibrations")
+    if not isinstance(raw_items, list):
+        raw_items = payload.get("groups") if isinstance(payload.get("groups"), list) else []
+    return [copy.deepcopy(item) for item in raw_items if isinstance(item, dict)]
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -1320,6 +1402,647 @@ def row_brief(row: dict, student_count: int) -> str:
     )
 
 
+def build_group_calibration_neighborhoods(
+    *,
+    selected: list[dict],
+    rows: list[dict],
+    read_results: list[dict],
+    max_groups: int,
+    max_students: int,
+) -> list[dict]:
+    """Collect unresolved committee-read edges into small placement neighborhoods."""
+    if max_groups <= 0 or max_students < 2:
+        return []
+    candidate_by_key = {str(candidate.get("pair_key") or ""): candidate for candidate in selected}
+    rows_by_id = {str(row.get("student_id") or ""): row for row in vc.prepare_rows(rows)}
+    neighborhoods: list[dict] = []
+    current_ids: set[str] = set()
+    current_pair_keys: list[str] = []
+    current_details: list[dict] = []
+    current_statuses: dict[str, str] = {}
+
+    def emit_current() -> None:
+        if not current_pair_keys or len(current_ids) < 2 or len(neighborhoods) >= max_groups:
+            return
+        student_count = len(rows_by_id)
+        ordered_ids = sorted(
+            current_ids,
+            key=lambda sid: (
+                int(num(rows_by_id.get(sid, {}).get("seed_rank"), student_count) or student_count),
+                sid,
+            ),
+        )
+        neighborhoods.append(
+            {
+                "neighborhood_id": f"group_{len(neighborhoods) + 1}",
+                "student_ids": ordered_ids,
+                "pair_keys": list(current_pair_keys),
+                "trigger_details": copy.deepcopy(current_details),
+                "read_result_statuses": dict(current_statuses),
+            }
+        )
+
+    for record in read_results:
+        if len(neighborhoods) >= max_groups:
+            break
+        if record.get("override_emitted"):
+            continue
+        status = str(record.get("status") or "").strip()
+        if status not in UNRESOLVED_GROUP_STATUSES:
+            continue
+        pair_key = str(record.get("pair_key") or "").strip()
+        candidate = candidate_by_key.get(pair_key)
+        if not candidate:
+            continue
+        seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+        endpoints = [
+            str(seed_order.get("higher") or "").strip(),
+            str(seed_order.get("lower") or "").strip(),
+        ]
+        if len([sid for sid in endpoints if sid]) != 2 or any(sid not in rows_by_id for sid in endpoints):
+            continue
+        new_ids = [sid for sid in endpoints if sid not in current_ids]
+        if current_pair_keys and len(current_ids) + len(new_ids) > max_students:
+            emit_current()
+            current_ids = set()
+            current_pair_keys = []
+            current_details = []
+            current_statuses = {}
+        if len(set(endpoints)) > max_students:
+            continue
+        current_ids.update(endpoints)
+        current_pair_keys.append(pair_key)
+        details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+        current_details.append(
+            {
+                "pair_key": pair_key,
+                "bucket": candidate.get("bucket", ""),
+                "committee_score": candidate.get("committee_score", 0),
+                "triggers": list(candidate.get("triggers") or []),
+                "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
+                "prior_basis": (candidate.get("escalated_summary") or {}).get("decision_basis", ""),
+                "read_status": status,
+                "read_c_invoked": bool(record.get("read_c_invoked")),
+                "cautions": details.get("escalated_cautions", []),
+            }
+        )
+        current_statuses[pair_key] = status
+    emit_current()
+    return neighborhoods[:max_groups]
+
+
+def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
+    expected = [str(sid).strip() for sid in neighborhood.get("student_ids", []) if str(sid).strip()]
+    expected_set = set(expected)
+    seen: set[str] = set()
+    ordered = []
+    for raw in payload.get("ordered_student_ids", []):
+        student_id = str(raw or "").strip()
+        if student_id in expected_set and student_id not in seen:
+            ordered.append(student_id)
+            seen.add(student_id)
+    missing = [sid for sid in expected if sid not in seen]
+    ordered.extend(missing)
+    confidence = vc.normalize_confidence(payload.get("confidence"))
+    if missing:
+        confidence = "low"
+    notes = []
+    raw_notes = payload.get("placement_notes") if isinstance(payload.get("placement_notes"), list) else []
+    for note in raw_notes:
+        if not isinstance(note, dict):
+            continue
+        student_id = str(note.get("student_id") or "").strip()
+        if student_id not in expected_set:
+            continue
+        notes.append(
+            {
+                "student_id": student_id,
+                "placement_band": str(note.get("placement_band") or "").strip(),
+                "reason": str(note.get("reason") or "").strip(),
+            }
+        )
+    edge_decisions = []
+    unresolved_pair_keys = {str(pair_key) for pair_key in neighborhood.get("pair_keys", [])}
+    raw_edges = payload.get("edge_decisions") if isinstance(payload.get("edge_decisions"), list) else []
+    for edge in raw_edges:
+        if not isinstance(edge, dict):
+            continue
+        pair_key = str(edge.get("pair_key") or "").strip()
+        winner = str(edge.get("winner") or "").strip()
+        if pair_key not in unresolved_pair_keys or winner not in expected_set:
+            continue
+        edge_decisions.append(
+            {
+                "pair_key": pair_key,
+                "winner": winner,
+                "confidence": vc.normalize_confidence(edge.get("confidence")),
+                "rationale": str(edge.get("rationale") or "").strip(),
+                "polish_trap": truthy(edge.get("polish_trap")),
+                "rougher_but_stronger_latent": truthy(edge.get("rougher_but_stronger_latent")),
+                "mechanics_block_meaning": truthy(edge.get("mechanics_block_meaning")),
+                "completion_floor_applied": truthy(edge.get("completion_floor_applied")),
+            }
+        )
+    return {
+        "neighborhood_id": neighborhood.get("neighborhood_id", ""),
+        "ordered_student_ids": ordered,
+        "confidence": confidence,
+        "rationale": str(payload.get("rationale") or "").strip(),
+        "placement_notes": notes,
+        "edge_decisions": edge_decisions,
+        "missing_student_ids": missing,
+    }
+
+
+def group_calibration_from_fixture(
+    neighborhood: dict,
+    fixtures: list[dict],
+    index: int,
+) -> dict | None:
+    if not fixtures:
+        return None
+    neighborhood_id = str(neighborhood.get("neighborhood_id") or "")
+    for fixture in fixtures:
+        if str(fixture.get("neighborhood_id") or "") == neighborhood_id:
+            return normalize_group_calibration(neighborhood, fixture)
+    if index < len(fixtures):
+        return normalize_group_calibration(neighborhood, fixtures[index])
+    return None
+
+
+def group_calibration_prompt(
+    *,
+    neighborhood: dict,
+    rows_by_id: dict[str, dict],
+    texts: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    committee_anchor: Path,
+) -> str:
+    student_ids = [str(sid) for sid in neighborhood.get("student_ids", [])]
+    student_count = len(rows_by_id)
+    rows = [rows_by_id[sid] for sid in student_ids if sid in rows_by_id]
+    essay_blocks = []
+    for sid in student_ids:
+        row = rows_by_id.get(sid, {})
+        name = str(row.get("student_name") or row.get("name") or sid)
+        essay_blocks.append(f"STUDENT {sid} ({name})\n{texts.get(sid, '').strip()}")
+    pair_lines = []
+    for detail in neighborhood.get("trigger_details", []):
+        if not isinstance(detail, dict):
+            continue
+        pair_lines.append(
+            f"{detail.get('pair_key', '')}: prior_winner={detail.get('prior_winner', '')}; "
+            f"basis={detail.get('prior_basis', '')}; status={detail.get('read_status', '')}; "
+            f"triggers={detail.get('triggers', [])}; cautions={detail.get('cautions', [])}"
+        )
+    class_context = json.dumps(
+        {
+            "assignment_genre": metadata.get("assignment_genre") or metadata.get("genre") or "",
+            "grade_level": metadata.get("grade_level") or metadata.get("grade") or "",
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+    return "\n\n".join(
+        [
+            "You are doing committee-level neighborhood calibration for a writing assessment.",
+            "Rank ONLY the listed students from strongest to weakest within this local neighborhood.",
+            "Return every listed student_id exactly once in ordered_student_ids. Do not include any other students.",
+            "Use the rubric, assignment, committee anchors, and essay texts as evidence. Cohort metrics and prior pairwise reads identify the neighborhood; they are not authority.",
+            "For literary analysis, prioritize defensible interpretation, proof sufficiency, and explained textual evidence over cleaner formulaic control. Do not reward mature theme words unless they are proven by specific events.",
+            "If a cleaner essay is merely organized, formulaic, or complete while a rougher essay proves stronger meaning, place the rougher essay higher. If roughness blocks meaning or the response is unfinished scaffold, keep it lower.",
+            "For every unresolved pair_key listed below, return an edge_decisions item. Decide that pair directly even if your full-neighborhood order remains medium confidence. Use high confidence only when the pair winner is teacher-defensible after rereading both essays.",
+            "An edge_decisions winner may disagree with the broad ordered_student_ids only if the local pair is genuinely ambiguous; explain that tension in the edge rationale.",
+            f"Class context: {class_context}",
+            "Rubric:\n" + rubric.strip(),
+            "Assignment outline:\n" + outline.strip(),
+            "Committee anchors:\n" + "\n".join(committee_anchor_selection_details(committee_anchor)),
+            "Cohort row context:\n" + "\n".join(row_brief(row, student_count) for row in rows),
+            "Unresolved pairwise edges under calibration:\n" + "\n".join(pair_lines),
+            "Essays:\n\n" + "\n\n---\n\n".join(essay_blocks),
+        ]
+    )
+
+
+def group_calibration_repair_prompt(
+    raw_output: str,
+    original_prompt: str,
+    repair_reasons: list[str] | None = None,
+) -> str:
+    reason_text = "\n".join(f"- {reason}" for reason in (repair_reasons or ["invalid_json_response"]))
+    return "\n\n".join(
+        [
+            "Your previous group-calibration output did not parse as the required JSON object.",
+            "Repair reasons:",
+            reason_text,
+            "Return ONLY valid JSON. No markdown fences, no prose outside JSON.",
+            "The JSON must include ordered_student_ids, confidence, rationale, and placement_notes.",
+            "It must also include one edge_decisions item for every unresolved pair_key listed in the original task.",
+            "Original task:",
+            original_prompt,
+            "Previous invalid output:",
+            raw_output[:4000],
+        ]
+    )
+
+
+def run_group_calibration(
+    neighborhood: dict,
+    rows_by_id: dict[str, dict],
+    texts: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    committee_anchor: Path,
+) -> dict:
+    group_max_output_tokens = max(int(max_output_tokens or 0), DEFAULT_GROUP_MAX_OUTPUT_TOKENS)
+    prompt = group_calibration_prompt(
+        neighborhood=neighborhood,
+        rows_by_id=rows_by_id,
+        texts=texts,
+        rubric=rubric,
+        outline=outline,
+        metadata=metadata,
+        committee_anchor=committee_anchor,
+    )
+    response = responses_create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        reasoning=reasoning,
+        routing_path=routing,
+        text_format=GROUP_CALIBRATION_RESPONSE_FORMAT,
+        max_output_tokens=group_max_output_tokens,
+    )
+    content = extract_text(response)
+    repair_reasons = []
+    try:
+        parsed = vc.parse_json(content)
+    except ValueError:
+        repair_reasons = ["invalid_json_response"]
+        parsed = {}
+    normalized = normalize_group_calibration(neighborhood, parsed)
+    expected_edges = {str(pair_key) for pair_key in neighborhood.get("pair_keys", [])}
+    returned_edges = {str(edge.get("pair_key") or "") for edge in normalized.get("edge_decisions", [])}
+    if normalized.get("missing_student_ids"):
+        repair_reasons.append(
+            "ordered_student_ids omitted required student ids: "
+            + ", ".join(normalized.get("missing_student_ids", []))
+        )
+    missing_edges = sorted(expected_edges - returned_edges)
+    if missing_edges:
+        repair_reasons.append(
+            "edge_decisions omitted required pair_keys: " + ", ".join(missing_edges)
+        )
+    if repair_reasons:
+        repair_response = responses_create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": group_calibration_repair_prompt(content, prompt, repair_reasons),
+                }
+            ],
+            temperature=0.0,
+            reasoning="low",
+            routing_path=routing,
+            text_format=GROUP_CALIBRATION_RESPONSE_FORMAT,
+            max_output_tokens=group_max_output_tokens,
+        )
+        parsed = vc.parse_json(extract_text(repair_response))
+        normalized = normalize_group_calibration(neighborhood, parsed)
+    return normalized
+
+
+def candidate_from_group_pair(
+    left: str,
+    right: str,
+    rows_by_id: dict[str, dict],
+    neighborhood: dict,
+) -> dict:
+    left_row = rows_by_id[left]
+    right_row = rows_by_id[right]
+    left_rank = int(num(left_row.get("seed_rank"), 999999) or 999999)
+    right_rank = int(num(right_row.get("seed_rank"), 999999) or 999999)
+    higher, lower = (left, right) if left_rank <= right_rank else (right, left)
+    higher_rank, lower_rank = (left_rank, right_rank) if higher == left else (right_rank, left_rank)
+    pair_key = pair_key_from_item({"pair": [higher, lower]})
+    return {
+        "pair": [higher, lower],
+        "pair_key": pair_key,
+        "seed_order": {
+            "higher": higher,
+            "lower": lower,
+            "higher_rank": higher_rank,
+            "lower_rank": lower_rank,
+        },
+        "bucket": "group_neighborhood",
+        "committee_score": 0,
+        "triggers": ["committee_group_neighborhood_order"],
+        "trigger_details": {
+            "group_neighborhood_id": neighborhood.get("neighborhood_id", ""),
+            "escalated_cautions": [],
+        },
+        "escalated_summary": {
+            "winner": "",
+            "loser": "",
+            "winner_side": "",
+            "decision": "",
+            "confidence": "",
+            "decision_basis": "",
+            "adjudication_source": "",
+        },
+    }
+
+
+def decision_from_group_calibration(candidate: dict, calibration: dict) -> dict | None:
+    if vc.normalize_confidence(calibration.get("confidence")) != "high":
+        return None
+    order = [str(sid).strip() for sid in calibration.get("ordered_student_ids", []) if str(sid).strip()]
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    if higher not in order or lower not in order:
+        return None
+    winner = higher if order.index(higher) < order.index(lower) else lower
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    if winner == prior_winner:
+        return None
+    loser = lower if winner == higher else higher
+    winner_side = "A" if winner == higher else "B"
+    decision = "KEEP" if winner_side == "A" else "SWAP"
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    triggers = set(candidate.get("triggers") or [])
+    cautions = sorted(set(details.get("escalated_cautions") or []) | {"committee_group_calibration"})
+    polish_signal = bool(triggers & CAUTION_IGNORED_TRIGGERS) or bool(
+        set(details.get("escalated_cautions") or []) & POLISH_LIKE_CAUTIONS
+    )
+    rougher_signal = bool(set(details.get("escalated_cautions") or []) & ROUGHER_STRONGER_CAUTIONS)
+    return {
+        "pair": [higher, lower],
+        "pair_key": pair_key_from_item({"pair": [higher, lower]}),
+        "seed_order": {
+            "higher": higher,
+            "lower": lower,
+            "higher_rank": int(seed_order.get("higher_rank", 999999) or 999999),
+            "lower_rank": int(seed_order.get("lower_rank", 999999) or 999999),
+        },
+        "winner": winner,
+        "loser": loser,
+        "winner_side": winner_side,
+        "decision": decision,
+        "confidence": "high",
+        "adjudication_source": "committee_edge",
+        "decision_basis": "content_reasoning",
+        "cautions_applied": cautions,
+        "criterion_notes": [],
+        "decision_checks": {
+            "deeper_interpretation": winner_side,
+            "better_text_evidence_explanation": winner_side,
+            "cleaner_or_more_formulaic": "tie",
+            "rougher_but_stronger_content": winner_side if rougher_signal else "tie",
+            "completion_advantage": "tie",
+            "cleaner_wins_on_substance": "",
+            "rougher_loses_because": "",
+            "interpretation_depth": winner_side,
+            "proof_sufficiency": winner_side,
+            "polish_trap": polish_signal,
+            "rougher_but_stronger_latent": rougher_signal,
+            "alternate_theme_validity": winner_side,
+            "mechanics_block_meaning": False,
+            "completion_floor_applied": False,
+        },
+        "rationale": calibration.get("rationale", ""),
+        "committee_confidence": "group_high",
+        "model_metadata": {
+            "adjudication_source": "committee_edge",
+            "committee_read": "group-neighborhood-calibration",
+            "committee_override_reason": "committee_group_calibration_override",
+            "supersedes_pair_key": pair_key_from_item({"pair": [higher, lower]}),
+            "phase": "3d",
+        },
+        "committee_edge_trace": {
+            "read": "group-neighborhood-calibration",
+            "override_reason": "committee_group_calibration_override",
+            "triggers": sorted(triggers),
+            "committee_score": candidate.get("committee_score", 0),
+            "prior_winner": prior_winner,
+            "neighborhood_id": calibration.get("neighborhood_id", ""),
+            "ordered_student_ids": order,
+            "placement_notes": calibration.get("placement_notes", []),
+        },
+    }
+
+
+def decision_from_group_edge_decision(
+    candidate: dict,
+    edge: dict,
+    calibration: dict,
+) -> dict | None:
+    if vc.normalize_confidence(edge.get("confidence")) != "high":
+        return None
+    if truthy(edge.get("mechanics_block_meaning")) or truthy(edge.get("completion_floor_applied")):
+        return None
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    winner = str(edge.get("winner") or "").strip()
+    if winner not in {higher, lower}:
+        return None
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    if winner == prior_winner:
+        return None
+    loser = lower if winner == higher else higher
+    winner_side = "A" if winner == higher else "B"
+    decision = decision_from_group_calibration(
+        {
+            **candidate,
+            "trigger_details": {
+                **(candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}),
+                "escalated_cautions": list(
+                    set(
+                        (
+                            candidate.get("trigger_details")
+                            if isinstance(candidate.get("trigger_details"), dict)
+                            else {}
+                        ).get("escalated_cautions", [])
+                    )
+                ),
+            },
+        },
+        {
+            **calibration,
+            "confidence": "high",
+            "ordered_student_ids": [winner, loser],
+            "rationale": str(edge.get("rationale") or calibration.get("rationale") or ""),
+        },
+    )
+    if decision is None:
+        return None
+    checks = decision.get("decision_checks") if isinstance(decision.get("decision_checks"), dict) else {}
+    checks["polish_trap"] = truthy(edge.get("polish_trap"))
+    checks["rougher_but_stronger_latent"] = truthy(edge.get("rougher_but_stronger_latent"))
+    checks["mechanics_block_meaning"] = False
+    checks["completion_floor_applied"] = False
+    decision["decision_checks"] = checks
+    decision["winner"] = winner
+    decision["loser"] = loser
+    decision["winner_side"] = winner_side
+    decision["decision"] = "KEEP" if winner_side == "A" else "SWAP"
+    decision["rationale"] = str(edge.get("rationale") or decision.get("rationale") or "")
+    decision["committee_confidence"] = "group_edge_high"
+    metadata = dict(decision.get("model_metadata") or {})
+    metadata["committee_override_reason"] = "committee_group_edge_decision_override"
+    decision["model_metadata"] = metadata
+    trace = dict(decision.get("committee_edge_trace") or {})
+    trace["override_reason"] = "committee_group_edge_decision_override"
+    trace["edge_decision"] = {
+        "pair_key": edge.get("pair_key", ""),
+        "winner": winner,
+        "confidence": vc.normalize_confidence(edge.get("confidence")),
+        "polish_trap": truthy(edge.get("polish_trap")),
+        "rougher_but_stronger_latent": truthy(edge.get("rougher_but_stronger_latent")),
+    }
+    decision["committee_edge_trace"] = trace
+    return decision
+
+
+def run_group_calibration_path(
+    *,
+    selected: list[dict],
+    rows: list[dict],
+    read_results: list[dict],
+    texts_by_id: dict[str, str],
+    rubric: str,
+    outline: str,
+    metadata: dict,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    committee_anchor: Path,
+    live: bool,
+    live_group: bool,
+    fixtures: list[dict],
+    max_groups: int,
+    max_students: int,
+    existing_decision_keys: set[str],
+) -> tuple[list[dict], list[dict], dict]:
+    rows_by_id = {str(row.get("student_id") or ""): row for row in vc.prepare_rows(rows)}
+    neighborhoods = build_group_calibration_neighborhoods(
+        selected=selected,
+        rows=rows,
+        read_results=read_results,
+        max_groups=max_groups,
+        max_students=max_students,
+    )
+    candidate_by_key = {str(candidate.get("pair_key") or ""): candidate for candidate in selected}
+    decisions: list[dict] = []
+    results: list[dict] = []
+    read_count = 0
+    skipped_existing = 0
+    for index, neighborhood in enumerate(neighborhoods):
+        calibration = group_calibration_from_fixture(neighborhood, fixtures, index)
+        source = "fixture" if calibration is not None else ""
+        if calibration is None and live and live_group:
+            calibration = run_group_calibration(
+                neighborhood,
+                rows_by_id,
+                texts_by_id,
+                rubric,
+                outline,
+                metadata,
+                model=model,
+                routing=routing,
+                reasoning=reasoning,
+                max_output_tokens=max_output_tokens,
+                committee_anchor=committee_anchor,
+            )
+            source = "live"
+        result = {
+            "neighborhood_id": neighborhood.get("neighborhood_id", ""),
+            "student_ids": neighborhood.get("student_ids", []),
+            "pair_keys": neighborhood.get("pair_keys", []),
+            "source": source or "not_read",
+            "override_pair_keys": [],
+            "edge_decision_pair_keys": [],
+            "support_pair_keys": [],
+            "skipped_existing_decision_keys": [],
+        }
+        if calibration is None:
+            result["status"] = "not_read"
+            results.append(result)
+            continue
+        read_count += 1
+        result["status"] = "read"
+        result["calibration"] = calibration
+        for edge_decision in calibration.get("edge_decisions", []):
+            pair_key = str(edge_decision.get("pair_key") or "")
+            if not pair_key or pair_key in existing_decision_keys:
+                continue
+            candidate = candidate_by_key.get(pair_key)
+            if candidate is None:
+                continue
+            decision = decision_from_group_edge_decision(candidate, edge_decision, calibration)
+            if decision is None:
+                continue
+            decisions.append(decision)
+            existing_decision_keys.add(pair_key)
+            result["override_pair_keys"].append(pair_key)
+            result["edge_decision_pair_keys"].append(pair_key)
+        ordered_ids = [
+            str(sid).strip()
+            for sid in calibration.get("ordered_student_ids", [])
+            if str(sid).strip() in rows_by_id
+        ]
+        group_pair_keys = []
+        for left_index, left in enumerate(ordered_ids):
+            for right in ordered_ids[left_index + 1:]:
+                group_pair_keys.append(pair_key_from_item({"pair": [left, right]}))
+        result["group_order_pair_keys"] = group_pair_keys
+        unresolved_pair_keys = {str(pair_key) for pair_key in neighborhood.get("pair_keys", [])}
+        for pair_key in group_pair_keys:
+            if pair_key in existing_decision_keys:
+                skipped_existing += 1
+                result["skipped_existing_decision_keys"].append(pair_key)
+                continue
+            candidate = candidate_by_key.get(pair_key)
+            if candidate is None:
+                left, right = pair_key.split("::", 1)
+                if left not in rows_by_id or right not in rows_by_id:
+                    continue
+                candidate = candidate_from_group_pair(left, right, rows_by_id, neighborhood)
+            decision = decision_from_group_calibration(candidate, calibration)
+            if decision is None:
+                continue
+            decisions.append(decision)
+            existing_decision_keys.add(pair_key)
+            if pair_key in unresolved_pair_keys:
+                result["override_pair_keys"].append(pair_key)
+            else:
+                result["support_pair_keys"].append(pair_key)
+        results.append(result)
+    summary = {
+        "enabled": bool(live or fixtures),
+        "live": bool(live and live_group),
+        "fixture": bool(fixtures),
+        "max_groups": int(max_groups),
+        "max_students": int(max_students),
+        "neighborhood_count": len(neighborhoods),
+        "read_count": read_count,
+        "override_count": len(decisions),
+        "skipped_existing_decision_count": skipped_existing,
+    }
+    return decisions, results, summary
+
+
 def placement_context_lines(
     candidate: dict,
     read_a: dict,
@@ -1897,7 +2620,7 @@ def run_read_a_path(
             decisions.append(decision_from_committee_read(candidate, read, reason_a))
         read_results.append(record)
     return decisions, read_results, {
-        "enabled": bool(live or fixture_by_key or b_fixture),
+        "enabled": bool(live or fixture_by_key or b_fixture or c_fixture),
         "live": bool(live),
         "fixture": bool(fixture_by_key),
         "read_b_fixture": bool(b_fixture),
@@ -1991,6 +2714,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
+        "group_calibration_fixture": str(args.group_calibration_fixture) if args.group_calibration_fixture else "",
     }
 
 
@@ -2026,6 +2750,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Read C runs only for unresolved high-leverage A/B outcomes."
         ),
     )
+    parser.add_argument(
+        "--group-calibration-fixture",
+        type=Path,
+        default=None,
+        help=(
+            "Optional offline group-neighborhood calibration fixture. This runs after unresolved "
+            "A/B/C reads and can emit committee_edge overrides from a high-confidence local order."
+        ),
+    )
     parser.add_argument("--live", action="store_true", help="Run live committee adjudication for selected candidates.")
     parser.add_argument("--max-reads", type=int, default=DEFAULT_MAX_READS, help="Maximum selected candidates to read in live/fixture mode.")
     parser.add_argument(
@@ -2049,6 +2782,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-live-read-c",
         action="store_true",
         help="Disable live Read-C placement audits even when --live is set; fixture Read-C still works.",
+    )
+    parser.add_argument(
+        "--max-group-calibrations",
+        type=int,
+        default=DEFAULT_MAX_GROUP_CALIBRATIONS,
+        help="Maximum unresolved neighborhoods to calibrate after A/B/C reads.",
+    )
+    parser.add_argument(
+        "--max-group-students",
+        type=int,
+        default=DEFAULT_MAX_GROUP_STUDENTS,
+        help="Maximum students per group-neighborhood calibration.",
+    )
+    parser.add_argument(
+        "--no-live-group-calibration",
+        action="store_true",
+        help="Disable live group-neighborhood calibration even when --live is set; fixture calibration still works.",
     )
     parser.add_argument("--rubric", type=Path, default=Path(DEFAULT_RUBRIC))
     parser.add_argument("--outline", type=Path, default=Path(DEFAULT_OUTLINE))
@@ -2101,6 +2851,7 @@ def main() -> int:
         blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
         read_b_fixture = load_blind_read_fixture(args.read_b_fixture)
         read_c_fixture = load_blind_read_fixture(args.read_c_fixture)
+        group_calibration_fixture = load_group_calibration_fixture(args.group_calibration_fixture)
     except Exception as exc:
         report = {
             "generated_at": generated_at,
@@ -2165,7 +2916,20 @@ def main() -> int:
         "skipped_max_read_b": 0,
         "skipped_max_read_c": 0,
     }
-    if args.live or blind_read_fixture or read_b_fixture or read_c_fixture:
+    group_decisions: list[dict] = []
+    group_results: list[dict] = []
+    group_summary = {
+        "enabled": False,
+        "live": False,
+        "fixture": False,
+        "max_groups": int(args.max_group_calibrations),
+        "max_students": int(args.max_group_students),
+        "neighborhood_count": 0,
+        "read_count": 0,
+        "override_count": 0,
+        "skipped_existing_decision_count": 0,
+    }
+    if args.live or blind_read_fixture or read_b_fixture or read_c_fixture or group_calibration_fixture:
         try:
             routing_payload = load_optional_json(args.routing)
             task = task_config(routing_payload, "literary_committee")
@@ -2204,6 +2968,32 @@ def main() -> int:
                 read_b_fixture=read_b_fixture,
                 read_c_fixture=read_c_fixture,
             )
+            if read_a_results and (args.live or group_calibration_fixture):
+                existing_keys = {
+                    pair_key_from_item(decision)
+                    for decision in (manual_decisions + read_a_decisions)
+                    if pair_key_from_item(decision)
+                }
+                group_decisions, group_results, group_summary = run_group_calibration_path(
+                    selected=selected,
+                    rows=rows,
+                    read_results=read_a_results,
+                    texts_by_id=texts_by_id,
+                    rubric=rubric,
+                    outline=outline,
+                    metadata=class_metadata,
+                    model=model,
+                    routing=str(args.routing),
+                    reasoning=str(reasoning),
+                    max_output_tokens=max_output_tokens,
+                    committee_anchor=args.committee_anchor,
+                    live=bool(args.live),
+                    live_group=not bool(args.no_live_group_calibration),
+                    fixtures=group_calibration_fixture,
+                    max_groups=args.max_group_calibrations,
+                    max_students=args.max_group_students,
+                    existing_decision_keys=existing_keys,
+                )
         except Exception as exc:
             report = {
                 "generated_at": generated_at,
@@ -2212,10 +3002,11 @@ def main() -> int:
                 "source_paths": source_paths,
                 "error": str(exc),
                 "read_a": read_a_summary,
+                "group_calibration": group_summary,
             }
             write_json(args.report_output, report)
             return 1
-    decisions = manual_decisions + read_a_decisions
+    decisions = manual_decisions + read_a_decisions + group_decisions
     merged_payload = merged_checks_payload(
         escalated_payload=escalated_payload,
         escalated_checks=escalated_checks,
@@ -2267,6 +3058,8 @@ def main() -> int:
             "skipped_max_reads": int(read_a_summary.get("skipped_max_read_c", 0) or 0),
         },
         "read_a_results": read_a_results,
+        "group_calibration": group_summary,
+        "group_calibration_results": group_results,
     }
     trigger_counts = Counter()
     bucket_counts = Counter()
@@ -2329,6 +3122,7 @@ def main() -> int:
         "read_a": read_a_summary,
         "read_b": decisions_payload["read_b"],
         "read_c": decisions_payload["read_c"],
+        "group_calibration": group_summary,
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)
