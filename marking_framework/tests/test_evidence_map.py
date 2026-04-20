@@ -31,6 +31,45 @@ def maps(*student_ids):
     }
 
 
+def rows(*student_ids):
+    return [{"student_id": student_id, "seed_rank": str(index)} for index, student_id in enumerate(student_ids, start=1)]
+
+
+def neighborhood(
+    *,
+    student_ids,
+    action="needs_group_calibration",
+    contradicting_edges=None,
+    ambiguous_edges=None,
+):
+    student_ids = list(student_ids)
+    return {
+        "generated_at": "fixture",
+        "phase": "offline_evidence_neighborhood_v1",
+        "enabled": True,
+        "source_paths": {},
+        "counts": {
+            "candidate_edges": 0,
+            "evidence_edges": len(contradicting_edges or []),
+            "contradicting_edges": len(contradicting_edges or []),
+            "ambiguous_edges": len(ambiguous_edges or []),
+            "neighborhoods": 1,
+        },
+        "neighborhoods": [
+            {
+                "neighborhood_id": "evidence_neighborhood_1",
+                "student_ids": student_ids,
+                "seed_order": student_ids,
+                "evidence_order": list(reversed(student_ids)),
+                "contradicting_edges": contradicting_edges or [],
+                "ambiguous_edges": ambiguous_edges or [],
+                "recommended_next_action": action,
+                "reason": "fixture",
+            }
+        ],
+    }
+
+
 def test_extract_evidence_units_counts_claim_moments_and_commentary():
     text = (
         "Ghost changes because Coach gives him a second chance. "
@@ -238,3 +277,109 @@ def test_neighborhood_report_disabled_without_evidence_map():
     assert report["enabled"] is False
     assert report["reason"] == "evidence_map_missing"
     assert report["neighborhoods"] == []
+
+
+def test_group_packets_keep_pair_only_component_as_pair_review():
+    report = em.build_evidence_neighborhood_report(
+        maps_by_id=maps("s022", "s019"),
+        rows=rows("s022", "s019"),
+        candidates=[candidate(("s022", "s019"), "s019", "s022", "high", 4.0)],
+    )
+
+    packets = em.build_evidence_group_calibration_packets(
+        neighborhood_report=report,
+        maps_by_id=maps("s022", "s019"),
+        rows=rows("s022", "s019"),
+    )
+
+    assert packets["enabled"] is True
+    assert packets["counts"]["selected_packets"] == 1
+    packet = packets["packets"][0]
+    assert packet["student_ids"] == ["s022", "s019"]
+    assert packet["recommended_read_type"] == "pair_guard_review"
+    assert packet["triggering_edges"][0]["pair_key"] == "s019::s022"
+
+
+def test_group_packets_split_large_component_into_bounded_packets():
+    student_ids = [f"s{index:03d}" for index in range(1, 21)]
+    edges = [
+        candidate((student_ids[index], student_ids[index + 1]), student_ids[index], student_ids[index + 1], "high", 3.0)[
+            "evidence_map_pair_signal"
+        ]
+        for index in range(19)
+    ]
+    for edge in edges:
+        edge["contradicts_active_winner"] = True
+    report = neighborhood(student_ids=student_ids, contradicting_edges=edges)
+
+    packets = em.build_evidence_group_calibration_packets(
+        neighborhood_report=report,
+        maps_by_id=maps(*student_ids),
+        rows=rows(*student_ids),
+        max_packet_students=5,
+        max_packets=12,
+    )
+
+    assert packets["enabled"] is True
+    assert packets["counts"]["selected_packets"] > 1
+    assert packets["counts"]["selected_packets"] <= 12
+    assert all(len(packet["student_ids"]) <= 5 for packet in packets["packets"])
+    assert all(packet["recommended_read_type"] == "local_order_calibration" for packet in packets["packets"])
+    assert not any(len(packet["student_ids"]) == 20 for packet in packets["packets"])
+
+
+def test_group_packets_attach_ambiguous_edges_to_relevant_packet():
+    report = em.build_evidence_neighborhood_report(
+        maps_by_id=maps("s009", "s015", "s003", "s013"),
+        rows=rows("s015", "s003", "s009", "s013"),
+        candidates=[
+            candidate(("s015", "s009"), "s015", "s009", "high", 4.0),
+            candidate(("s003", "s009"), "s003", "s009", "high", 4.0),
+            candidate(("s003", "s013"), "s003", "tie", "low", 0.2),
+        ],
+    )
+
+    packets = em.build_evidence_group_calibration_packets(
+        neighborhood_report=report,
+        maps_by_id=maps("s009", "s015", "s003", "s013"),
+        rows=rows("s015", "s003", "s009", "s013"),
+        max_packet_students=3,
+    )
+
+    assert any(
+        "s003::s013" in {edge["pair_key"] for edge in packet["ambiguous_edges"]}
+        and {"s003", "s013"} <= set(packet["student_ids"])
+        for packet in packets["packets"]
+    )
+
+
+def test_group_packet_priority_is_stable_when_edges_are_reordered():
+    student_ids = [f"s{index:03d}" for index in range(1, 11)]
+    edges = [
+        candidate((student_ids[index], student_ids[index + 1]), student_ids[index], student_ids[index + 1], "high", 3.0)[
+            "evidence_map_pair_signal"
+        ]
+        for index in range(9)
+    ]
+    for edge in edges:
+        edge["contradicts_active_winner"] = True
+
+    forward = em.build_evidence_group_calibration_packets(
+        neighborhood_report=neighborhood(student_ids=student_ids, contradicting_edges=edges),
+        maps_by_id=maps(*student_ids),
+        rows=rows(*student_ids),
+        max_packet_students=4,
+        max_packets=6,
+    )
+    reversed_edges = list(reversed(edges))
+    backward = em.build_evidence_group_calibration_packets(
+        neighborhood_report=neighborhood(student_ids=student_ids, contradicting_edges=reversed_edges),
+        maps_by_id=maps(*student_ids),
+        rows=rows(*student_ids),
+        max_packet_students=4,
+        max_packets=6,
+    )
+
+    forward_shape = [(packet["student_ids"], packet["priority_score"]) for packet in forward["packets"]]
+    backward_shape = [(packet["student_ids"], packet["priority_score"]) for packet in backward["packets"]]
+    assert forward_shape == backward_shape

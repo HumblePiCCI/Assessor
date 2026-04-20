@@ -37,6 +37,9 @@ try:
         polish_vs_substance_gap,
     )
     from scripts.evidence_map import (
+        DEFAULT_MAX_GROUP_PACKETS,
+        DEFAULT_MAX_PACKET_STUDENTS,
+        build_evidence_group_calibration_packets,
         build_evidence_neighborhood_report,
         compare_evidence_maps,
         evidence_map_summary,
@@ -64,6 +67,9 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         polish_vs_substance_gap,
     )
     from evidence_map import (  # type: ignore  # pragma: no cover
+        DEFAULT_MAX_GROUP_PACKETS,
+        DEFAULT_MAX_PACKET_STUDENTS,
+        build_evidence_group_calibration_packets,
         build_evidence_neighborhood_report,
         compare_evidence_maps,
         evidence_map_summary,
@@ -94,6 +100,7 @@ DEFAULT_COMMITTEE_ANCHOR = "inputs/pairwise_anchors/literary_analysis.committee.
 DEFAULT_SOURCE_CALIBRATION_PATH = str(DEFAULT_SOURCE_CALIBRATION.relative_to(Path(__file__).resolve().parents[1]))
 DEFAULT_EVIDENCE_MAP = "outputs/evidence_map.json"
 DEFAULT_EVIDENCE_NEIGHBORHOOD_OUT = "outputs/evidence_neighborhood_report.json"
+DEFAULT_EVIDENCE_GROUP_PACKETS_OUT = "outputs/evidence_group_calibration_packets.json"
 DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
@@ -3539,6 +3546,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "source_calibration": str(args.source_calibration),
         "evidence_map": str(args.evidence_map),
         "evidence_neighborhood_output": str(args.evidence_neighborhood_output),
+        "evidence_group_packets_output": str(args.evidence_group_packets_output),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
@@ -3660,6 +3668,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--report-output", type=Path, default=Path(DEFAULT_REPORT_OUT))
     parser.add_argument("--merged-output", type=Path, default=Path(DEFAULT_MERGED_OUT))
     parser.add_argument("--evidence-neighborhood-output", type=Path, default=Path(DEFAULT_EVIDENCE_NEIGHBORHOOD_OUT))
+    parser.add_argument("--evidence-group-packets-output", type=Path, default=Path(DEFAULT_EVIDENCE_GROUP_PACKETS_OUT))
+    parser.add_argument("--max-evidence-packet-students", type=int, default=DEFAULT_MAX_PACKET_STUDENTS)
+    parser.add_argument("--max-evidence-group-packets", type=int, default=DEFAULT_MAX_GROUP_PACKETS)
     parser.add_argument("--live-trace-output", type=Path, default=None)
     parser.add_argument("--max-candidates", type=int, default=CandidateConfig.max_candidates)
     parser.add_argument("--max-top-pack", type=int, default=CandidateConfig.max_top_pack)
@@ -3695,6 +3706,11 @@ def main() -> int:
         and args.escalated != Path(DEFAULT_ESCALATED)
     ):
         args.evidence_neighborhood_output = args.escalated.with_name("evidence_neighborhood_report.json")
+    if (
+        args.evidence_group_packets_output == Path(DEFAULT_EVIDENCE_GROUP_PACKETS_OUT)
+        and args.escalated != Path(DEFAULT_ESCALATED)
+    ):
+        args.evidence_group_packets_output = args.escalated.with_name("evidence_group_calibration_packets.json")
     generated_at = now_iso()
     source_paths = artifact_source_paths(args)
     try:
@@ -3766,6 +3782,20 @@ def main() -> int:
             "committee_candidates": str(args.candidates_output),
             "scores": str(args.scores),
         },
+    )
+    evidence_group_packets = build_evidence_group_calibration_packets(
+        neighborhood_report=evidence_neighborhood_report,
+        maps_by_id=evidence_maps_by_id,
+        rows=rows,
+        generated_at=generated_at,
+        source_paths={
+            "evidence_map": str(args.evidence_map),
+            "evidence_neighborhood_report": str(args.evidence_neighborhood_output),
+            "committee_candidates": str(args.candidates_output),
+            "scores": str(args.scores),
+        },
+        max_packet_students=args.max_evidence_packet_students,
+        max_packets=args.max_evidence_group_packets,
     )
     read_a_decisions = []
     read_a_results = []
@@ -4075,6 +4105,7 @@ def main() -> int:
     write_json(args.live_trace_output, live_trace_payload)
     write_json(args.report_output, report_payload)
     write_json(args.evidence_neighborhood_output, evidence_neighborhood_report)
+    write_json(args.evidence_group_packets_output, evidence_group_packets)
     write_json(args.merged_output, merged_payload)
     return 0
 

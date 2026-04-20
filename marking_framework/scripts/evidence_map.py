@@ -31,6 +31,9 @@ DEFAULT_OUTPUT = "outputs/evidence_map.json"
 DEFAULT_PAIR_SIGNALS_OUTPUT = "outputs/evidence_map_pair_signals.json"
 DEFAULT_SCORES = "outputs/consensus_scores.csv"
 DEFAULT_NEIGHBORHOOD_OUTPUT = "outputs/evidence_neighborhood_report.json"
+DEFAULT_GROUP_PACKETS_OUTPUT = "outputs/evidence_group_calibration_packets.json"
+DEFAULT_MAX_PACKET_STUDENTS = 5
+DEFAULT_MAX_GROUP_PACKETS = 12
 MEDIUM_HIGH_CONFIDENCE = frozenset({"medium", "high"})
 
 WORD_RE = re.compile(r"[A-Za-z0-9']+")
@@ -1036,6 +1039,348 @@ def build_evidence_neighborhood_report(
     }
 
 
+def edge_margin(edge: dict) -> float:
+    try:
+        return float(edge.get("margin") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def edge_priority_score(edge: dict, ranks: dict[str, int]) -> float:
+    pair = [str(sid) for sid in edge.get("pair", [])]
+    best_rank = min((ranks.get(sid, 999999) for sid in pair), default=999999)
+    rank_boost = max(0.0, 35.0 - min(float(best_rank), 35.0))
+    confidence = str(edge.get("confidence") or "").lower()
+    confidence_boost = 16.0 if confidence == "high" else 10.0 if confidence == "medium" else 3.0
+    contradiction_boost = 42.0 if edge.get("contradicts_active_winner") and not edge.get("ambiguous") else 0.0
+    ambiguity_boost = 18.0 if edge.get("ambiguous") else 0.0
+    return round(contradiction_boost + ambiguity_boost + confidence_boost + min(22.0, edge_margin(edge) * 4.0) + rank_boost, 6)
+
+
+def ordered_subset(student_ids: list[str], order: list[str], ranks: dict[str, int]) -> list[str]:
+    student_set = set(student_ids)
+    ordered = [student_id for student_id in order if student_id in student_set]
+    missing = sorted(student_set - set(ordered), key=lambda sid: (ranks.get(sid, 999999), sid))
+    return ordered + missing
+
+
+def edge_centered_student_set(
+    *,
+    pair: list[str],
+    seed_order: list[str],
+    evidence_order_values: list[str],
+    max_packet_students: int,
+) -> list[str]:
+    max_packet_students = max(2, int(max_packet_students))
+    selected = []
+    for student_id in pair:
+        if student_id and student_id not in selected:
+            selected.append(student_id)
+    orders = [seed_order, evidence_order_values]
+    radius = 0
+    max_order_len = max([len(order) for order in orders if order] or [0])
+    while len(selected) < max_packet_students and radius <= max_order_len:
+        for order in orders:
+            for anchor in pair:
+                if anchor not in order:
+                    continue
+                index = order.index(anchor)
+                for neighbor_index in (index - radius, index + radius):
+                    if 0 <= neighbor_index < len(order):
+                        neighbor = order[neighbor_index]
+                        if neighbor not in selected:
+                            selected.append(neighbor)
+                            if len(selected) >= max_packet_students:
+                                break
+                if len(selected) >= max_packet_students:
+                    break
+            if len(selected) >= max_packet_students:
+                break
+        radius += 1
+    seed_positions = {student_id: index for index, student_id in enumerate(seed_order)}
+    return sorted(selected[:max_packet_students], key=lambda sid: (seed_positions.get(sid, 999999), sid))
+
+
+def packet_edges_for_students(edges: list[dict], student_ids: list[str], *, ambiguous: bool) -> list[dict]:
+    student_set = set(student_ids)
+    selected = []
+    for edge in edges:
+        pair = edge.get("pair") if isinstance(edge.get("pair"), list) else []
+        if len(pair) == 2 and set(str(sid) for sid in pair) <= student_set and bool(edge.get("ambiguous")) == ambiguous:
+            selected.append(edge)
+    return sorted(selected, key=lambda edge: edge.get("pair_key", ""))
+
+
+def packet_read_type(action: str) -> str:
+    if action == "pair_guard_only":
+        return "pair_guard_review"
+    if action == "needs_group_calibration":
+        return "local_order_calibration"
+    return "insufficient_signal_review"
+
+
+def packet_priority_score(
+    *,
+    read_type: str,
+    student_ids: list[str],
+    triggering_edges: list[dict],
+    ambiguous_edges: list[dict],
+    ranks: dict[str, int],
+) -> int:
+    base = {
+        "local_order_calibration": 90.0,
+        "pair_guard_review": 62.0,
+        "insufficient_signal_review": 24.0,
+    }.get(read_type, 20.0)
+    edge_score = sum(edge_priority_score(edge, ranks) for edge in triggering_edges)
+    ambiguity_score = sum(edge_priority_score(edge, ranks) * 0.55 for edge in ambiguous_edges)
+    best_rank = min((ranks.get(student_id, 999999) for student_id in student_ids), default=999999)
+    rank_boost = max(0.0, 20.0 - min(float(best_rank), 20.0))
+    density_boost = min(18.0, (len(triggering_edges) * 4.0) + (len(ambiguous_edges) * 2.0))
+    return int(round(base + edge_score + ambiguity_score + rank_boost + density_boost))
+
+
+def make_group_packet(
+    *,
+    source_neighborhood: dict,
+    student_ids: list[str],
+    all_edges: list[dict],
+    ranks: dict[str, int],
+    maps_by_id: dict[str, dict],
+    reason: str,
+) -> dict:
+    source_seed_order = [str(student_id) for student_id in source_neighborhood.get("seed_order", [])]
+    source_evidence_order = [str(student_id) for student_id in source_neighborhood.get("evidence_order", [])]
+    seed_order = ordered_subset(student_ids, source_seed_order, ranks)
+    evidence_order_values = ordered_subset(student_ids, source_evidence_order, ranks)
+    triggering_edges = packet_edges_for_students(all_edges, seed_order, ambiguous=False)
+    ambiguous_edges = packet_edges_for_students(all_edges, seed_order, ambiguous=True)
+    read_type = packet_read_type(str(source_neighborhood.get("recommended_next_action") or "insufficient_signal"))
+    return {
+        "source_neighborhood_id": source_neighborhood.get("neighborhood_id", ""),
+        "source_neighborhood_action": source_neighborhood.get("recommended_next_action", ""),
+        "source_component_size": len(source_neighborhood.get("student_ids", []) or []),
+        "student_ids": seed_order,
+        "seed_order": seed_order,
+        "evidence_order": evidence_order_values,
+        "triggering_edges": triggering_edges,
+        "ambiguous_edges": ambiguous_edges,
+        "recommended_read_type": read_type,
+        "priority_score": packet_priority_score(
+            read_type=read_type,
+            student_ids=seed_order,
+            triggering_edges=triggering_edges,
+            ambiguous_edges=ambiguous_edges,
+            ranks=ranks,
+        ),
+        "evidence_scores": {student_id: evidence_score_for(student_id, maps_by_id) for student_id in seed_order},
+        "reason": reason,
+    }
+
+
+def sliding_seed_windows(student_ids: list[str], *, max_packet_students: int) -> list[list[str]]:
+    max_packet_students = max(2, int(max_packet_students))
+    if len(student_ids) <= max_packet_students:
+        return [list(student_ids)]
+    step = max(1, max_packet_students - 1)
+    windows = []
+    for start in range(0, len(student_ids), step):
+        window = student_ids[start : start + max_packet_students]
+        if len(window) < 2 and windows:
+            for student_id in window:
+                if student_id not in windows[-1]:
+                    windows[-1].append(student_id)
+            continue
+        windows.append(window)
+        if start + max_packet_students >= len(student_ids):
+            break
+    return windows
+
+
+def candidate_packets_for_neighborhood(
+    *,
+    neighborhood: dict,
+    ranks: dict[str, int],
+    maps_by_id: dict[str, dict],
+    max_packet_students: int,
+) -> list[dict]:
+    student_ids = [str(student_id) for student_id in neighborhood.get("student_ids", []) if str(student_id)]
+    seed_order = ordered_subset(student_ids, [str(sid) for sid in neighborhood.get("seed_order", [])], ranks)
+    evidence_order_values = ordered_subset(student_ids, [str(sid) for sid in neighborhood.get("evidence_order", [])], ranks)
+    all_edges = sorted(
+        [
+            edge for edge in (neighborhood.get("contradicting_edges", []) or []) + (neighborhood.get("ambiguous_edges", []) or [])
+            if isinstance(edge, dict)
+        ],
+        key=lambda edge: edge.get("pair_key", ""),
+    )
+    action = str(neighborhood.get("recommended_next_action") or "insufficient_signal")
+    if not student_ids:
+        return []
+    if len(seed_order) <= max_packet_students:
+        return [
+            make_group_packet(
+                source_neighborhood=neighborhood,
+                student_ids=seed_order,
+                all_edges=all_edges,
+                ranks=ranks,
+                maps_by_id=maps_by_id,
+                reason="whole_neighborhood_within_packet_limit",
+            )
+        ]
+
+    packets_by_students: dict[tuple[str, ...], dict] = {}
+    significant_edges = sorted(
+        all_edges,
+        key=lambda edge: (-edge_priority_score(edge, ranks), edge.get("pair_key", "")),
+    )
+    for edge in significant_edges:
+        pair = [str(student_id) for student_id in edge.get("pair", []) if str(student_id)]
+        if len(pair) != 2:
+            continue
+        packet_students = edge_centered_student_set(
+            pair=pair,
+            seed_order=seed_order,
+            evidence_order_values=evidence_order_values,
+            max_packet_students=max_packet_students,
+        )
+        packet = make_group_packet(
+            source_neighborhood=neighborhood,
+            student_ids=packet_students,
+            all_edges=all_edges,
+            ranks=ranks,
+            maps_by_id=maps_by_id,
+            reason=(
+                "edge_centered_local_order_packet"
+                if action == "needs_group_calibration"
+                else "edge_centered_pair_packet"
+            ),
+        )
+        key = tuple(packet["student_ids"])
+        if key not in packets_by_students or packet["priority_score"] > packets_by_students[key]["priority_score"]:
+            packets_by_students[key] = packet
+
+    if action == "needs_group_calibration":
+        for window in sliding_seed_windows(seed_order, max_packet_students=max_packet_students):
+            packet = make_group_packet(
+                source_neighborhood=neighborhood,
+                student_ids=window,
+                all_edges=all_edges,
+                ranks=ranks,
+                maps_by_id=maps_by_id,
+                reason="seed_order_window_for_component_coverage",
+            )
+            key = tuple(packet["student_ids"])
+            if key not in packets_by_students or packet["priority_score"] > packets_by_students[key]["priority_score"]:
+                packets_by_students[key] = packet
+
+    return sorted(
+        packets_by_students.values(),
+        key=lambda packet: (
+            -int(packet.get("priority_score", 0)),
+            packet.get("recommended_read_type", ""),
+            packet.get("student_ids", []),
+        ),
+    )
+
+
+def finalize_group_packets(candidate_packets: list[dict], *, max_packets: int) -> tuple[list[dict], list[dict]]:
+    max_packets = max(1, int(max_packets))
+    ordered = sorted(
+        candidate_packets,
+        key=lambda packet: (
+            -int(packet.get("priority_score", 0)),
+            packet.get("source_neighborhood_id", ""),
+            packet.get("student_ids", []),
+        ),
+    )
+    selected = []
+    skipped = []
+    for index, packet in enumerate(ordered, start=1):
+        item = dict(packet)
+        item["packet_id"] = f"evidence_group_packet_{index:03d}"
+        if len(selected) < max_packets:
+            item["selection_status"] = "selected"
+            item["skip_reason"] = ""
+            selected.append(item)
+        else:
+            item["selection_status"] = "skipped"
+            item["skip_reason"] = "max_group_packets_exceeded"
+            skipped.append(item)
+    return selected, skipped
+
+
+def build_evidence_group_calibration_packets(
+    *,
+    neighborhood_report: dict,
+    maps_by_id: dict[str, dict],
+    rows: list[dict],
+    generated_at: str | None = None,
+    source_paths: dict | None = None,
+    max_packet_students: int = DEFAULT_MAX_PACKET_STUDENTS,
+    max_packets: int = DEFAULT_MAX_GROUP_PACKETS,
+) -> dict:
+    generated_at = generated_at or now_iso()
+    source_paths = source_paths or {}
+    enabled = bool(neighborhood_report.get("enabled"))
+    if not enabled:
+        return {
+            "generated_at": generated_at,
+            "phase": "offline_evidence_group_calibration_packets_v1",
+            "enabled": False,
+            "reason": neighborhood_report.get("reason", "evidence_neighborhood_report_disabled"),
+            "source_paths": source_paths,
+            "config": {
+                "max_packet_students": max_packet_students,
+                "max_packets": max_packets,
+            },
+            "counts": {
+                "neighborhoods": 0,
+                "candidate_packets": 0,
+                "selected_packets": 0,
+                "skipped_packets": 0,
+            },
+            "packets": [],
+            "skipped": [],
+        }
+    ranks = student_rank_map(rows)
+    neighborhoods = [
+        neighborhood for neighborhood in neighborhood_report.get("neighborhoods", [])
+        if isinstance(neighborhood, dict)
+    ]
+    candidate_packets = []
+    for neighborhood in neighborhoods:
+        candidate_packets.extend(
+            candidate_packets_for_neighborhood(
+                neighborhood=neighborhood,
+                ranks=ranks,
+                maps_by_id=maps_by_id,
+                max_packet_students=max_packet_students,
+            )
+        )
+    selected, skipped = finalize_group_packets(candidate_packets, max_packets=max_packets)
+    read_type_counts = Counter(packet.get("recommended_read_type", "") for packet in selected)
+    return {
+        "generated_at": generated_at,
+        "phase": "offline_evidence_group_calibration_packets_v1",
+        "enabled": True,
+        "source_paths": source_paths,
+        "config": {
+            "max_packet_students": max_packet_students,
+            "max_packets": max_packets,
+        },
+        "counts": {
+            "neighborhoods": len(neighborhoods),
+            "candidate_packets": len(candidate_packets),
+            "selected_packets": len(selected),
+            "skipped_packets": len(skipped),
+        },
+        "read_type_counts": dict(sorted(read_type_counts.items())),
+        "packets": selected,
+        "skipped": skipped,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build deterministic evidence maps for student writing.")
     parser.add_argument("--texts", type=Path, default=Path(DEFAULT_TEXTS))
@@ -1066,6 +1411,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(DEFAULT_NEIGHBORHOOD_OUTPUT),
         help="Output path used when --committee-candidates is provided.",
     )
+    parser.add_argument(
+        "--group-packets-output",
+        type=Path,
+        default=Path(DEFAULT_GROUP_PACKETS_OUTPUT),
+        help="Output path for bounded evidence group-calibration packets when --committee-candidates is provided.",
+    )
+    parser.add_argument("--max-packet-students", type=int, default=DEFAULT_MAX_PACKET_STUDENTS)
+    parser.add_argument("--max-group-packets", type=int, default=DEFAULT_MAX_GROUP_PACKETS)
     return parser
 
 
@@ -1120,6 +1473,21 @@ def main() -> int:
             },
         )
         write_json(args.neighborhood_output, report)
+        packets = build_evidence_group_calibration_packets(
+            neighborhood_report=report,
+            maps_by_id=maps_by_id,
+            rows=rows,
+            generated_at=generated_at,
+            source_paths={
+                "evidence_map": str(args.output),
+                "evidence_neighborhood_report": str(args.neighborhood_output),
+                "committee_candidates": str(args.committee_candidates),
+                "scores": str(args.scores),
+            },
+            max_packet_students=args.max_packet_students,
+            max_packets=args.max_group_packets,
+        )
+        write_json(args.group_packets_output, packets)
     return 0
 
 

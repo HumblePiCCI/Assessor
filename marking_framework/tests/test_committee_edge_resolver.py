@@ -2042,6 +2042,7 @@ def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch)
     evidence_map = outputs / "evidence_map.json"
     evidence_map.write_text(json.dumps(ghost_residual_neighborhood_evidence_map()), encoding="utf-8")
     neighborhood = outputs / "evidence_neighborhood_report.json"
+    packets = outputs / "evidence_group_calibration_packets.json"
 
     monkeypatch.setattr(
         "sys.argv",
@@ -2059,6 +2060,8 @@ def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch)
             str(evidence_map),
             "--evidence-neighborhood-output",
             str(neighborhood),
+            "--evidence-group-packets-output",
+            str(packets),
             "--candidates-output",
             str(outputs / "committee_edge_candidates.json"),
             "--decisions-output",
@@ -2073,6 +2076,7 @@ def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch)
     assert cer.main() == 0
     merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
     report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    packet_report = json.loads(packets.read_text(encoding="utf-8"))
     assert merged["checks"] == payload["checks"]
     assert merged["committee_edge"]["passthrough"] is True
     assert report["enabled"] is True
@@ -2090,6 +2094,11 @@ def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch)
     )
     assert top["evidence_order"][0] == "s009"
     assert {edge["pair_key"] for edge in top["ambiguous_edges"]} == {"s003::s013"}
+    assert packet_report["enabled"] is True
+    assert packet_report["counts"]["selected_packets"] == 3
+    assert all(len(packet["student_ids"]) <= 5 for packet in packet_report["packets"])
+    read_types = {packet["recommended_read_type"] for packet in packet_report["packets"]}
+    assert read_types == {"local_order_calibration", "pair_guard_review"}
 
 
 def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_path, monkeypatch):
@@ -2109,6 +2118,7 @@ def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_
     for student_id, text in ghost_residual_texts().items():
         (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
     neighborhood = outputs / "evidence_neighborhood_report.json"
+    packets = outputs / "evidence_group_calibration_packets.json"
 
     monkeypatch.setattr(
         "sys.argv",
@@ -2126,6 +2136,8 @@ def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_
             str(outputs / "missing_evidence_map.json"),
             "--evidence-neighborhood-output",
             str(neighborhood),
+            "--evidence-group-packets-output",
+            str(packets),
             "--candidates-output",
             str(outputs / "committee_edge_candidates.json"),
             "--decisions-output",
@@ -2139,9 +2151,13 @@ def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_
 
     assert cer.main() == 0
     report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    packet_report = json.loads(packets.read_text(encoding="utf-8"))
     assert report["enabled"] is False
     assert report["reason"] == "evidence_map_missing"
     assert report["counts"]["candidate_edges"] == 1
+    assert packet_report["enabled"] is False
+    assert packet_report["reason"] == "evidence_map_missing"
+    assert packet_report["packets"] == []
 
 
 def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
