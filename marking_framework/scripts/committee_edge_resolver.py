@@ -271,6 +271,7 @@ CAUTION_IGNORED_TRIGGERS = frozenset(
         "never_escalated_high_leverage",
     }
 )
+EVIDENCE_MAP_GUARD_MIN_MEDIUM_MARGIN = 0.75
 UNRESOLVED_GROUP_STATUSES = frozenset(
     {
         "committee_read_ab_concurred",
@@ -1626,6 +1627,132 @@ def source_calibration_guard_decision(candidate: dict, read: dict, *, read_label
     return normalize_committee_read(candidate, flipped), f"committee_read_{str(read_label).lower()}_source_calibration_override"
 
 
+def evidence_map_pair_signal(candidate: dict) -> dict:
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    signal = details.get("evidence_map_pair_signal")
+    if not isinstance(signal, dict):
+        signal = candidate.get("evidence_map_pair_signal")
+    return signal if isinstance(signal, dict) else {}
+
+
+def evidence_map_guard_signal_is_strong(signal: dict) -> bool:
+    confidence = str(signal.get("confidence") or "").strip().lower()
+    margin = num(signal.get("margin"), 0.0)
+    return bool(
+        confidence == "high"
+        or (confidence == "medium" and margin >= EVIDENCE_MAP_GUARD_MIN_MEDIUM_MARGIN)
+    )
+
+
+def evidence_map_summary_for(signal: dict, student_id: str) -> dict:
+    summaries = signal.get("summaries") if isinstance(signal.get("summaries"), dict) else {}
+    summary = summaries.get(student_id)
+    if not isinstance(summary, dict):
+        if str(signal.get("active_winner") or "") == student_id:
+            summary = signal.get("winner_summary")
+        elif str(signal.get("active_loser") or "") == student_id:
+            summary = signal.get("loser_summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def evidence_map_recommended_winner_blocked(signal: dict, student_id: str) -> bool:
+    summary = evidence_map_summary_for(signal, student_id)
+    return bool(summary.get("completion_floor_applied"))
+
+
+def evidence_map_guard_decision(candidate: dict, read: dict, *, read_label: str = "A") -> tuple[dict | None, str]:
+    """Use the deterministic offline evidence map as a guard on committee reads.
+
+    This guard never creates a decision without a committee read. It only acts on
+    high-risk routed edges when the model/fixture read either preserves the
+    active winner despite a strong evidence-map contradiction, or tries to emit
+    an override against a strong evidence-map signal.
+    """
+
+    signal = evidence_map_pair_signal(candidate)
+    if not signal:
+        return None, "evidence_map_guard_missing_signal"
+    bucket = str(candidate.get("bucket") or "")
+    triggers = set(candidate.get("triggers") or [])
+    if bucket != "caution_ignored" and not (triggers & CAUTION_IGNORED_TRIGGERS):
+        return None, "evidence_map_guard_not_high_risk"
+    recommended = str(signal.get("recommended_winner") or "").strip()
+    if not recommended or recommended == "tie":
+        return None, "evidence_map_guard_tie"
+    if not evidence_map_guard_signal_is_strong(signal):
+        return None, "evidence_map_guard_low_confidence"
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    if recommended not in {higher, lower}:
+        return None, "evidence_map_guard_incomplete"
+    if evidence_map_recommended_winner_blocked(signal, recommended):
+        return None, "evidence_map_guard_recommended_winner_blocked"
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    read_winner = str(read.get("winner") or "").strip()
+    if not prior_winner or not read_winner:
+        return None, "evidence_map_guard_incomplete"
+    if read_winner == recommended:
+        return None, "evidence_map_guard_supports_winner"
+    if read_winner != prior_winner:
+        return None, "evidence_map_guard_blocks_override"
+    if recommended == prior_winner:
+        return None, "evidence_map_guard_supports_winner"
+
+    flipped = copy.deepcopy(read)
+    new_winner = recommended
+    new_loser = lower if new_winner == higher else higher
+    new_side = "A" if new_winner == higher else "B"
+    flipped_checks = normalize_committee_decision_checks(
+        flipped.get("decision_checks") if isinstance(flipped.get("decision_checks"), dict) else {}
+    )
+    flipped_checks["interpretation_depth"] = new_side
+    flipped_checks["proof_sufficiency"] = new_side
+    flipped_checks["alternate_theme_validity"] = new_side
+    flipped_checks["polish_trap"] = True
+    flipped_checks["rougher_but_stronger_latent"] = True
+    flipped_checks["mechanics_block_meaning"] = False
+    flipped_checks["completion_floor_applied"] = False
+    cautions = set(flipped.get("cautions_applied") if isinstance(flipped.get("cautions_applied"), list) else [])
+    cautions.update({"rougher_but_stronger_content", "polished_but_shallow"})
+    confidence = vc.normalize_confidence(flipped.get("confidence"))
+    flipped.update(
+        {
+            "winner": new_winner,
+            "loser": new_loser,
+            "winner_side": new_side,
+            "decision": "KEEP" if new_side == "A" else "SWAP",
+            "confidence": confidence if confidence in {"medium", "high"} else "medium",
+            "decision_basis": "content_reasoning",
+            "cautions_applied": sorted(cautions),
+            "decision_checks": flipped_checks,
+            "rationale": (
+                "Evidence-map guard: the committee read preserved the active winner, "
+                "but the deterministic offline claim/evidence/commentary map strongly "
+                "favored the other essay with no completion blocker. "
+                + str(flipped.get("rationale") or "").strip()
+            ).strip(),
+        }
+    )
+    metadata = dict(flipped.get("model_metadata") or {})
+    metadata["committee_read"] = f"{read_label}-evidence-map-guard"
+    metadata["adjudication_source"] = "committee_evidence_map_guard"
+    flipped["model_metadata"] = metadata
+    flipped["evidence_map_guard"] = {
+        "prior_winner": prior_winner,
+        "original_winner": read_winner,
+        "guard_winner": new_winner,
+        "guard_winner_side": new_side,
+        "original_winner_side": normalize_winner_side(read.get("winner_side")),
+        "confidence": signal.get("confidence", ""),
+        "margin": signal.get("margin", 0.0),
+        "evidence_map_reasons": list(signal.get("reasons") or [])[:6],
+        "active_winner": signal.get("active_winner", prior_winner),
+        "scores": signal.get("scores", {}),
+    }
+    return normalize_committee_read(candidate, flipped), f"committee_read_{str(read_label).lower()}_evidence_map_override"
+
+
 def run_blind_read_a(
     candidate: dict,
     rows_by_id: dict[str, dict],
@@ -2779,6 +2906,11 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
     b_source_guard_read, b_source_guard_reason = source_calibration_guard_decision(candidate, read_b, read_label="B")
     if b_source_guard_read is not None:
         return b_source_guard_read, b_source_guard_reason
+    b_map_guard_read, b_map_guard_reason = evidence_map_guard_decision(candidate, read_b, read_label="B")
+    if b_map_guard_read is not None:
+        return b_map_guard_read, b_map_guard_reason
+    if b_map_guard_reason == "evidence_map_guard_blocks_override":
+        return None, b_map_guard_reason
 
     b_trap = bool(b_checks.get("polish_trap") or b_checks.get("rougher_but_stronger_latent"))
 
@@ -2846,6 +2978,11 @@ def resolve_a_b_c(
     c_source_guard_read, c_source_guard_reason = source_calibration_guard_decision(candidate, read_c, read_label="C")
     if c_source_guard_read is not None:
         return c_source_guard_read, c_source_guard_reason
+    c_map_guard_read, c_map_guard_reason = evidence_map_guard_decision(candidate, read_c, read_label="C")
+    if c_map_guard_read is not None:
+        return c_map_guard_read, c_map_guard_reason
+    if c_map_guard_reason == "evidence_map_guard_blocks_override":
+        return None, c_map_guard_reason
     for prior_read in (read_a, read_b):
         if str(prior_read.get("winner") or "").strip() != c_winner:
             continue
@@ -2922,6 +3059,8 @@ def decision_from_committee_read(
         trace["evidence_ledger_guard"] = item["evidence_ledger_guard"]
     if isinstance(item.get("source_calibration_guard"), dict):
         trace["source_calibration_guard"] = item["source_calibration_guard"]
+    if isinstance(item.get("evidence_map_guard"), dict):
+        trace["evidence_map_guard"] = item["evidence_map_guard"]
     if read_a is not None:
         a_checks = normalize_committee_decision_checks(
             read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
@@ -3123,6 +3262,30 @@ def run_read_a_path(
             read_results.append(record)
             continue
 
+        evidence_map_guard_read, evidence_map_guard_reason = evidence_map_guard_decision(candidate, read, read_label="A")
+        record["evidence_map_guard_reason"] = evidence_map_guard_reason
+        record["evidence_map_guard_emitted"] = bool(evidence_map_guard_read)
+        record["evidence_map_guard_blocked_override"] = evidence_map_guard_reason == "evidence_map_guard_blocks_override"
+        if evidence_map_guard_read is not None:
+            record["status"] = evidence_map_guard_reason
+            record["override_emitted"] = True
+            record["evidence_map_guard_read"] = evidence_map_guard_read
+            decisions.append(
+                decision_from_committee_read(
+                    candidate,
+                    evidence_map_guard_read,
+                    evidence_map_guard_reason,
+                    read_a=read,
+                )
+            )
+            read_results.append(record)
+            continue
+        if evidence_map_guard_reason == "evidence_map_guard_blocks_override":
+            record["status"] = evidence_map_guard_reason
+            record["override_emitted"] = False
+            read_results.append(record)
+            continue
+
         # Decide whether Read B should audit this pair.
         should_run_b, b_invocation_reason = should_invoke_read_b(candidate, read)
         record["read_b_invocation_reason"] = b_invocation_reason
@@ -3178,6 +3341,10 @@ def run_read_a_path(
             record["read_b_winner"] = read_b.get("winner", "")
             decision_read, ab_reason = resolve_a_b(candidate, read, read_b)
             record["status"] = ab_reason
+            if "evidence_map_guard" in ab_reason:
+                record["evidence_map_guard_reason"] = ab_reason
+                record["evidence_map_guard_emitted"] = decision_read is not None
+                record["evidence_map_guard_blocked_override"] = ab_reason == "evidence_map_guard_blocks_override"
 
             read_c = None
             should_run_c, c_invocation_reason = should_invoke_read_c(candidate, read, read_b, ab_reason)
@@ -3235,6 +3402,10 @@ def run_read_a_path(
                 record["read_c_winner"] = read_c.get("winner", "")
                 c_decision_read, c_reason = resolve_a_b_c(candidate, read, read_b, read_c, ab_reason)
                 record["status"] = c_reason
+                if "evidence_map_guard" in c_reason:
+                    record["evidence_map_guard_reason"] = c_reason
+                    record["evidence_map_guard_emitted"] = c_decision_read is not None
+                    record["evidence_map_guard_blocked_override"] = c_reason == "evidence_map_guard_blocks_override"
                 decision_read = c_decision_read
                 ab_reason = c_reason
 
@@ -3506,6 +3677,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.live_trace_output is None:
         args.live_trace_output = args.decisions_output.with_name(Path(DEFAULT_LIVE_TRACE_OUT).name)
+    if args.evidence_map == Path(DEFAULT_EVIDENCE_MAP) and args.escalated != Path(DEFAULT_ESCALATED):
+        args.evidence_map = args.escalated.with_name("evidence_map.json")
     generated_at = now_iso()
     source_paths = artifact_source_paths(args)
     try:
@@ -3696,6 +3869,7 @@ def main() -> int:
                     "group_calibration": group_summary,
                     "ledger_guard": {"evaluated_count": 0, "override_count": 0, "statuses": {}},
                     "source_calibration_guard": {"evaluated_count": 0, "override_count": 0, "statuses": {}},
+                    "evidence_map_guard": {"evaluated_count": 0, "override_count": 0, "blocked_override_count": 0, "statuses": {}},
                     "read_results": read_a_results,
                     "group_calibration_results": group_results,
                     "decision_pair_keys": [],
@@ -3767,6 +3941,11 @@ def main() -> int:
         for record in read_a_results
         if isinstance(record, dict)
     )
+    evidence_map_guard_statuses = Counter(
+        str(record.get("evidence_map_guard_reason") or "not_evaluated")
+        for record in read_a_results
+        if isinstance(record, dict)
+    )
     live_trace_payload = {
         "generated_at": generated_at,
         "phase": "3e",
@@ -3786,6 +3965,12 @@ def main() -> int:
             "evaluated_count": sum(1 for record in read_a_results if isinstance(record, dict) and "source_calibration_guard_reason" in record),
             "override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("source_calibration_guard_emitted")),
             "statuses": dict(sorted(source_guard_statuses.items())),
+        },
+        "evidence_map_guard": {
+            "evaluated_count": sum(1 for record in read_a_results if isinstance(record, dict) and "evidence_map_guard_reason" in record),
+            "override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("evidence_map_guard_emitted")),
+            "blocked_override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("evidence_map_guard_blocked_override")),
+            "statuses": dict(sorted(evidence_map_guard_statuses.items())),
         },
         "read_results": read_a_results,
         "group_calibration_results": group_results,
@@ -3854,6 +4039,7 @@ def main() -> int:
         "read_c": decisions_payload["read_c"],
         "ledger_guard": live_trace_payload["ledger_guard"],
         "source_calibration_guard": live_trace_payload["source_calibration_guard"],
+        "evidence_map_guard": live_trace_payload["evidence_map_guard"],
         "group_calibration": group_summary,
         "phase2_ready": True,
     }

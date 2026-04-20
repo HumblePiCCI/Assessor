@@ -1,4 +1,5 @@
 import csv
+import copy
 import json
 from pathlib import Path
 
@@ -1246,6 +1247,47 @@ def _get_candidate(candidates, pair_key):
     return next(c for c in candidates if c["pair_key"] == pair_key)
 
 
+def _with_evidence_map_signal(candidate, *, winner, confidence="high", margin=3.0, completion_floor=False):
+    candidate = copy.deepcopy(candidate)
+    seed_order = candidate["seed_order"]
+    higher = seed_order["higher"]
+    lower = seed_order["lower"]
+    loser = lower if winner == higher else higher
+    signal = {
+        "pair": [higher, lower],
+        "pair_key": candidate["pair_key"],
+        "recommended_winner": winner,
+        "confidence": confidence,
+        "margin": margin,
+        "scores": {winner: 10.0 + margin, loser: 10.0},
+        "summaries": {
+            winner: {
+                "completion_floor_applied": completion_floor,
+                "evidence_map_score": 10.0 + margin,
+                "commentary_unit_count": 4,
+                "integrated_analysis_count": 3,
+                "band_signal": "solid_analysis",
+            },
+            loser: {
+                "completion_floor_applied": False,
+                "evidence_map_score": 10.0,
+                "commentary_unit_count": 1,
+                "integrated_analysis_count": 0,
+                "band_signal": "thin_or_summary_heavy",
+            },
+        },
+        "reasons": [f"{winner} stronger offline claim/evidence/commentary"],
+        "active_winner": candidate["escalated_summary"]["winner"],
+        "active_loser": candidate["escalated_summary"]["loser"],
+        "contradicts_active_winner": winner != candidate["escalated_summary"]["winner"],
+        "winner_summary": {},
+        "loser_summary": {},
+    }
+    candidate["evidence_map_pair_signal"] = signal
+    candidate.setdefault("trigger_details", {})["evidence_map_pair_signal"] = signal
+    return candidate
+
+
 def _read_a_from_fixture(candidate, fixture_name="ghost_residual_blind_reads.json"):
     fixture = cer.load_blind_read_fixture(FIXTURE_DIR / fixture_name)
     return cer.read_from_fixture(candidate, fixture)
@@ -1672,6 +1714,283 @@ def test_source_calibration_guard_does_not_flip_observable_completion_scaffold()
     guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
     assert guard_read is None
     assert reason == "source_calibration_guard_checklist_supports_winner"
+
+
+def test_evidence_map_guard_flips_four_strong_residual_prior_concurrences():
+    candidates = _build_ghost_candidates()
+    expected = {
+        "s009::s015": "s009",
+        "s003::s009": "s009",
+        "s019::s022": "s022",
+        "s004::s008": "s008",
+    }
+    for pair_key, expected_winner in expected.items():
+        candidate = _with_evidence_map_signal(
+            _get_candidate(candidates, pair_key),
+            winner=expected_winner,
+            confidence="high",
+            margin=3.0,
+        )
+        read = _make_read(
+            candidate,
+            winner=candidate["escalated_summary"]["winner"],
+            confidence="medium",
+        )
+        guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+        assert reason == "committee_read_a_evidence_map_override"
+        assert guard_read is not None
+        assert guard_read["winner"] == expected_winner
+        assert guard_read["model_metadata"]["adjudication_source"] == "committee_evidence_map_guard"
+        assert guard_read["evidence_map_guard"]["guard_winner"] == expected_winner
+
+
+def test_evidence_map_guard_does_not_flip_low_confidence_tie():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s003::s013"),
+        winner="tie",
+        confidence="low",
+        margin=0.2,
+    )
+    read = _make_read(
+        candidate,
+        winner=candidate["escalated_summary"]["winner"],
+        confidence="high",
+    )
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_tie"
+
+
+def test_evidence_map_guard_blocks_override_against_strong_map():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    prior_winner = candidate["escalated_summary"]["winner"]
+    prior_loser = candidate["escalated_summary"]["loser"]
+    candidate = _with_evidence_map_signal(
+        candidate,
+        winner=prior_winner,
+        confidence="high",
+        margin=2.5,
+    )
+    read = _make_read(candidate, winner=prior_loser, confidence="high", polish_trap=True)
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_blocks_override"
+
+
+def test_evidence_map_guard_does_not_flip_completion_floor_recommended_winner():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s009::s015"),
+        winner="s009",
+        confidence="high",
+        margin=5.0,
+        completion_floor=True,
+    )
+    read = _make_read(
+        candidate,
+        winner=candidate["escalated_summary"]["winner"],
+        confidence="high",
+    )
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_recommended_winner_blocked"
+
+
+def test_run_read_path_emits_evidence_map_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s009::s015"),
+        winner="s009",
+        confidence="high",
+        margin=4.0,
+    )
+    selected = [candidate]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is cleaner.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(a_depth="strong", a_proof="strong", b_depth="weak", b_proof="weak"),
+                "source_calibration_checks": _source_checks(winner="A", evidence="A", commentary="A"),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_evidence_map_override"
+    assert decisions[0]["committee_edge_trace"]["evidence_map_guard"]["guard_winner"] == "s009"
+    assert read_results[0]["status"] == "committee_read_a_evidence_map_override"
+    assert read_results[0]["evidence_map_guard_emitted"] is True
+
+
+def test_run_read_path_blocks_a_only_override_against_evidence_map():
+    candidates = _build_ghost_candidates()
+    base = _get_candidate(candidates, "s009::s015")
+    candidate = _with_evidence_map_signal(
+        base,
+        winner=base["escalated_summary"]["winner"],
+        confidence="high",
+        margin=4.0,
+    )
+    selected = [candidate]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": base["escalated_summary"]["loser"],
+            "confidence": "high",
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "rationale": "Read A wants to override against the offline map.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "interpretation_depth": "B",
+                "proof_sufficiency": "B",
+                "polish_trap": True,
+                "rougher_but_stronger_latent": True,
+                "alternate_theme_validity": "B",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(a_depth="weak", a_proof="weak", b_depth="strong", b_proof="strong"),
+                "source_calibration_checks": _source_checks(winner="B", evidence="B", commentary="B"),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+    )
+    assert summary["read_count"] == 1
+    assert decisions == []
+    assert read_results[0]["status"] == "evidence_map_guard_blocks_override"
+    assert read_results[0]["evidence_map_guard_blocked_override"] is True
+
+
+def test_main_reports_evidence_map_guard_counts(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = copy.deepcopy(ghost_residual_payload())
+    payload["checks"] = [item for item in payload["checks"] if cer.pair_key_from_item(item) == "s009::s015"]
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(
+        json.dumps(
+            {
+                "students": em.build_evidence_maps(ghost_residual_texts(), genre="literary_analysis"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--max-reads",
+            "1",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    report = json.loads((outputs / "committee_edge_report.json").read_text(encoding="utf-8"))
+    trace = json.loads((outputs / "committee_edge_live_trace.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert report["evidence_map_guard"]["evaluated_count"] == 1
+    assert report["evidence_map_guard"]["override_count"] == 1
+    assert trace["evidence_map_guard"]["statuses"] == {"committee_read_a_evidence_map_override": 1}
+    assert decisions["decisions"][0]["winner"] == "s009"
 
 
 def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():

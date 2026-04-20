@@ -48,7 +48,7 @@ Optional LLM assessors:
 - Review `outputs/pairwise_escalation_candidates.json` for the routed hard-pair selection.
 - Review `outputs/pairwise_escalations.json` for stronger-model teacher-grade decisions.
 - Review `outputs/consistency_checks.escalated.json` for the merged evidence file consumed by rerank.
-- Review `outputs/evidence_map.json` for the offline claim/evidence/commentary ledger. This artifact is model-free: it extracts central claims, text moments, commentary markers, plot-summary load, completion-floor signals, and pair-level evidence-map recommendations when run with `--candidates`.
+- Review `outputs/evidence_map.json` for the offline claim/evidence/commentary ledger. This artifact is model-free: it extracts central claims, text moments, commentary markers, plot-summary load, completion-floor signals, and pair-level evidence-map recommendations when run with `--candidates`; when present, committee-edge reads also use it as a narrow guard against weak prior-winner concurrence or unsupported overrides.
 - Review `outputs/committee_edge_candidates.json` for residual unstable edges, including polish-bias, rougher-but-stronger, and bell-curve-leverage risks.
 - Review `outputs/committee_edge_live_trace.json` after any live committee run; it records every A/B/C/group read, evidence-ledger guard status, and emitted override so failed live calibration can be debugged without rerunning model calls.
 - Review `outputs/pairwise_adjudicator_eval.json`; the publish gate expects the routed committee-edge path to meet hard-pair accuracy and polish-bias thresholds.
