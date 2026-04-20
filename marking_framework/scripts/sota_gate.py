@@ -130,6 +130,70 @@ def consistency_metrics(path: Path) -> tuple[int, float, float]:
     return total, swaps / total, low / total
 
 
+def _item_count(payload: dict, key: str) -> int:
+    items = payload.get(key)
+    return len(items) if isinstance(items, list) else 0
+
+
+def evidence_packet_metrics(
+    committee_candidates_path: Path,
+    neighborhood_report_path: Path,
+    group_packets_path: Path,
+) -> dict:
+    candidate_payload = load_json(committee_candidates_path)
+    candidate_count = _item_count(candidate_payload, "candidates") + _item_count(candidate_payload, "skipped")
+    neighborhood_payload = load_json(neighborhood_report_path)
+    neighborhoods = neighborhood_payload.get("neighborhoods") if isinstance(neighborhood_payload.get("neighborhoods"), list) else []
+    needs_group_count = sum(
+        1
+        for item in neighborhoods
+        if isinstance(item, dict) and str(item.get("recommended_next_action") or "") == "needs_group_calibration"
+    )
+    packet_payload = load_json(group_packets_path)
+    selected_packets = packet_payload.get("packets") if isinstance(packet_payload.get("packets"), list) else []
+    skipped_packets = packet_payload.get("skipped") if isinstance(packet_payload.get("skipped"), list) else []
+    config = packet_payload.get("config") if isinstance(packet_payload.get("config"), dict) else {}
+    max_packet_students = int(config.get("max_packet_students", 0) or 0)
+    max_packets = int(config.get("max_packets", 0) or 0)
+    selected_sizes = [
+        len(packet.get("student_ids", []))
+        for packet in selected_packets
+        if isinstance(packet, dict) and isinstance(packet.get("student_ids"), list)
+    ]
+    max_selected_size = max(selected_sizes, default=0)
+    bounded = True
+    if max_packet_students > 0 and max_selected_size > max_packet_students:
+        bounded = False
+    if max_packets > 0 and len(selected_packets) > max_packets:
+        bounded = False
+    needs_packets = needs_group_count > 0
+    needs_group_has_packets = bool(not needs_packets or selected_packets)
+    ready = True
+    if candidate_count > 0 and (not neighborhood_report_path.exists() or not neighborhood_payload.get("enabled")):
+        ready = False
+    if needs_packets and (not group_packets_path.exists() or not packet_payload.get("enabled") or not selected_packets):
+        ready = False
+    if not bounded:
+        ready = False
+    return {
+        "committee_candidate_count": candidate_count,
+        "evidence_neighborhood_present": neighborhood_report_path.exists(),
+        "evidence_neighborhood_enabled": bool(neighborhood_payload.get("enabled", False)),
+        "evidence_neighborhood_count": len(neighborhoods),
+        "evidence_needs_group_calibration_count": needs_group_count,
+        "evidence_group_packets_present": group_packets_path.exists(),
+        "evidence_group_packets_enabled": bool(packet_payload.get("enabled", False)),
+        "evidence_group_packets_selected_count": len(selected_packets),
+        "evidence_group_packets_skipped_count": len(skipped_packets),
+        "evidence_group_packets_max_selected_packet_size": max_selected_size,
+        "evidence_group_packets_max_packet_students": max_packet_students,
+        "evidence_group_packets_max_packets": max_packets,
+        "evidence_group_packets_ready": ready,
+        "packetized_neighborhoods_have_bounded_reads": bounded,
+        "needs_group_calibration_has_packets": needs_group_has_packets,
+    }
+
+
 def benchmark_mode_summary(report: dict, mode: str) -> dict:
     modes = report.get("modes", {}) if isinstance(report, dict) else {}
     if not isinstance(modes, dict):
@@ -361,6 +425,12 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("consistency_swap_rate_above_threshold")
     if metrics["consistency_low_confidence_rate"] > float(thresholds.get("max_consistency_low_confidence_rate", 1.0)):
         failures.append("consistency_low_confidence_rate_above_threshold")
+    if not metrics.get("evidence_group_packets_ready", True):
+        failures.append("evidence_group_packets_not_ready")
+    if not metrics.get("packetized_neighborhoods_have_bounded_reads", True):
+        failures.append("evidence_group_packets_unbounded")
+    if not metrics.get("needs_group_calibration_has_packets", True):
+        failures.append("evidence_group_packets_missing_for_neighborhood")
     if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_comparison_present"]:
         failures.append("benchmark_report_missing")
     if metrics["benchmark_comparison_present"]:
@@ -539,6 +609,21 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "consistency_checks",
         "consistency_swap_rate",
         "consistency_low_confidence_rate",
+        "committee_candidate_count",
+        "evidence_neighborhood_present",
+        "evidence_neighborhood_enabled",
+        "evidence_neighborhood_count",
+        "evidence_needs_group_calibration_count",
+        "evidence_group_packets_present",
+        "evidence_group_packets_enabled",
+        "evidence_group_packets_selected_count",
+        "evidence_group_packets_skipped_count",
+        "evidence_group_packets_max_selected_packet_size",
+        "evidence_group_packets_max_packet_students",
+        "evidence_group_packets_max_packets",
+        "evidence_group_packets_ready",
+        "packetized_neighborhoods_have_bounded_reads",
+        "needs_group_calibration_has_packets",
         "benchmark_candidate_mode",
         "benchmark_baseline_mode",
         "benchmark_failed_dataset_count",
@@ -574,6 +659,9 @@ def main() -> int:
     parser.add_argument("--pass1", default="assessments/pass1_individual", help="Pass1 assessor directory")
     parser.add_argument("--consistency", default="outputs/consistency_checks.json", help="Consistency checks JSON")
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
+    parser.add_argument("--committee-candidates", default="outputs/committee_edge_candidates.json", help="Committee-edge candidates JSON")
+    parser.add_argument("--evidence-neighborhood-report", default="outputs/evidence_neighborhood_report.json", help="Evidence neighborhood report JSON")
+    parser.add_argument("--evidence-group-packets", default="outputs/evidence_group_calibration_packets.json", help="Evidence group-calibration packets JSON")
     parser.add_argument("--gate-config", default="config/sota_gate.json", help="SOTA thresholds JSON")
     parser.add_argument("--output", default="outputs/sota_gate.json", help="SOTA result JSON")
     args = parser.parse_args()
@@ -583,6 +671,11 @@ def main() -> int:
     rows = load_pass1_rows(Path(args.pass1))
     consistency_total, swap_rate, low_conf_rate = consistency_metrics(Path(args.consistency))
     mean_sd, p95_sd = assessor_spread(rows)
+    evidence_packets = evidence_packet_metrics(
+        Path(args.committee_candidates),
+        Path(args.evidence_neighborhood_report),
+        Path(args.evidence_group_packets),
+    )
     base_metrics = {
         "publish_gate_present": publish["present"],
         "publish_gate_ok": publish["ok"],
@@ -600,6 +693,7 @@ def main() -> int:
         "consistency_checks": consistency_total,
         "consistency_swap_rate": swap_rate,
         "consistency_low_confidence_rate": low_conf_rate,
+        **evidence_packets,
     }
     profile_order, target_profile, profile_results = evaluate_profiles(
         base_metrics,

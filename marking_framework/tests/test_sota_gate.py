@@ -106,6 +106,42 @@ def _write_corpus_benchmark_summary(path, *, failed_datasets=None):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_evidence_artifacts(root, *, neighborhood_enabled=True, needs_group=True, packets_enabled=True, packets=None, max_students=5, max_packets=2):
+    outputs = root / "outputs"
+    outputs.mkdir(parents=True, exist_ok=True)
+    (outputs / "committee_edge_candidates.json").write_text(
+        json.dumps({"candidates": [{"pair_key": "s001::s002"}], "skipped": []}),
+        encoding="utf-8",
+    )
+    (outputs / "evidence_neighborhood_report.json").write_text(
+        json.dumps(
+            {
+                "enabled": neighborhood_enabled,
+                "neighborhoods": [
+                    {
+                        "neighborhood_id": "n1",
+                        "recommended_next_action": "needs_group_calibration" if needs_group else "pair_guard_only",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    if packets is None:
+        packets = [{"packet_id": "p1", "student_ids": ["s001", "s002"], "recommended_read_type": "local_order_calibration"}]
+    (outputs / "evidence_group_calibration_packets.json").write_text(
+        json.dumps(
+            {
+                "enabled": packets_enabled,
+                "config": {"max_packet_students": max_students, "max_packets": max_packets},
+                "packets": packets,
+                "skipped": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_load_helpers_and_core_metrics(tmp_path):
     assert sg.load_json(tmp_path / "missing.json") == {}
     bad = tmp_path / "bad.json"
@@ -202,6 +238,82 @@ def test_assessor_spread_and_consistency_metrics(tmp_path):
     assert corpus_benchmark["dataset_count"] == 2
     assert corpus_benchmark["candidate"]["runs_successful"] == 1
     assert corpus_benchmark["delta"]["score_band_mae"] == -0.3
+
+
+def test_evidence_packet_metrics_and_sota_invariants(tmp_path):
+    _write_evidence_artifacts(tmp_path)
+    valid = sg.evidence_packet_metrics(
+        tmp_path / "outputs/committee_edge_candidates.json",
+        tmp_path / "outputs/evidence_neighborhood_report.json",
+        tmp_path / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert valid["evidence_group_packets_ready"] is True
+    assert valid["packetized_neighborhoods_have_bounded_reads"] is True
+    assert valid["needs_group_calibration_has_packets"] is True
+
+    empty_dir = tmp_path / "empty"
+    _write_evidence_artifacts(empty_dir, packets=[])
+    empty = sg.evidence_packet_metrics(
+        empty_dir / "outputs/committee_edge_candidates.json",
+        empty_dir / "outputs/evidence_neighborhood_report.json",
+        empty_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert empty["evidence_group_packets_ready"] is False
+    assert empty["needs_group_calibration_has_packets"] is False
+    assert "evidence_group_packets_missing_for_neighborhood" in sg.evaluate(
+        {
+            "publish_gate_present": True,
+            "publish_gate_ok": True,
+            "publish_profile_order": ["dev"],
+            "publish_highest_attained_profile": "dev",
+            "assessor_files": 3,
+            "model_coverage": 1.0,
+            "nonzero_score_rate": 1.0,
+            "criteria_coverage": 1.0,
+            "evidence_coverage": 1.0,
+            "mean_assessor_sd": 0.0,
+            "p95_assessor_sd": 0.0,
+            "consistency_swap_rate": 0.0,
+            "consistency_low_confidence_rate": 0.0,
+            "benchmark_comparison_present": False,
+            **empty,
+        },
+        {},
+    )
+
+    oversized_dir = tmp_path / "oversized"
+    _write_evidence_artifacts(
+        oversized_dir,
+        packets=[{"packet_id": "p1", "student_ids": ["s1", "s2", "s3"]}],
+        max_students=2,
+    )
+    oversized = sg.evidence_packet_metrics(
+        oversized_dir / "outputs/committee_edge_candidates.json",
+        oversized_dir / "outputs/evidence_neighborhood_report.json",
+        oversized_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    failures = sg.evaluate(
+        {
+            "publish_gate_present": True,
+            "publish_gate_ok": True,
+            "publish_profile_order": ["dev"],
+            "publish_highest_attained_profile": "dev",
+            "assessor_files": 3,
+            "model_coverage": 1.0,
+            "nonzero_score_rate": 1.0,
+            "criteria_coverage": 1.0,
+            "evidence_coverage": 1.0,
+            "mean_assessor_sd": 0.0,
+            "p95_assessor_sd": 0.0,
+            "consistency_swap_rate": 0.0,
+            "consistency_low_confidence_rate": 0.0,
+            "benchmark_comparison_present": False,
+            **oversized,
+        },
+        {},
+    )
+    assert "evidence_group_packets_not_ready" in failures
+    assert "evidence_group_packets_unbounded" in failures
 
 
 def test_evaluate_covers_failure_codes():

@@ -264,6 +264,68 @@ def _write_reproducibility_report(path, *, exact=True, within_tolerance=None, ma
     )
 
 
+def _write_evidence_artifacts(root, *, neighborhood_enabled=True, needs_group=True, packets_enabled=True, packets=None, max_students=5, max_packets=2):
+    outputs = root / "outputs"
+    outputs.mkdir(parents=True, exist_ok=True)
+    (outputs / "committee_edge_candidates.json").write_text(
+        json.dumps({"candidates": [{"pair_key": "s001::s002"}], "skipped": []}),
+        encoding="utf-8",
+    )
+    (outputs / "evidence_neighborhood_report.json").write_text(
+        json.dumps(
+            {
+                "enabled": neighborhood_enabled,
+                "neighborhoods": [
+                    {
+                        "neighborhood_id": "n1",
+                        "recommended_next_action": "needs_group_calibration" if needs_group else "pair_guard_only",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    if packets is None:
+        packets = [{"packet_id": "p1", "student_ids": ["s001", "s002"], "recommended_read_type": "local_order_calibration"}]
+    (outputs / "evidence_group_calibration_packets.json").write_text(
+        json.dumps(
+            {
+                "enabled": packets_enabled,
+                "config": {"max_packet_students": max_students, "max_packets": max_packets},
+                "counts": {
+                    "candidate_packets": len(packets),
+                    "selected_packets": len(packets),
+                    "skipped_packets": 0,
+                },
+                "read_type_counts": {"local_order_calibration": len(packets)},
+                "packets": packets,
+                "skipped": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _valid_publish_metrics():
+    return {
+        "irr_rank_kendalls_w": 1.0,
+        "irr_mean_rubric_sd": 0.0,
+        "model_coverage": 1.0,
+        "boundary_count": 0,
+        "anchors_total": 0,
+        "cal_missing_assessors": [],
+        "calibration_scope_samples": 0,
+        "calibration_scope_observations": 0,
+        "cal_level_hit_rate": 1.0,
+        "cal_mae": 0.0,
+        "cal_pairwise_order": 1.0,
+        "cal_repeat_consistency": 1.0,
+        "cal_abs_bias": 0.0,
+        "benchmark_report_present": False,
+        "pairwise_eval_present": False,
+    }
+
+
 def test_publish_gate_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_inputs(tmp_path)
@@ -466,6 +528,101 @@ def test_publish_gate_helper_branches(tmp_path):
     )
     committee_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_committee.json")
     assert committee_eval["escalated_path"] is True
+
+
+def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
+    _write_evidence_artifacts(tmp_path)
+    valid = pg.evidence_packet_metrics(
+        tmp_path / "outputs/committee_edge_candidates.json",
+        tmp_path / "outputs/evidence_neighborhood_report.json",
+        tmp_path / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert valid["evidence_group_packets_ready"] is True
+    assert valid["evidence_needs_group_calibration_count"] == 1
+    assert valid["evidence_group_packets_selected_count"] == 1
+    assert pg.evaluate({**_valid_publish_metrics(), **valid}, {}) == []
+
+    missing_neighborhood_dir = tmp_path / "missing_neighborhood"
+    (missing_neighborhood_dir / "outputs").mkdir(parents=True)
+    (missing_neighborhood_dir / "outputs/committee_edge_candidates.json").write_text(
+        json.dumps({"candidates": [{"pair_key": "s001::s002"}]}),
+        encoding="utf-8",
+    )
+    missing_neighborhood = pg.evidence_packet_metrics(
+        missing_neighborhood_dir / "outputs/committee_edge_candidates.json",
+        missing_neighborhood_dir / "outputs/evidence_neighborhood_report.json",
+        missing_neighborhood_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_neighborhood_report_missing" in pg.evaluate({**_valid_publish_metrics(), **missing_neighborhood}, {})
+
+    disabled_dir = tmp_path / "disabled"
+    _write_evidence_artifacts(disabled_dir, neighborhood_enabled=False)
+    disabled = pg.evidence_packet_metrics(
+        disabled_dir / "outputs/committee_edge_candidates.json",
+        disabled_dir / "outputs/evidence_neighborhood_report.json",
+        disabled_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_neighborhood_report_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled}, {})
+
+    missing_packets_dir = tmp_path / "missing_packets"
+    _write_evidence_artifacts(missing_packets_dir)
+    (missing_packets_dir / "outputs/evidence_group_calibration_packets.json").unlink()
+    missing_packets = pg.evidence_packet_metrics(
+        missing_packets_dir / "outputs/committee_edge_candidates.json",
+        missing_packets_dir / "outputs/evidence_neighborhood_report.json",
+        missing_packets_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    missing_packet_failures = pg.evaluate({**_valid_publish_metrics(), **missing_packets}, {})
+    assert "evidence_group_packets_missing" in missing_packet_failures
+    assert "evidence_group_packets_empty" in missing_packet_failures
+
+    disabled_packets_dir = tmp_path / "disabled_packets"
+    _write_evidence_artifacts(disabled_packets_dir, packets_enabled=False)
+    disabled_packets = pg.evidence_packet_metrics(
+        disabled_packets_dir / "outputs/committee_edge_candidates.json",
+        disabled_packets_dir / "outputs/evidence_neighborhood_report.json",
+        disabled_packets_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_group_packets_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled_packets}, {})
+
+    empty_dir = tmp_path / "empty"
+    _write_evidence_artifacts(empty_dir, packets=[])
+    empty = pg.evidence_packet_metrics(
+        empty_dir / "outputs/committee_edge_candidates.json",
+        empty_dir / "outputs/evidence_neighborhood_report.json",
+        empty_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_group_packets_empty" in pg.evaluate({**_valid_publish_metrics(), **empty}, {})
+
+    oversized_dir = tmp_path / "oversized"
+    _write_evidence_artifacts(
+        oversized_dir,
+        packets=[{"packet_id": "p1", "student_ids": ["s1", "s2", "s3"], "recommended_read_type": "local_order_calibration"}],
+        max_students=2,
+    )
+    oversized = pg.evidence_packet_metrics(
+        oversized_dir / "outputs/committee_edge_candidates.json",
+        oversized_dir / "outputs/evidence_neighborhood_report.json",
+        oversized_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_group_packet_size_above_limit" in pg.evaluate({**_valid_publish_metrics(), **oversized}, {})
+
+    too_many_dir = tmp_path / "too_many"
+    _write_evidence_artifacts(
+        too_many_dir,
+        packets=[
+            {"packet_id": "p1", "student_ids": ["s1", "s2"]},
+            {"packet_id": "p2", "student_ids": ["s2", "s3"]},
+            {"packet_id": "p3", "student_ids": ["s3", "s4"]},
+        ],
+        max_packets=2,
+    )
+    too_many = pg.evidence_packet_metrics(
+        too_many_dir / "outputs/committee_edge_candidates.json",
+        too_many_dir / "outputs/evidence_neighborhood_report.json",
+        too_many_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert "evidence_group_packet_count_above_limit" in pg.evaluate({**_valid_publish_metrics(), **too_many}, {})
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():

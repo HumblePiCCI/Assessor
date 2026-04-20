@@ -334,6 +334,78 @@ def pairwise_eval_metrics(report_path: Path) -> dict:
     }
 
 
+def _item_count(payload: dict, key: str) -> int:
+    items = payload.get(key)
+    return len(items) if isinstance(items, list) else 0
+
+
+def evidence_packet_metrics(
+    committee_candidates_path: Path,
+    neighborhood_report_path: Path,
+    group_packets_path: Path,
+) -> dict:
+    candidates_present = committee_candidates_path.exists()
+    candidate_payload = load_json(committee_candidates_path)
+    candidate_count = _item_count(candidate_payload, "candidates") + _item_count(candidate_payload, "skipped")
+    neighborhood_present = neighborhood_report_path.exists()
+    neighborhood_payload = load_json(neighborhood_report_path)
+    neighborhoods = neighborhood_payload.get("neighborhoods") if isinstance(neighborhood_payload.get("neighborhoods"), list) else []
+    needs_group_count = sum(
+        1
+        for item in neighborhoods
+        if isinstance(item, dict) and str(item.get("recommended_next_action") or "") == "needs_group_calibration"
+    )
+    packets_present = group_packets_path.exists()
+    packet_payload = load_json(group_packets_path)
+    selected_packets = packet_payload.get("packets") if isinstance(packet_payload.get("packets"), list) else []
+    skipped_packets = packet_payload.get("skipped") if isinstance(packet_payload.get("skipped"), list) else []
+    config = packet_payload.get("config") if isinstance(packet_payload.get("config"), dict) else {}
+    max_packet_students = int(config.get("max_packet_students", 0) or 0)
+    max_packets = int(config.get("max_packets", 0) or 0)
+    selected_sizes = [
+        len(packet.get("student_ids", []))
+        for packet in selected_packets
+        if isinstance(packet, dict) and isinstance(packet.get("student_ids"), list)
+    ]
+    max_selected_size = max(selected_sizes, default=0)
+    read_type_counts = packet_payload.get("read_type_counts") if isinstance(packet_payload.get("read_type_counts"), dict) else {}
+    bounded = True
+    if max_packet_students > 0 and max_selected_size > max_packet_students:
+        bounded = False
+    if max_packets > 0 and len(selected_packets) > max_packets:
+        bounded = False
+    needs_packets = needs_group_count > 0
+    ready = True
+    if candidate_count > 0 and (not neighborhood_present or not neighborhood_payload.get("enabled")):
+        ready = False
+    if needs_packets and (not packets_present or not packet_payload.get("enabled") or not selected_packets):
+        ready = False
+    if not bounded:
+        ready = False
+    return {
+        "committee_candidates_present": candidates_present,
+        "committee_candidate_count": candidate_count,
+        "evidence_neighborhood_present": neighborhood_present,
+        "evidence_neighborhood_enabled": bool(neighborhood_payload.get("enabled", False)),
+        "evidence_neighborhood_count": len(neighborhoods),
+        "evidence_needs_group_calibration_count": needs_group_count,
+        "evidence_group_packets_present": packets_present,
+        "evidence_group_packets_enabled": bool(packet_payload.get("enabled", False)),
+        "evidence_group_packets_candidate_count": int(packet_payload.get("counts", {}).get("candidate_packets", 0) or 0)
+        if isinstance(packet_payload.get("counts"), dict)
+        else 0,
+        "evidence_group_packets_selected_count": len(selected_packets),
+        "evidence_group_packets_skipped_count": len(skipped_packets),
+        "evidence_group_packets_read_type_counts": read_type_counts,
+        "evidence_group_packets_max_selected_packet_size": max_selected_size,
+        "evidence_group_packets_max_packet_students": max_packet_students,
+        "evidence_group_packets_max_packets": max_packets,
+        "evidence_group_packets_ready": ready,
+        "evidence_group_packets_bounded": bounded,
+        "evidence_needs_group_calibration_has_packets": bool(not needs_packets or selected_packets),
+    }
+
+
 def contains_escalated_pairwise_judgment(value) -> bool:
     if isinstance(value, dict):
         metadata = value.get("model_metadata") if isinstance(value.get("model_metadata"), dict) else {}
@@ -515,8 +587,26 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             failures.append("pairwise_eval_polish_bias_risks_above_threshold")
         if thresholds.get("pairwise_eval_fail_on_report_failures", False) and metrics.get("pairwise_eval_failures", []):
             failures.append("pairwise_eval_report_failures_present")
-        if thresholds.get("pairwise_eval_require_escalated_path", False) and not metrics.get("pairwise_eval_escalated_path", False):
-            failures.append("pairwise_eval_escalated_path_missing")
+    if thresholds.get("pairwise_eval_require_escalated_path", False) and not metrics.get("pairwise_eval_escalated_path", False):
+        failures.append("pairwise_eval_escalated_path_missing")
+    if metrics.get("committee_candidate_count", 0) > 0:
+        if not metrics.get("evidence_neighborhood_present", False):
+            failures.append("evidence_neighborhood_report_missing")
+        elif not metrics.get("evidence_neighborhood_enabled", False):
+            failures.append("evidence_neighborhood_report_disabled")
+    if metrics.get("evidence_needs_group_calibration_count", 0) > 0:
+        if not metrics.get("evidence_group_packets_present", False):
+            failures.append("evidence_group_packets_missing")
+        elif not metrics.get("evidence_group_packets_enabled", False):
+            failures.append("evidence_group_packets_disabled")
+        if metrics.get("evidence_group_packets_selected_count", 0) <= 0:
+            failures.append("evidence_group_packets_empty")
+    max_packet_students = int(metrics.get("evidence_group_packets_max_packet_students", 0) or 0)
+    if max_packet_students > 0 and metrics.get("evidence_group_packets_max_selected_packet_size", 0) > max_packet_students:
+        failures.append("evidence_group_packet_size_above_limit")
+    max_packets = int(metrics.get("evidence_group_packets_max_packets", 0) or 0)
+    if max_packets > 0 and metrics.get("evidence_group_packets_selected_count", 0) > max_packets:
+        failures.append("evidence_group_packet_count_above_limit")
     return failures
 
 
@@ -664,6 +754,22 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "pairwise_eval_coverage",
         "pairwise_eval_critical_accuracy",
         "pairwise_eval_polish_bias_risk_count",
+        "committee_candidate_count",
+        "evidence_neighborhood_present",
+        "evidence_neighborhood_enabled",
+        "evidence_neighborhood_count",
+        "evidence_needs_group_calibration_count",
+        "evidence_group_packets_present",
+        "evidence_group_packets_enabled",
+        "evidence_group_packets_selected_count",
+        "evidence_group_packets_skipped_count",
+        "evidence_group_packets_read_type_counts",
+        "evidence_group_packets_max_selected_packet_size",
+        "evidence_group_packets_max_packet_students",
+        "evidence_group_packets_max_packets",
+        "evidence_group_packets_ready",
+        "evidence_group_packets_bounded",
+        "evidence_needs_group_calibration_has_packets",
         "reproducibility_report_present",
         "reproducibility_runs_compared",
         "reproducibility_manifest_identical",
@@ -697,6 +803,9 @@ def main() -> int:
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
     parser.add_argument("--pairwise-eval-report", default="outputs/pairwise_adjudicator_eval.json", help="Optional hard-pair pairwise adjudicator eval JSON")
     parser.add_argument("--reproducibility-report", default="outputs/reproducibility_report.json", help="Optional reproducibility report JSON")
+    parser.add_argument("--committee-candidates", default="outputs/committee_edge_candidates.json", help="Committee-edge candidates JSON")
+    parser.add_argument("--evidence-neighborhood-report", default="outputs/evidence_neighborhood_report.json", help="Evidence neighborhood report JSON")
+    parser.add_argument("--evidence-group-packets", default="outputs/evidence_group_calibration_packets.json", help="Evidence group-calibration packets JSON")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--output", default="outputs/publish_gate.json", help="Gate result JSON")
     args = parser.parse_args()
@@ -727,6 +836,11 @@ def main() -> int:
     )
     scope_coverage = cal.get("coverage_scope", {}) if isinstance(cal.get("coverage_scope", {}), dict) else {}
     reproducibility = reproducibility_metrics(Path(args.reproducibility_report))
+    evidence_packets = evidence_packet_metrics(
+        Path(args.committee_candidates),
+        Path(args.evidence_neighborhood_report),
+        Path(args.evidence_group_packets),
+    )
 
     anchors_total, anchor_hit_rate, anchor_level_mae = anchor_metrics(rows, metadata)
     base_metrics = {
@@ -773,6 +887,7 @@ def main() -> int:
         "reproducibility_mismatched_intermediate_artifact_count": int(
             reproducibility.get("mismatched_intermediate_artifact_count", 0) or 0
         ),
+        **evidence_packets,
     }
     profile_order, target_profile, profile_results = evaluate_profiles(
         base_metrics,
