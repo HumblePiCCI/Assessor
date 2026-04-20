@@ -122,6 +122,32 @@ LEDGER_SIDE_SCHEMA = {
     ],
     "additionalProperties": False,
 }
+SOURCE_CALIBRATION_CHECKS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "source_calibrated_winner": {"type": "string", "enum": ["A", "B", "tie"]},
+        "evidence_explained_not_named": {"type": "string", "enum": ["A", "B", "tie"]},
+        "commentary_depth": {"type": "string", "enum": ["A", "B", "tie"]},
+        "surface_control_advantage": {"type": "string", "enum": ["A", "B", "tie"]},
+        "surface_control_is_decisive": {"type": "boolean"},
+        "mature_theme_without_proof": {"type": "string", "enum": ["A", "B", "none"]},
+        "completion_floor_has_observable_scaffold": {"type": "boolean"},
+        "active_rubric_remains_authority": {"type": "boolean"},
+        "source_calibration_rationale": {"type": "string"},
+    },
+    "required": [
+        "source_calibrated_winner",
+        "evidence_explained_not_named",
+        "commentary_depth",
+        "surface_control_advantage",
+        "surface_control_is_decisive",
+        "mature_theme_without_proof",
+        "completion_floor_has_observable_scaffold",
+        "active_rubric_remains_authority",
+        "source_calibration_rationale",
+    ],
+    "additionalProperties": False,
+}
 COMMITTEE_DECISION_CHECKS["properties"].update(
     {
         "interpretation_depth": {"type": "string", "enum": ["A", "B", "tie"]},
@@ -137,6 +163,7 @@ COMMITTEE_DECISION_CHECKS["properties"].update(
             "required": ["A", "B"],
             "additionalProperties": False,
         },
+        "source_calibration_checks": SOURCE_CALIBRATION_CHECKS_SCHEMA,
     }
 )
 COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required"]) + [
@@ -148,6 +175,7 @@ COMMITTEE_DECISION_CHECKS["required"] = list(COMMITTEE_DECISION_CHECKS["required
     "mechanics_block_meaning",
     "completion_floor_applied",
     "evidence_ledger",
+    "source_calibration_checks",
 ]
 
 GROUP_CALIBRATION_RESPONSE_FORMAT = {
@@ -1171,6 +1199,17 @@ def evidence_ledger_instruction_lines() -> list[str]:
             "If winner_side conflicts with the evidence ledger, the deterministic committee guard may supersede "
             "your winner using the ledger you supplied."
         ),
+        (
+            "Also complete decision_checks.source_calibration_checks. source_calibrated_winner must answer: "
+            "which essay wins when teacher-scored exemplar rules are applied to the active rubric? "
+            "Do not let surface_control_advantage decide unless surface_control_is_decisive is true because "
+            "the other essay's meaning is unrecoverable, incomplete, or off task."
+        ),
+        (
+            "Set completion_floor_has_observable_scaffold to true only when the essay has visible scaffold headings, "
+            "blank/fragmentary prompt remnants, or an actually unfinished draft. Do not use it for a merely shorter, "
+            "rougher, or less formulaic essay."
+        ),
     ]
 
 
@@ -1239,7 +1278,23 @@ def normalize_committee_decision_checks(value: dict) -> dict:
     base["mechanics_block_meaning"] = truthy(value.get("mechanics_block_meaning"))
     base["completion_floor_applied"] = truthy(value.get("completion_floor_applied"))
     base["evidence_ledger"] = normalize_evidence_ledger(value.get("evidence_ledger"))
+    base["source_calibration_checks"] = normalize_source_calibration_checks(value.get("source_calibration_checks"))
     return base
+
+
+def normalize_source_calibration_checks(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    return {
+        "source_calibrated_winner": vc.normalize_side(value.get("source_calibrated_winner")),
+        "evidence_explained_not_named": vc.normalize_side(value.get("evidence_explained_not_named")),
+        "commentary_depth": vc.normalize_side(value.get("commentary_depth")),
+        "surface_control_advantage": vc.normalize_side(value.get("surface_control_advantage")),
+        "surface_control_is_decisive": truthy(value.get("surface_control_is_decisive")),
+        "mature_theme_without_proof": vc.normalize_side(value.get("mature_theme_without_proof"), allow_none=True),
+        "completion_floor_has_observable_scaffold": truthy(value.get("completion_floor_has_observable_scaffold")),
+        "active_rubric_remains_authority": truthy(value.get("active_rubric_remains_authority")),
+        "source_calibration_rationale": str(value.get("source_calibration_rationale") or "").strip(),
+    }
 
 
 LEDGER_QUALITY = {"none": 0, "weak": 1, "adequate": 2, "strong": 3}
@@ -1414,6 +1469,121 @@ def evidence_ledger_guard_decision(candidate: dict, read: dict, *, read_label: s
         },
     }
     return normalize_committee_read(candidate, flipped), f"committee_read_{str(read_label).lower()}_evidence_ledger_override"
+
+
+def source_calibration_favors_side(checks: dict, side: str, other: str) -> bool:
+    side = normalize_winner_side(side)
+    other = normalize_winner_side(other)
+    if not side or not other or side == other:
+        return False
+    source_checks = normalize_source_calibration_checks(checks.get("source_calibration_checks"))
+    if source_checks.get("source_calibrated_winner") != side:
+        return False
+    if source_checks.get("mature_theme_without_proof") == side:
+        return False
+    if source_checks.get("completion_floor_has_observable_scaffold"):
+        return False
+    if checks.get("mechanics_block_meaning") or checks.get("completion_floor_applied"):
+        return False
+    evidence_side = source_checks.get("evidence_explained_not_named")
+    commentary_side = source_checks.get("commentary_depth")
+    surface_side = source_checks.get("surface_control_advantage")
+    surface_decisive = bool(source_checks.get("surface_control_is_decisive"))
+    if evidence_side == side and commentary_side in {side, "tie"}:
+        return True
+    if commentary_side == side and evidence_side in {side, "tie"}:
+        return True
+    if evidence_side == side and commentary_side == side:
+        return True
+    if surface_side == other and not surface_decisive and (evidence_side == side or commentary_side == side):
+        return True
+    return False
+
+
+def source_calibration_guard_decision(candidate: dict, read: dict, *, read_label: str = "A") -> tuple[dict | None, str]:
+    """Flip a prior-winner concurrence when the source-calibration checklist contradicts it."""
+
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    read_winner = str(read.get("winner") or "").strip()
+    if not prior_winner or not read_winner or read_winner != prior_winner:
+        return None, "source_calibration_guard_not_prior_concurrence"
+    confidence = vc.normalize_confidence(read.get("confidence"))
+    if confidence not in {"medium", "high"}:
+        return None, "source_calibration_guard_low_confidence"
+    bucket = str(candidate.get("bucket") or "")
+    triggers = set(candidate.get("triggers") or [])
+    if bucket != "caution_ignored" and not (triggers & CAUTION_IGNORED_TRIGGERS):
+        return None, "source_calibration_guard_not_high_risk"
+    checks = normalize_committee_decision_checks(
+        read.get("decision_checks") if isinstance(read.get("decision_checks"), dict) else {}
+    )
+    winner_side = normalize_winner_side(read.get("winner_side"))
+    loser_side = "B" if winner_side == "A" else "A" if winner_side == "B" else ""
+    if not winner_side or not loser_side:
+        return None, "source_calibration_guard_missing_side"
+    if not source_calibration_favors_side(checks, loser_side, winner_side):
+        return None, "source_calibration_guard_checklist_supports_winner"
+    ledger = checks.get("evidence_ledger") if isinstance(checks.get("evidence_ledger"), dict) else {}
+    normalized_ledger = normalize_evidence_ledger(ledger)
+    if ledger_side_blocked(normalized_ledger[loser_side]):
+        return None, "source_calibration_guard_loser_blocked_by_ledger"
+
+    flipped = copy.deepcopy(read)
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    new_winner = higher if loser_side == "A" else lower
+    new_loser = lower if new_winner == higher else higher
+    flipped_checks = normalize_committee_decision_checks(
+        flipped.get("decision_checks") if isinstance(flipped.get("decision_checks"), dict) else {}
+    )
+    flipped_checks["interpretation_depth"] = loser_side
+    flipped_checks["proof_sufficiency"] = loser_side
+    flipped_checks["alternate_theme_validity"] = loser_side
+    flipped_checks["polish_trap"] = True
+    flipped_checks["rougher_but_stronger_latent"] = True
+    flipped_checks["mechanics_block_meaning"] = False
+    flipped_checks["completion_floor_applied"] = False
+    source_checks = normalize_source_calibration_checks(flipped_checks.get("source_calibration_checks"))
+    source_checks["source_calibrated_winner"] = loser_side
+    source_checks["evidence_explained_not_named"] = loser_side
+    source_checks["commentary_depth"] = loser_side
+    source_checks["surface_control_is_decisive"] = False
+    source_checks["completion_floor_has_observable_scaffold"] = False
+    flipped_checks["source_calibration_checks"] = source_checks
+    cautions = set(flipped.get("cautions_applied") if isinstance(flipped.get("cautions_applied"), list) else [])
+    cautions.update({"rougher_but_stronger_content", "polished_but_shallow"})
+    flipped.update(
+        {
+            "winner": new_winner,
+            "loser": new_loser,
+            "winner_side": loser_side,
+            "decision": "KEEP" if loser_side == "A" else "SWAP",
+            "confidence": confidence,
+            "decision_basis": "content_reasoning",
+            "cautions_applied": sorted(cautions),
+            "decision_checks": flipped_checks,
+            "rationale": (
+                "Source-calibration guard: the committee read preserved the prior winner, "
+                "but its source-calibration checklist gives the other essay stronger explained evidence/commentary "
+                "with no observable completion floor or mechanics blocker. "
+                + str(flipped.get("rationale") or "").strip()
+            ).strip(),
+        }
+    )
+    metadata = dict(flipped.get("model_metadata") or {})
+    metadata["committee_read"] = f"{read_label}-source-calibration-guard"
+    metadata["adjudication_source"] = "committee_source_calibration_guard"
+    flipped["model_metadata"] = metadata
+    flipped["source_calibration_guard"] = {
+        "prior_winner": prior_winner,
+        "original_winner": read_winner,
+        "guard_winner": new_winner,
+        "guard_winner_side": loser_side,
+        "original_winner_side": winner_side,
+        "source_calibration_checks": source_checks,
+    }
+    return normalize_committee_read(candidate, flipped), f"committee_read_{str(read_label).lower()}_source_calibration_override"
 
 
 def run_blind_read_a(
@@ -2566,6 +2736,9 @@ def resolve_a_b(candidate: dict, read_a: dict, read_b: dict) -> tuple[dict | Non
     b_guard_read, b_guard_reason = evidence_ledger_guard_decision(candidate, read_b, read_label="B")
     if b_guard_read is not None:
         return b_guard_read, b_guard_reason
+    b_source_guard_read, b_source_guard_reason = source_calibration_guard_decision(candidate, read_b, read_label="B")
+    if b_source_guard_read is not None:
+        return b_source_guard_read, b_source_guard_reason
 
     b_trap = bool(b_checks.get("polish_trap") or b_checks.get("rougher_but_stronger_latent"))
 
@@ -2630,6 +2803,9 @@ def resolve_a_b_c(
     c_guard_read, c_guard_reason = evidence_ledger_guard_decision(candidate, read_c, read_label="C")
     if c_guard_read is not None:
         return c_guard_read, c_guard_reason
+    c_source_guard_read, c_source_guard_reason = source_calibration_guard_decision(candidate, read_c, read_label="C")
+    if c_source_guard_read is not None:
+        return c_source_guard_read, c_source_guard_reason
     for prior_read in (read_a, read_b):
         if str(prior_read.get("winner") or "").strip() != c_winner:
             continue
@@ -2704,6 +2880,8 @@ def decision_from_committee_read(
     }
     if isinstance(item.get("evidence_ledger_guard"), dict):
         trace["evidence_ledger_guard"] = item["evidence_ledger_guard"]
+    if isinstance(item.get("source_calibration_guard"), dict):
+        trace["source_calibration_guard"] = item["source_calibration_guard"]
     if read_a is not None:
         a_checks = normalize_committee_decision_checks(
             read_a.get("decision_checks") if isinstance(read_a.get("decision_checks"), dict) else {}
@@ -2881,6 +3059,24 @@ def run_read_a_path(
                     candidate,
                     ledger_guard_read,
                     ledger_guard_reason,
+                    read_a=read,
+                )
+            )
+            read_results.append(record)
+            continue
+
+        source_guard_read, source_guard_reason = source_calibration_guard_decision(candidate, read, read_label="A")
+        record["source_calibration_guard_reason"] = source_guard_reason
+        record["source_calibration_guard_emitted"] = bool(source_guard_read)
+        if source_guard_read is not None:
+            record["status"] = source_guard_reason
+            record["override_emitted"] = True
+            record["source_calibration_guard_read"] = source_guard_read
+            decisions.append(
+                decision_from_committee_read(
+                    candidate,
+                    source_guard_read,
+                    source_guard_reason,
                     read_a=read,
                 )
             )
@@ -3446,6 +3642,7 @@ def main() -> int:
                     "read_a": read_a_summary,
                     "group_calibration": group_summary,
                     "ledger_guard": {"evaluated_count": 0, "override_count": 0, "statuses": {}},
+                    "source_calibration_guard": {"evaluated_count": 0, "override_count": 0, "statuses": {}},
                     "read_results": read_a_results,
                     "group_calibration_results": group_results,
                     "decision_pair_keys": [],
@@ -3512,6 +3709,11 @@ def main() -> int:
         for record in read_a_results
         if isinstance(record, dict)
     )
+    source_guard_statuses = Counter(
+        str(record.get("source_calibration_guard_reason") or "not_evaluated")
+        for record in read_a_results
+        if isinstance(record, dict)
+    )
     live_trace_payload = {
         "generated_at": generated_at,
         "phase": "3e",
@@ -3526,6 +3728,11 @@ def main() -> int:
             "evaluated_count": sum(1 for record in read_a_results if isinstance(record, dict) and "evidence_ledger_guard_reason" in record),
             "override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("evidence_ledger_guard_emitted")),
             "statuses": dict(sorted(ledger_guard_statuses.items())),
+        },
+        "source_calibration_guard": {
+            "evaluated_count": sum(1 for record in read_a_results if isinstance(record, dict) and "source_calibration_guard_reason" in record),
+            "override_count": sum(1 for record in read_a_results if isinstance(record, dict) and record.get("source_calibration_guard_emitted")),
+            "statuses": dict(sorted(source_guard_statuses.items())),
         },
         "read_results": read_a_results,
         "group_calibration_results": group_results,
@@ -3593,6 +3800,7 @@ def main() -> int:
         "read_b": decisions_payload["read_b"],
         "read_c": decisions_payload["read_c"],
         "ledger_guard": live_trace_payload["ledger_guard"],
+        "source_calibration_guard": live_trace_payload["source_calibration_guard"],
         "group_calibration": group_summary,
         "phase2_ready": True,
     }

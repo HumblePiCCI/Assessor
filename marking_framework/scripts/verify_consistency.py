@@ -1205,6 +1205,7 @@ def judge_pair(
         "mechanics_block_meaning",
         "completion_floor_applied",
         "evidence_ledger",
+        "source_calibration_checks",
     ):
         if key in parsed_checks:
             decision_checks[key] = parsed_checks.get(key)

@@ -17,6 +17,12 @@ Read B, Read C, and group-neighborhood committee prompts. The broad cheap
 pairwise screener does not consume this pack; calibration stays on the routed
 teacher-grade path.
 
+Routed committee reads must also fill `decision_checks.source_calibration_checks`.
+The deterministic source-calibration guard can supersede a prior-winner
+concurrence only when that checklist says the other essay wins explained
+evidence/commentary under the external calibration rules and there is no
+observable scaffold, completion floor, or mechanics blocker.
+
 ## Current Source Families
 
 - [New Meridian / PARCC Grade 7 Literary Analysis Task](https://resources.newmeridiancorp.org/wp-content/uploads/2019/07/Gr7_LAT_4127_Released_Set_12016.pdf): core middle-grade literary-analysis anchor set with annotated score points for reading and written expression.
@@ -52,4 +58,3 @@ Do not paste external exemplar essays into prompts, fixtures, or docs unless a
 separate license review approves ingestion. The committee prompt explicitly
 instructs the model to use the distilled rules only and not quote, reproduce, or
 infer full source essay text.
-

@@ -1284,6 +1284,29 @@ def _ledger(*, a_depth="weak", a_proof="weak", b_depth="weak", b_proof="weak", a
     }
 
 
+def _source_checks(
+    *,
+    winner="B",
+    evidence="B",
+    commentary="B",
+    surface="A",
+    surface_decisive=False,
+    mature_theme_without_proof="none",
+    completion_scaffold=False,
+):
+    return {
+        "source_calibrated_winner": winner,
+        "evidence_explained_not_named": evidence,
+        "commentary_depth": commentary,
+        "surface_control_advantage": surface,
+        "surface_control_is_decisive": surface_decisive,
+        "mature_theme_without_proof": mature_theme_without_proof,
+        "completion_floor_has_observable_scaffold": completion_scaffold,
+        "active_rubric_remains_authority": True,
+        "source_calibration_rationale": "Source rules prefer explained commentary over surface control.",
+    }
+
+
 def test_phase3a_read_priority_polished_but_shallow_keep_is_tier_0():
     candidates = _build_ghost_candidates()
     # s003::s013: cheap_pairwise + polished_but_shallow caution + KEEP → Tier 0
@@ -1556,6 +1579,75 @@ def test_phase3e_evidence_ledger_guard_does_not_flip_when_alternate_blocked():
     assert reason == "evidence_ledger_guard_ledger_supports_winner"
 
 
+def test_source_calibration_guard_flips_prior_concurrence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="medium",
+        interpretation_depth="A",
+        proof_sufficiency="A",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            surface="A",
+            surface_decisive=False,
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert reason == "committee_read_a_source_calibration_override"
+    assert guard_read is not None
+    assert guard_read["winner"] == "s009"
+    assert guard_read["winner_side"] == "B"
+    checks = guard_read["decision_checks"]["source_calibration_checks"]
+    assert checks["source_calibrated_winner"] == "B"
+    assert checks["completion_floor_has_observable_scaffold"] is False
+    assert guard_read["source_calibration_guard"]["guard_winner"] == "s009"
+
+
+def test_source_calibration_guard_does_not_flip_unproven_mature_theme():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            mature_theme_without_proof="B",
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "source_calibration_guard_checklist_supports_winner"
+
+
+def test_source_calibration_guard_does_not_flip_observable_completion_scaffold():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            completion_scaffold=True,
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "source_calibration_guard_checklist_supports_winner"
+
+
 def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
     candidates = _build_ghost_candidates()
     selected = [_get_candidate(candidates, "s009::s015")]
@@ -1629,6 +1721,88 @@ def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
     assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_evidence_ledger_override"
     assert read_results[0]["status"] == "committee_read_a_evidence_ledger_override"
     assert read_results[0]["evidence_ledger_guard_emitted"] is True
+
+
+def test_run_read_path_emits_source_calibration_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015")]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is more complete, but source calibration favors Jack's commentary.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "deeper_interpretation": "A",
+                "better_text_evidence_explanation": "A",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "A",
+                "cleaner_wins_on_substance": "Logan is complete.",
+                "rougher_loses_because": "Jack is rougher.",
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(
+                    a_depth="strong",
+                    a_proof="strong",
+                    b_depth="adequate",
+                    b_proof="adequate",
+                ),
+                "source_calibration_checks": _source_checks(
+                    winner="B",
+                    evidence="B",
+                    commentary="B",
+                    surface="A",
+                    surface_decisive=False,
+                ),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_source_calibration_override"
+    assert read_results[0]["status"] == "committee_read_a_source_calibration_override"
+    assert read_results[0]["source_calibration_guard_emitted"] is True
 
 
 def test_phase3e_live_read_error_records_and_continues(monkeypatch):
