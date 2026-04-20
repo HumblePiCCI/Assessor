@@ -2160,6 +2160,62 @@ def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_
     assert packet_report["packets"] == []
 
 
+def test_main_group_fixture_reads_evidence_packet_without_pair_reads(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = ghost_residual_payload()
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(json.dumps(ghost_residual_neighborhood_evidence_map()), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--group-calibration-fixture",
+            str(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+            "--max-group-calibrations",
+            "1",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["group_calibration"]["neighborhood_source"] == "evidence_group_packets"
+    assert decisions["group_calibration"]["read_count"] == 1
+    assert decisions["group_calibration_results"][0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert decisions["group_calibration_results"][0]["source"] == "fixture"
+
+
 def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
     candidates = _build_ghost_candidates()
     selected = [_get_candidate(candidates, "s009::s015")]
@@ -2964,6 +3020,115 @@ def _prior_group_read_results():
     ]
 
 
+def packet_edge(pair, active_winner, recommended_winner, *, confidence="high", margin=3.0, ambiguous=False):
+    return {
+        "pair": list(pair),
+        "pair_key": "::".join(sorted(pair)),
+        "recommended_winner": recommended_winner,
+        "active_winner": active_winner,
+        "confidence": confidence,
+        "margin": margin,
+        "contradicts_active_winner": bool(recommended_winner not in {"", "tie", active_winner}),
+        "ambiguous": ambiguous,
+        "scores": {pair[0]: 10.0, pair[1]: 9.0},
+        "reasons": ["packet fixture"],
+    }
+
+
+def group_packet_payload_fixture():
+    return {
+        "enabled": True,
+        "packets": [
+            {
+                "packet_id": "evidence_group_packet_002",
+                "selection_status": "selected",
+                "priority_score": 120,
+                "recommended_read_type": "pair_guard_review",
+                "reason": "lower priority packet",
+                "source_neighborhood_id": "evidence_neighborhood_2",
+                "source_component_size": 2,
+                "student_ids": ["s022", "s019"],
+                "seed_order": ["s022", "s019"],
+                "evidence_order": ["s022", "s019"],
+                "triggering_edges": [packet_edge(("s022", "s019"), "s019", "s022", margin=2.0)],
+                "ambiguous_edges": [],
+            },
+            {
+                "packet_id": "evidence_group_packet_001",
+                "selection_status": "selected",
+                "priority_score": 300,
+                "recommended_read_type": "local_order_calibration",
+                "reason": "highest priority packet",
+                "source_neighborhood_id": "evidence_neighborhood_1",
+                "source_component_size": 4,
+                "student_ids": ["s015", "s003", "s009", "s013"],
+                "seed_order": ["s015", "s003", "s009", "s013"],
+                "evidence_order": ["s009", "s013", "s015", "s003"],
+                "triggering_edges": [
+                    packet_edge(("s015", "s009"), "s015", "s009", margin=4.0),
+                    packet_edge(("s003", "s009"), "s003", "s009", margin=3.0),
+                ],
+                "ambiguous_edges": [
+                    packet_edge(("s003", "s013"), "s003", "tie", confidence="low", margin=0.2, ambiguous=True),
+                ],
+            },
+        ],
+    }
+
+
+def group_packet_calibration_fixtures():
+    return [
+        {
+            "neighborhood_id": "evidence_group_packet_001",
+            "ordered_student_ids": ["s009", "s013", "s015", "s003"],
+            "confidence": "high",
+            "rationale": "Packet 1 ranks the local order by interpretation.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "Jack beats Logan on interpretation.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+                {
+                    "pair_key": "s003::s009",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "Jack beats Easton on interpretation.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+            ],
+        },
+        {
+            "neighborhood_id": "evidence_group_packet_002",
+            "ordered_student_ids": ["s022", "s019"],
+            "confidence": "high",
+            "rationale": "Packet 2 confirms Sienna over Naomi.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s019::s022",
+                    "winner": "s022",
+                    "confidence": "high",
+                    "rationale": "Sienna is more grounded.",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        },
+    ]
+
+
 def test_phase3d_build_group_neighborhood_from_unresolved_results():
     candidates = _build_ghost_candidates()
     neighborhoods = cer.build_group_calibration_neighborhoods(
@@ -2980,6 +3145,90 @@ def test_phase3d_build_group_neighborhood_from_unresolved_results():
         "s003", "s004", "s008", "s009", "s013", "s015", "s019", "s022"
     }
     assert neighborhood["read_result_statuses"]["s009::s015"] == "committee_read_c_confirms_prior"
+
+
+def test_packet_sourced_group_neighborhoods_sort_by_priority_and_attach_context():
+    neighborhoods = cer.build_group_calibration_neighborhoods_from_packets(
+        packet_payload=group_packet_payload_fixture(),
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        max_groups=2,
+        max_students=5,
+    )
+
+    assert [neighborhood["neighborhood_id"] for neighborhood in neighborhoods] == [
+        "evidence_group_packet_001",
+        "evidence_group_packet_002",
+    ]
+    assert neighborhoods[0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert neighborhoods[0]["evidence_packet"]["evidence_order"] == ["s009", "s013", "s015", "s003"]
+    assert set(neighborhoods[0]["pair_keys"]) == {"s009::s015", "s003::s009", "s003::s013"}
+    assert neighborhoods[0]["trigger_details"][0]["read_status"] == "evidence_group_packet_selected"
+
+
+def test_packet_sourced_group_calibration_reads_priority_order_and_caps():
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        read_results=[],
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=group_packet_calibration_fixtures(),
+        max_groups=1,
+        max_students=5,
+        existing_decision_keys=set(),
+        evidence_group_packets=group_packet_payload_fixture(),
+    )
+
+    assert summary["neighborhood_source"] == "evidence_group_packets"
+    assert summary["packet_neighborhood_count"] == 1
+    assert summary["read_count"] == 1
+    assert results[0]["neighborhood_id"] == "evidence_group_packet_001"
+    assert results[0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert set(results[0]["override_pair_keys"]) >= {"s009::s015", "s003::s009"}
+    assert {decision["pair_key"]: decision["winner"] for decision in decisions}["s009::s015"] == "s009"
+    assert any(
+        decision["committee_edge_trace"]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+        for decision in decisions
+    )
+
+
+def test_disabled_packet_report_falls_back_to_unresolved_read_results():
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=cer.load_group_calibration_fixture(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+        max_groups=1,
+        max_students=12,
+        existing_decision_keys=set(),
+        evidence_group_packets={"enabled": False, "packets": []},
+    )
+
+    assert summary["neighborhood_source"] == "unresolved_read_results"
+    assert summary["packet_neighborhood_count"] == 0
+    assert results[0]["neighborhood_id"] == "group_1"
+    assert decisions
 
 
 def test_phase3d_group_calibration_emits_pair_overrides():

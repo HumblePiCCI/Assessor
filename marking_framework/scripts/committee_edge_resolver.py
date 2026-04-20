@@ -427,6 +427,13 @@ def load_group_calibration_fixture(path: Path | None) -> list[dict]:
     return [copy.deepcopy(item) for item in raw_items if isinstance(item, dict)]
 
 
+def load_evidence_group_packets(path: Path | None) -> dict:
+    if path is None or not path.exists():
+        return {}
+    payload = load_optional_json(path)
+    return payload if isinstance(payload, dict) else {}
+
+
 def load_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -2136,6 +2143,129 @@ def build_group_calibration_neighborhoods(
     return neighborhoods[:max_groups]
 
 
+def packet_pair_keys(packet: dict) -> list[str]:
+    keys = []
+    for section in ("triggering_edges", "ambiguous_edges"):
+        edges = packet.get(section) if isinstance(packet.get(section), list) else []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            pair_key = str(edge.get("pair_key") or "").strip()
+            if pair_key and pair_key not in keys:
+                keys.append(pair_key)
+    return keys
+
+
+def packet_trigger_detail(edge: dict, packet: dict, candidate_by_key: dict[str, dict]) -> dict:
+    pair_key = str(edge.get("pair_key") or "").strip()
+    candidate = candidate_by_key.get(pair_key, {})
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    return {
+        "pair_key": pair_key,
+        "bucket": candidate.get("bucket", "evidence_group_packet"),
+        "committee_score": candidate.get("committee_score", packet.get("priority_score", 0)),
+        "triggers": list(candidate.get("triggers") or ["evidence_group_packet"]),
+        "prior_winner": (candidate.get("escalated_summary") or {}).get("winner", ""),
+        "prior_basis": (candidate.get("escalated_summary") or {}).get("decision_basis", ""),
+        "read_status": "evidence_group_packet_selected",
+        "read_c_invoked": False,
+        "cautions": details.get("escalated_cautions", []),
+        "evidence_packet_id": packet.get("packet_id", ""),
+        "source_neighborhood_id": packet.get("source_neighborhood_id", ""),
+        "recommended_winner": edge.get("recommended_winner", ""),
+        "active_winner": edge.get("active_winner", ""),
+        "evidence_confidence": edge.get("confidence", ""),
+        "evidence_margin": edge.get("margin", 0.0),
+        "ambiguous": bool(edge.get("ambiguous")),
+        "evidence_reasons": list(edge.get("reasons") or [])[:6],
+    }
+
+
+def build_group_calibration_neighborhoods_from_packets(
+    *,
+    packet_payload: dict,
+    selected: list[dict],
+    rows: list[dict],
+    max_groups: int,
+    max_students: int,
+) -> list[dict]:
+    if max_groups <= 0 or max_students < 2 or not packet_payload.get("enabled"):
+        return []
+    candidate_by_key = {str(candidate.get("pair_key") or ""): candidate for candidate in selected}
+    rows_by_id = {str(row.get("student_id") or ""): row for row in vc.prepare_rows(rows)}
+    raw_packets = packet_payload.get("packets") if isinstance(packet_payload.get("packets"), list) else []
+    packets = [
+        packet for packet in raw_packets
+        if isinstance(packet, dict) and str(packet.get("selection_status") or "selected") == "selected"
+    ]
+    packets = sorted(
+        packets,
+        key=lambda packet: (
+            -int(num(packet.get("priority_score"), 0) or 0),
+            str(packet.get("packet_id") or ""),
+            [str(sid) for sid in packet.get("student_ids", [])],
+        ),
+    )
+    neighborhoods = []
+    for packet in packets:
+        if len(neighborhoods) >= max_groups:
+            break
+        seed_order = [str(sid).strip() for sid in packet.get("seed_order", []) if str(sid).strip()]
+        if not seed_order:
+            seed_order = [str(sid).strip() for sid in packet.get("student_ids", []) if str(sid).strip()]
+        student_ids = [sid for sid in seed_order if sid in rows_by_id][:max_students]
+        if len(student_ids) < 2:
+            continue
+        student_set = set(student_ids)
+        edges = [
+            edge for edge in (packet.get("triggering_edges", []) or []) + (packet.get("ambiguous_edges", []) or [])
+            if isinstance(edge, dict)
+        ]
+        filtered_edges = [
+            edge for edge in edges
+            if set(str(sid) for sid in edge.get("pair", []) if str(sid)) <= student_set
+        ]
+        pair_keys = [
+            key for key in packet_pair_keys({"triggering_edges": filtered_edges, "ambiguous_edges": []})
+            if key
+        ]
+        if not pair_keys:
+            # The full local order can still create support edges, but group
+            # calibration needs at least one explicit edge target to audit.
+            continue
+        trigger_details = [
+            packet_trigger_detail(edge, packet, candidate_by_key)
+            for edge in sorted(filtered_edges, key=lambda edge: str(edge.get("pair_key") or ""))
+        ]
+        packet_context = {
+            "packet_id": packet.get("packet_id", ""),
+            "priority_score": packet.get("priority_score", 0),
+            "recommended_read_type": packet.get("recommended_read_type", ""),
+            "reason": packet.get("reason", ""),
+            "source_neighborhood_id": packet.get("source_neighborhood_id", ""),
+            "source_component_size": packet.get("source_component_size", 0),
+            "seed_order": list(packet.get("seed_order") or []),
+            "evidence_order": list(packet.get("evidence_order") or []),
+            "triggering_pair_keys": [
+                str(edge.get("pair_key") or "") for edge in packet.get("triggering_edges", []) if isinstance(edge, dict)
+            ],
+            "ambiguous_pair_keys": [
+                str(edge.get("pair_key") or "") for edge in packet.get("ambiguous_edges", []) if isinstance(edge, dict)
+            ],
+        }
+        neighborhoods.append(
+            {
+                "neighborhood_id": str(packet.get("packet_id") or f"evidence_group_packet_{len(neighborhoods) + 1:03d}"),
+                "student_ids": student_ids,
+                "pair_keys": pair_keys,
+                "trigger_details": trigger_details,
+                "read_result_statuses": {pair_key: "evidence_group_packet_selected" for pair_key in pair_keys},
+                "evidence_packet": packet_context,
+            }
+        )
+    return neighborhoods
+
+
 def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
     expected = [str(sid).strip() for sid in neighborhood.get("student_ids", []) if str(sid).strip()]
     expected_set = set(expected)
@@ -2241,7 +2371,25 @@ def group_calibration_prompt(
         pair_lines.append(
             f"{detail.get('pair_key', '')}: prior_winner={detail.get('prior_winner', '')}; "
             f"basis={detail.get('prior_basis', '')}; status={detail.get('read_status', '')}; "
-            f"triggers={detail.get('triggers', [])}; cautions={detail.get('cautions', [])}"
+            f"triggers={detail.get('triggers', [])}; cautions={detail.get('cautions', [])}; "
+            f"evidence_recommended={detail.get('recommended_winner', '')}; "
+            f"evidence_confidence={detail.get('evidence_confidence', '')}; "
+            f"ambiguous={detail.get('ambiguous', False)}"
+        )
+    packet = neighborhood.get("evidence_packet") if isinstance(neighborhood.get("evidence_packet"), dict) else {}
+    packet_context = ""
+    if packet:
+        packet_context = "\n".join(
+            [
+                f"packet_id={packet.get('packet_id', '')}",
+                f"recommended_read_type={packet.get('recommended_read_type', '')}",
+                f"priority_score={packet.get('priority_score', '')}",
+                f"reason={packet.get('reason', '')}",
+                f"seed_order={packet.get('seed_order', [])}",
+                f"evidence_order={packet.get('evidence_order', [])}",
+                f"triggering_pair_keys={packet.get('triggering_pair_keys', [])}",
+                f"ambiguous_pair_keys={packet.get('ambiguous_pair_keys', [])}",
+            ]
         )
     genre = str(metadata.get("assignment_genre") or metadata.get("genre") or "")
     class_context = json.dumps(
@@ -2275,6 +2423,7 @@ def group_calibration_prompt(
                 )
             ),
             "Cohort row context:\n" + "\n".join(row_brief(row, student_count) for row in rows),
+            "Evidence group packet context:\n" + (packet_context or "No packet context supplied; this neighborhood came from unresolved committee reads."),
             "Unresolved pairwise edges under calibration:\n" + "\n".join(pair_lines),
             "Essays:\n\n" + "\n\n---\n\n".join(essay_blocks),
         ]
@@ -2391,6 +2540,7 @@ def candidate_from_group_pair(
     higher, lower = (left, right) if left_rank <= right_rank else (right, left)
     higher_rank, lower_rank = (left_rank, right_rank) if higher == left else (right_rank, left_rank)
     pair_key = pair_key_from_item({"pair": [higher, lower]})
+    packet = neighborhood.get("evidence_packet") if isinstance(neighborhood.get("evidence_packet"), dict) else {}
     return {
         "pair": [higher, lower],
         "pair_key": pair_key,
@@ -2405,6 +2555,8 @@ def candidate_from_group_pair(
         "triggers": ["committee_group_neighborhood_order"],
         "trigger_details": {
             "group_neighborhood_id": neighborhood.get("neighborhood_id", ""),
+            "evidence_packet_id": packet.get("packet_id", ""),
+            "evidence_packet_read_type": packet.get("recommended_read_type", ""),
             "escalated_cautions": [],
         },
         "escalated_summary": {
@@ -2417,6 +2569,19 @@ def candidate_from_group_pair(
             "adjudication_source": "",
         },
     }
+
+
+def candidate_with_group_context(candidate: dict, neighborhood: dict) -> dict:
+    item = copy.deepcopy(candidate)
+    details = item.get("trigger_details") if isinstance(item.get("trigger_details"), dict) else {}
+    details = dict(details)
+    packet = neighborhood.get("evidence_packet") if isinstance(neighborhood.get("evidence_packet"), dict) else {}
+    details.setdefault("group_neighborhood_id", neighborhood.get("neighborhood_id", ""))
+    if packet:
+        details["evidence_packet_id"] = packet.get("packet_id", "")
+        details["evidence_packet_read_type"] = packet.get("recommended_read_type", "")
+    item["trigger_details"] = details
+    return item
 
 
 def decision_from_group_calibration(candidate: dict, calibration: dict) -> dict | None:
@@ -2494,6 +2659,10 @@ def decision_from_group_calibration(candidate: dict, calibration: dict) -> dict 
             "neighborhood_id": calibration.get("neighborhood_id", ""),
             "ordered_student_ids": order,
             "placement_notes": calibration.get("placement_notes", []),
+            "evidence_packet": {
+                "packet_id": details.get("evidence_packet_id", ""),
+                "recommended_read_type": details.get("evidence_packet_read_type", ""),
+            },
         },
     }
 
@@ -2592,15 +2761,28 @@ def run_group_calibration_path(
     max_students: int,
     existing_decision_keys: set[str],
     source_calibration: Path | dict | None = None,
+    evidence_group_packets: dict | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     rows_by_id = {str(row.get("student_id") or ""): row for row in vc.prepare_rows(rows)}
-    neighborhoods = build_group_calibration_neighborhoods(
+    packet_neighborhoods = build_group_calibration_neighborhoods_from_packets(
+        packet_payload=evidence_group_packets or {},
         selected=selected,
         rows=rows,
-        read_results=read_results,
         max_groups=max_groups,
         max_students=max_students,
     )
+    if packet_neighborhoods:
+        neighborhoods = packet_neighborhoods
+        neighborhood_source = "evidence_group_packets"
+    else:
+        neighborhoods = build_group_calibration_neighborhoods(
+            selected=selected,
+            rows=rows,
+            read_results=read_results,
+            max_groups=max_groups,
+            max_students=max_students,
+        )
+        neighborhood_source = "unresolved_read_results"
     candidate_by_key = {str(candidate.get("pair_key") or ""): candidate for candidate in selected}
     decisions: list[dict] = []
     results: list[dict] = []
@@ -2637,6 +2819,8 @@ def run_group_calibration_path(
             "neighborhood_id": neighborhood.get("neighborhood_id", ""),
             "student_ids": neighborhood.get("student_ids", []),
             "pair_keys": neighborhood.get("pair_keys", []),
+            "neighborhood_source": neighborhood_source,
+            "evidence_packet": neighborhood.get("evidence_packet", {}),
             "source": source or "not_read",
             "override_pair_keys": [],
             "edge_decision_pair_keys": [],
@@ -2657,6 +2841,7 @@ def run_group_calibration_path(
             candidate = candidate_by_key.get(pair_key)
             if candidate is None:
                 continue
+            candidate = candidate_with_group_context(candidate, neighborhood)
             decision = decision_from_group_edge_decision(candidate, edge_decision, calibration)
             if decision is None:
                 continue
@@ -2686,6 +2871,8 @@ def run_group_calibration_path(
                 if left not in rows_by_id or right not in rows_by_id:
                     continue
                 candidate = candidate_from_group_pair(left, right, rows_by_id, neighborhood)
+            else:
+                candidate = candidate_with_group_context(candidate, neighborhood)
             decision = decision_from_group_calibration(candidate, calibration)
             if decision is None:
                 continue
@@ -2702,6 +2889,8 @@ def run_group_calibration_path(
         "fixture": bool(fixtures),
         "max_groups": int(max_groups),
         "max_students": int(max_students),
+        "neighborhood_source": neighborhood_source,
+        "packet_neighborhood_count": len(packet_neighborhoods),
         "neighborhood_count": len(neighborhoods),
         "read_count": read_count,
         "override_count": len(decisions),
@@ -3545,6 +3734,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "committee_anchor": str(args.committee_anchor),
         "source_calibration": str(args.source_calibration),
         "evidence_map": str(args.evidence_map),
+        "evidence_group_packets": str(args.evidence_group_packets) if args.evidence_group_packets else "",
         "evidence_neighborhood_output": str(args.evidence_neighborhood_output),
         "evidence_group_packets_output": str(args.evidence_group_packets_output),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
@@ -3660,6 +3850,15 @@ def build_parser() -> argparse.ArgumentParser:
             "default behavior remains model-free and passthrough when no decisions exist."
         ),
     )
+    parser.add_argument(
+        "--evidence-group-packets",
+        type=Path,
+        default=None,
+        help=(
+            "Optional prebuilt evidence_group_calibration_packets.json. When omitted, "
+            "the resolver uses the packet artifact it builds in this run."
+        ),
+    )
     parser.add_argument("--model", default="", help="Override literary committee model")
     parser.add_argument("--reasoning", default="", help="Override literary committee reasoning")
     parser.add_argument("--max-output-tokens", type=int, default=0, help="Override literary committee max output tokens")
@@ -3723,6 +3922,7 @@ def main() -> int:
         cohort_confidence = load_optional_json(args.cohort_confidence)
         class_metadata = load_optional_json(args.class_metadata)
         evidence_maps_by_id = load_evidence_maps(args.evidence_map)
+        input_evidence_group_packets = load_evidence_group_packets(args.evidence_group_packets)
         manual_decisions = load_decisions(args.decisions)
         blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
         read_b_fixture = load_blind_read_fixture(args.read_b_fixture)
@@ -3797,6 +3997,7 @@ def main() -> int:
         max_packet_students=args.max_evidence_packet_students,
         max_packets=args.max_evidence_group_packets,
     )
+    active_evidence_group_packets = input_evidence_group_packets or evidence_group_packets
     read_a_decisions = []
     read_a_results = []
     read_a_summary = {
@@ -3830,12 +4031,16 @@ def main() -> int:
         "fixture": False,
         "max_groups": int(args.max_group_calibrations),
         "max_students": int(args.max_group_students),
+        "neighborhood_source": "",
+        "packet_neighborhood_count": 0,
         "neighborhood_count": 0,
         "read_count": 0,
         "override_count": 0,
         "skipped_existing_decision_count": 0,
     }
-    if args.live or blind_read_fixture or read_b_fixture or read_c_fixture or group_calibration_fixture:
+    read_path_requested = bool(args.live or blind_read_fixture or read_b_fixture or read_c_fixture)
+    group_path_requested = bool(args.live or group_calibration_fixture)
+    if read_path_requested or group_path_requested:
         try:
             routing_payload = load_optional_json(args.routing)
             task = task_config(routing_payload, "literary_committee")
@@ -3851,31 +4056,32 @@ def main() -> int:
                 outline = load_file_text(outline_path)
                 if not rubric.strip():
                     raise ValueError(f"Rubric text is empty. Check file at {rubric_path}.")
-            read_a_decisions, read_a_results, read_a_summary = run_read_a_path(
-                selected=selected,
-                rows=rows,
-                texts_by_id=texts_by_id,
-                rubric=rubric,
-                outline=outline,
-                metadata=class_metadata,
-                model=model,
-                routing=str(args.routing),
-                reasoning=str(reasoning),
-                max_output_tokens=max_output_tokens,
-                anchor_dir=args.committee_anchor.parent,
-                committee_anchor=args.committee_anchor,
-                source_calibration=args.source_calibration,
-                max_reads=args.max_reads,
-                max_read_b=args.max_read_b,
-                max_read_c=args.max_read_c,
-                live=bool(args.live),
-                live_read_b=not bool(args.no_live_read_b),
-                live_read_c=not bool(args.no_live_read_c),
-                fixture_by_key=blind_read_fixture,
-                read_b_fixture=read_b_fixture,
-                read_c_fixture=read_c_fixture,
-            )
-            if read_a_results and (args.live or group_calibration_fixture):
+            if read_path_requested:
+                read_a_decisions, read_a_results, read_a_summary = run_read_a_path(
+                    selected=selected,
+                    rows=rows,
+                    texts_by_id=texts_by_id,
+                    rubric=rubric,
+                    outline=outline,
+                    metadata=class_metadata,
+                    model=model,
+                    routing=str(args.routing),
+                    reasoning=str(reasoning),
+                    max_output_tokens=max_output_tokens,
+                    anchor_dir=args.committee_anchor.parent,
+                    committee_anchor=args.committee_anchor,
+                    source_calibration=args.source_calibration,
+                    max_reads=args.max_reads,
+                    max_read_b=args.max_read_b,
+                    max_read_c=args.max_read_c,
+                    live=bool(args.live),
+                    live_read_b=not bool(args.no_live_read_b),
+                    live_read_c=not bool(args.no_live_read_c),
+                    fixture_by_key=blind_read_fixture,
+                    read_b_fixture=read_b_fixture,
+                    read_c_fixture=read_c_fixture,
+                )
+            if group_path_requested:
                 existing_keys = {
                     pair_key_from_item(decision)
                     for decision in (manual_decisions + read_a_decisions)
@@ -3901,6 +4107,7 @@ def main() -> int:
                     max_groups=args.max_group_calibrations,
                     max_students=args.max_group_students,
                     existing_decision_keys=existing_keys,
+                    evidence_group_packets=active_evidence_group_packets,
                 )
         except Exception as exc:
             report = {
@@ -3920,7 +4127,7 @@ def main() -> int:
                     "phase": "3e",
                     "passthrough": True,
                     "source_paths": source_paths,
-                    "enabled": bool(args.live or blind_read_fixture or read_b_fixture or read_c_fixture or group_calibration_fixture),
+                    "enabled": bool(read_path_requested or group_path_requested),
                     "error": str(exc),
                     "read_a": read_a_summary,
                     "group_calibration": group_summary,
