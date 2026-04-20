@@ -4,6 +4,33 @@ from pathlib import Path
 from scripts import evidence_map as em
 
 
+def candidate(pair, active_winner, recommended_winner, confidence="high", margin=2.0):
+    left, right = pair
+    return {
+        "pair": [left, right],
+        "pair_key": "::".join(sorted(pair)),
+        "escalated_summary": {"winner": active_winner},
+        "evidence_map_pair_signal": {
+            "pair": [left, right],
+            "pair_key": "::".join(sorted(pair)),
+            "recommended_winner": recommended_winner,
+            "active_winner": active_winner,
+            "confidence": confidence,
+            "margin": margin,
+            "scores": {left: 10.0, right: 9.0},
+            "reasons": ["fixture signal"],
+            "contradicts_active_winner": recommended_winner not in {"tie", active_winner},
+        },
+    }
+
+
+def maps(*student_ids):
+    return {
+        student_id: {"summary": {"evidence_map_score": float(100 - index), "completion_floor_applied": False}}
+        for index, student_id in enumerate(student_ids)
+    }
+
+
 def test_extract_evidence_units_counts_claim_moments_and_commentary():
     text = (
         "Ghost changes because Coach gives him a second chance. "
@@ -168,3 +195,46 @@ def test_cli_writes_map_and_pair_signals(tmp_path, monkeypatch):
     }
     assert pairs["pair_count"] == 1
     assert pairs["pair_signals"][0]["recommended_winner"] == "s001"
+
+
+def test_neighborhood_report_classifies_pair_guard_and_group_components():
+    report = em.build_evidence_neighborhood_report(
+        maps_by_id=maps("s009", "s015", "s003", "s013", "s022", "s019", "s008", "s004"),
+        rows=[
+            {"student_id": "s015", "seed_rank": "1"},
+            {"student_id": "s003", "seed_rank": "2"},
+            {"student_id": "s009", "seed_rank": "3"},
+            {"student_id": "s013", "seed_rank": "4"},
+            {"student_id": "s022", "seed_rank": "5"},
+            {"student_id": "s019", "seed_rank": "6"},
+            {"student_id": "s004", "seed_rank": "7"},
+            {"student_id": "s008", "seed_rank": "8"},
+        ],
+        candidates=[
+            candidate(("s015", "s009"), "s015", "s009", "high", 4.0),
+            candidate(("s003", "s009"), "s003", "s009", "high", 4.0),
+            candidate(("s003", "s013"), "s003", "tie", "low", 0.2),
+            candidate(("s022", "s019"), "s019", "s022", "medium", 1.0),
+            candidate(("s004", "s008"), "s004", "s008", "high", 5.0),
+        ],
+    )
+
+    actions = {tuple(neighborhood["student_ids"]): neighborhood["recommended_next_action"] for neighborhood in report["neighborhoods"]}
+    assert actions[("s015", "s003", "s009", "s013")] == "needs_group_calibration"
+    assert actions[("s022", "s019")] == "pair_guard_only"
+    assert actions[("s004", "s008")] == "pair_guard_only"
+    top = next(n for n in report["neighborhoods"] if set(n["student_ids"]) == {"s015", "s003", "s009", "s013"})
+    assert {edge["pair_key"] for edge in top["ambiguous_edges"]} == {"s003::s013"}
+    assert top["evidence_order"][0] == "s009"
+
+
+def test_neighborhood_report_disabled_without_evidence_map():
+    report = em.build_evidence_neighborhood_report(
+        maps_by_id={},
+        rows=[],
+        candidates=[candidate(("a", "b"), "a", "b")],
+    )
+
+    assert report["enabled"] is False
+    assert report["reason"] == "evidence_map_missing"
+    assert report["neighborhoods"] == []

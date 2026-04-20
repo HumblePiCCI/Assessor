@@ -576,6 +576,37 @@ def ghost_residual_texts():
     }
 
 
+def ghost_residual_neighborhood_evidence_map():
+    scores = {
+        "s009": 35.0,
+        "s015": 30.0,
+        "s003": 30.6,
+        "s013": 30.4,
+        "s022": 23.0,
+        "s019": 22.0,
+        "s008": 19.0,
+        "s004": 11.0,
+    }
+    return {
+        "students": {
+            student_id: {
+                "student_id": student_id,
+                "summary": {
+                    "evidence_map_score": score,
+                    "completion_floor_applied": False,
+                    "integrated_analysis_count": 0,
+                    "commentary_unit_count": 0,
+                    "distinct_literary_concept_count": 0,
+                    "focus_score": 0.0,
+                    "plot_summary_unit_count": 0,
+                },
+                "units": [],
+            }
+            for student_id, score in scores.items()
+        }
+    }
+
+
 def test_phase2a_triggers_all_five_ghost_residuals():
     """All five Ghost residual pair keys must land in caution_ignored and clear the budget."""
     payload = ghost_residual_payload()
@@ -1991,6 +2022,126 @@ def test_main_reports_evidence_map_guard_counts(tmp_path, monkeypatch):
     assert report["evidence_map_guard"]["override_count"] == 1
     assert trace["evidence_map_guard"]["statuses"] == {"committee_read_a_evidence_map_override": 1}
     assert decisions["decisions"][0]["winner"] == "s009"
+
+
+def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = ghost_residual_payload()
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(json.dumps(ghost_residual_neighborhood_evidence_map()), encoding="utf-8")
+    neighborhood = outputs / "evidence_neighborhood_report.json"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--evidence-neighborhood-output",
+            str(neighborhood),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert report["enabled"] is True
+    assert report["counts"]["neighborhoods"] == 3
+    actions = {
+        tuple(neighborhood["student_ids"]): neighborhood["recommended_next_action"]
+        for neighborhood in report["neighborhoods"]
+    }
+    assert actions[("s015", "s003", "s009", "s013")] == "needs_group_calibration"
+    assert actions[("s022", "s019")] == "pair_guard_only"
+    assert actions[("s004", "s008")] == "pair_guard_only"
+    top = next(
+        item for item in report["neighborhoods"]
+        if set(item["student_ids"]) == {"s015", "s003", "s009", "s013"}
+    )
+    assert top["evidence_order"][0] == "s009"
+    assert {edge["pair_key"] for edge in top["ambiguous_edges"]} == {"s003::s013"}
+
+
+def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = copy.deepcopy(ghost_residual_payload())
+    payload["checks"] = [item for item in payload["checks"] if cer.pair_key_from_item(item) == "s009::s015"]
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    neighborhood = outputs / "evidence_neighborhood_report.json"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(outputs / "missing_evidence_map.json"),
+            "--evidence-neighborhood-output",
+            str(neighborhood),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    assert report["enabled"] is False
+    assert report["reason"] == "evidence_map_missing"
+    assert report["counts"]["candidate_edges"] == 1
 
 
 def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():

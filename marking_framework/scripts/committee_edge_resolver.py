@@ -36,7 +36,11 @@ try:
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
-    from scripts.evidence_map import compare_evidence_maps, evidence_map_summary
+    from scripts.evidence_map import (
+        build_evidence_neighborhood_report,
+        compare_evidence_maps,
+        evidence_map_summary,
+    )
     from scripts.openai_client import extract_text, responses_create
     from scripts.source_calibration import (
         DEFAULT_SOURCE_CALIBRATION,
@@ -59,7 +63,11 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
-    from evidence_map import compare_evidence_maps, evidence_map_summary  # type: ignore  # pragma: no cover
+    from evidence_map import (  # type: ignore  # pragma: no cover
+        build_evidence_neighborhood_report,
+        compare_evidence_maps,
+        evidence_map_summary,
+    )
     from openai_client import extract_text, responses_create  # type: ignore  # pragma: no cover
     from source_calibration import (  # type: ignore  # pragma: no cover
         DEFAULT_SOURCE_CALIBRATION,
@@ -85,6 +93,7 @@ DEFAULT_ROUTING = "config/llm_routing.json"
 DEFAULT_COMMITTEE_ANCHOR = "inputs/pairwise_anchors/literary_analysis.committee.json"
 DEFAULT_SOURCE_CALIBRATION_PATH = str(DEFAULT_SOURCE_CALIBRATION.relative_to(Path(__file__).resolve().parents[1]))
 DEFAULT_EVIDENCE_MAP = "outputs/evidence_map.json"
+DEFAULT_EVIDENCE_NEIGHBORHOOD_OUT = "outputs/evidence_neighborhood_report.json"
 DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
@@ -3529,6 +3538,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "committee_anchor": str(args.committee_anchor),
         "source_calibration": str(args.source_calibration),
         "evidence_map": str(args.evidence_map),
+        "evidence_neighborhood_output": str(args.evidence_neighborhood_output),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
@@ -3649,6 +3659,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decisions-output", type=Path, default=Path(DEFAULT_DECISIONS_OUT))
     parser.add_argument("--report-output", type=Path, default=Path(DEFAULT_REPORT_OUT))
     parser.add_argument("--merged-output", type=Path, default=Path(DEFAULT_MERGED_OUT))
+    parser.add_argument("--evidence-neighborhood-output", type=Path, default=Path(DEFAULT_EVIDENCE_NEIGHBORHOOD_OUT))
     parser.add_argument("--live-trace-output", type=Path, default=None)
     parser.add_argument("--max-candidates", type=int, default=CandidateConfig.max_candidates)
     parser.add_argument("--max-top-pack", type=int, default=CandidateConfig.max_top_pack)
@@ -3679,6 +3690,11 @@ def main() -> int:
         args.live_trace_output = args.decisions_output.with_name(Path(DEFAULT_LIVE_TRACE_OUT).name)
     if args.evidence_map == Path(DEFAULT_EVIDENCE_MAP) and args.escalated != Path(DEFAULT_ESCALATED):
         args.evidence_map = args.escalated.with_name("evidence_map.json")
+    if (
+        args.evidence_neighborhood_output == Path(DEFAULT_EVIDENCE_NEIGHBORHOOD_OUT)
+        and args.escalated != Path(DEFAULT_ESCALATED)
+    ):
+        args.evidence_neighborhood_output = args.escalated.with_name("evidence_neighborhood_report.json")
     generated_at = now_iso()
     source_paths = artifact_source_paths(args)
     try:
@@ -3740,6 +3756,17 @@ def main() -> int:
     )
     selected, skipped, budget = select_within_budget(candidates, config=config)
     merged_candidates = selected + skipped
+    evidence_neighborhood_report = build_evidence_neighborhood_report(
+        maps_by_id=evidence_maps_by_id,
+        candidates=selected,
+        rows=rows,
+        generated_at=generated_at,
+        source_paths={
+            "evidence_map": str(args.evidence_map),
+            "committee_candidates": str(args.candidates_output),
+            "scores": str(args.scores),
+        },
+    )
     read_a_decisions = []
     read_a_results = []
     read_a_summary = {
@@ -4047,6 +4074,7 @@ def main() -> int:
     write_json(args.decisions_output, decisions_payload)
     write_json(args.live_trace_output, live_trace_payload)
     write_json(args.report_output, report_payload)
+    write_json(args.evidence_neighborhood_output, evidence_neighborhood_report)
     write_json(args.merged_output, merged_payload)
     return 0
 

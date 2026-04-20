@@ -9,9 +9,10 @@ committee reads and guards can compare against model-authored rationales.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,9 @@ DEFAULT_TEXTS = "processing/normalized_text"
 DEFAULT_CLASS_METADATA = "inputs/class_metadata.json"
 DEFAULT_OUTPUT = "outputs/evidence_map.json"
 DEFAULT_PAIR_SIGNALS_OUTPUT = "outputs/evidence_map_pair_signals.json"
+DEFAULT_SCORES = "outputs/consensus_scores.csv"
+DEFAULT_NEIGHBORHOOD_OUTPUT = "outputs/evidence_neighborhood_report.json"
+MEDIUM_HIGH_CONFIDENCE = frozenset({"medium", "high"})
 
 WORD_RE = re.compile(r"[A-Za-z0-9']+")
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
@@ -710,6 +714,328 @@ def build_pair_signals(maps_by_id: dict[str, dict], pairs: list[tuple[str, str]]
     return signals
 
 
+def load_score_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def selected_candidate_items(payload: dict) -> list[dict]:
+    raw_items = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    return [item for item in raw_items if isinstance(item, dict)]
+
+
+def student_rank_map(rows: list[dict]) -> dict[str, int]:
+    ranks = {}
+    for index, row in enumerate(rows, start=1):
+        student_id = str(row.get("student_id") or "").strip()
+        if not student_id:
+            continue
+        raw_rank = row.get("seed_rank") or row.get("consensus_rank") or row.get("final_rank") or index
+        try:
+            rank = int(float(raw_rank))
+        except (TypeError, ValueError):
+            rank = index
+        ranks[student_id] = rank
+    return ranks
+
+
+def candidate_active_winner(candidate: dict) -> str:
+    summary = candidate.get("escalated_summary") if isinstance(candidate.get("escalated_summary"), dict) else {}
+    winner = str(summary.get("winner") or "").strip()
+    if winner:
+        return winner
+    signal = candidate.get("evidence_map_pair_signal")
+    if not isinstance(signal, dict):
+        details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+        signal = details.get("evidence_map_pair_signal")
+    if isinstance(signal, dict):
+        return str(signal.get("active_winner") or "").strip()
+    return ""
+
+
+def candidate_evidence_signal(candidate: dict, maps_by_id: dict[str, dict]) -> dict:
+    signal = candidate.get("evidence_map_pair_signal")
+    if not isinstance(signal, dict):
+        details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+        signal = details.get("evidence_map_pair_signal")
+    if isinstance(signal, dict) and signal:
+        return signal
+    pair = candidate.get("pair") if isinstance(candidate.get("pair"), list) else []
+    if len(pair) != 2:
+        return {}
+    left, right = str(pair[0]).strip(), str(pair[1]).strip()
+    if left in maps_by_id and right in maps_by_id:
+        signal = compare_evidence_maps(left, right, maps_by_id)
+        active_winner = candidate_active_winner({**candidate, "evidence_map_pair_signal": signal})
+        signal["active_winner"] = active_winner
+        signal["contradicts_active_winner"] = bool(
+            signal.get("recommended_winner") not in {"", "tie", active_winner}
+        )
+        return signal
+    return {}
+
+
+def evidence_edge_record(candidate: dict, maps_by_id: dict[str, dict]) -> dict | None:
+    pair = candidate.get("pair") if isinstance(candidate.get("pair"), list) else []
+    signal = candidate_evidence_signal(candidate, maps_by_id)
+    signal_pair = signal.get("pair") if isinstance(signal.get("pair"), list) else []
+    if len(pair) != 2 and len(signal_pair) == 2:
+        pair = signal_pair
+    if len(pair) != 2 or not signal:
+        return None
+    left, right = str(pair[0]).strip(), str(pair[1]).strip()
+    if not left or not right:
+        return None
+    confidence = str(signal.get("confidence") or "").strip().lower()
+    recommended = str(signal.get("recommended_winner") or "").strip()
+    active_winner = str(signal.get("active_winner") or candidate_active_winner(candidate)).strip()
+    contradictory = bool(recommended not in {"", "tie", active_winner})
+    ambiguous = bool(recommended in {"", "tie"} or confidence not in MEDIUM_HIGH_CONFIDENCE)
+    return {
+        "pair": [left, right],
+        "pair_key": "::".join(sorted((left, right))),
+        "recommended_winner": recommended or "tie",
+        "active_winner": active_winner,
+        "confidence": confidence or "low",
+        "margin": signal.get("margin", 0.0),
+        "contradicts_active_winner": contradictory,
+        "ambiguous": ambiguous,
+        "scores": signal.get("scores", {}),
+        "reasons": list(signal.get("reasons") or [])[:6],
+    }
+
+
+def focused_neighborhood_edges(edge_records: list[dict]) -> list[dict]:
+    contradictions = [
+        edge for edge in edge_records
+        if edge.get("contradicts_active_winner")
+        and not edge.get("ambiguous")
+        and edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE
+    ]
+    contradiction_nodes = {sid for edge in contradictions for sid in edge.get("pair", [])}
+    focused = {edge["pair_key"]: edge for edge in contradictions}
+    for edge in edge_records:
+        if edge.get("pair_key") in focused:
+            continue
+        pair_nodes = set(edge.get("pair", []))
+        if edge.get("ambiguous") and pair_nodes & contradiction_nodes:
+            focused[edge["pair_key"]] = edge
+    return sorted(focused.values(), key=lambda edge: edge["pair_key"])
+
+
+def connected_components_from_edges(edges: list[dict]) -> list[list[str]]:
+    graph: dict[str, set[str]] = defaultdict(set)
+    for edge in edges:
+        pair = edge.get("pair") if isinstance(edge.get("pair"), list) else []
+        if len(pair) != 2:
+            continue
+        left, right = str(pair[0]), str(pair[1])
+        graph[left].add(right)
+        graph[right].add(left)
+    components = []
+    seen: set[str] = set()
+    for start in sorted(graph):
+        if start in seen:
+            continue
+        queue = deque([start])
+        seen.add(start)
+        component = []
+        while queue:
+            node = queue.popleft()
+            component.append(node)
+            for neighbor in sorted(graph[node]):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append(neighbor)
+        components.append(sorted(component))
+    return components
+
+
+def evidence_score_for(student_id: str, maps_by_id: dict[str, dict]) -> float:
+    summary = evidence_map_summary(maps_by_id.get(student_id, {}))
+    try:
+        return float(summary.get("evidence_map_score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def evidence_local_order(
+    student_ids: list[str],
+    edge_records: list[dict],
+    maps_by_id: dict[str, dict],
+    ranks: dict[str, int],
+) -> list[str]:
+    wins = Counter()
+    losses = Counter()
+    student_set = set(student_ids)
+    for edge in edge_records:
+        if edge.get("ambiguous") or edge.get("confidence") not in MEDIUM_HIGH_CONFIDENCE:
+            continue
+        winner = str(edge.get("recommended_winner") or "").strip()
+        pair = [str(sid) for sid in edge.get("pair", [])]
+        if winner not in student_set or len(pair) != 2:
+            continue
+        loser = pair[1] if pair[0] == winner else pair[0]
+        if loser not in student_set:
+            continue
+        wins[winner] += 1
+        losses[loser] += 1
+    return sorted(
+        student_ids,
+        key=lambda sid: (
+            -(wins[sid] - losses[sid]),
+            -evidence_score_for(sid, maps_by_id),
+            ranks.get(sid, 999999),
+            sid,
+        ),
+    )
+
+
+def has_evidence_cycle(student_ids: list[str], edge_records: list[dict]) -> bool:
+    graph: dict[str, set[str]] = defaultdict(set)
+    student_set = set(student_ids)
+    for edge in edge_records:
+        if edge.get("ambiguous") or edge.get("confidence") not in MEDIUM_HIGH_CONFIDENCE:
+            continue
+        winner = str(edge.get("recommended_winner") or "")
+        pair = [str(sid) for sid in edge.get("pair", [])]
+        if winner not in student_set or len(pair) != 2:
+            continue
+        loser = pair[1] if pair[0] == winner else pair[0]
+        if loser in student_set:
+            graph[winner].add(loser)
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str) -> bool:
+        if node in visiting:
+            return True
+        if node in visited:
+            return False
+        visiting.add(node)
+        for neighbor in graph.get(node, set()):
+            if visit(neighbor):
+                return True
+        visiting.remove(node)
+        visited.add(node)
+        return False
+
+    return any(visit(student_id) for student_id in student_ids)
+
+
+def classify_evidence_neighborhood(
+    student_ids: list[str],
+    component_edges: list[dict],
+) -> tuple[str, str]:
+    strong_edges = [
+        edge for edge in component_edges
+        if not edge.get("ambiguous") and edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE
+    ]
+    contradictory_edges = [edge for edge in strong_edges if edge.get("contradicts_active_winner")]
+    ambiguous_edges = [edge for edge in component_edges if edge.get("ambiguous")]
+    if not strong_edges:
+        return "insufficient_signal", "no medium/high evidence-map edges in component"
+    if len(student_ids) == 2 and len(contradictory_edges) == 1 and not ambiguous_edges:
+        return "pair_guard_only", "isolated strong evidence-map contradiction"
+    if len(student_ids) >= 3:
+        return "needs_group_calibration", "connected component has three or more students"
+    if contradictory_edges and ambiguous_edges:
+        return "needs_group_calibration", "component mixes strong contradiction with ambiguous internal edge"
+    if has_evidence_cycle(student_ids, component_edges):
+        return "needs_group_calibration", "directed evidence-map edges form a local cycle"
+    return "insufficient_signal", "component has evidence but no actionable contradiction pattern"
+
+
+def build_evidence_neighborhood_report(
+    *,
+    maps_by_id: dict[str, dict],
+    candidates: list[dict],
+    rows: list[dict],
+    generated_at: str | None = None,
+    source_paths: dict | None = None,
+) -> dict:
+    generated_at = generated_at or now_iso()
+    source_paths = source_paths or {}
+    if not maps_by_id:
+        return {
+            "generated_at": generated_at,
+            "phase": "offline_evidence_neighborhood_v1",
+            "enabled": False,
+            "reason": "evidence_map_missing",
+            "source_paths": source_paths,
+            "counts": {
+                "candidate_edges": len(candidates),
+                "evidence_edges": 0,
+                "contradicting_edges": 0,
+                "ambiguous_edges": 0,
+                "neighborhoods": 0,
+            },
+            "neighborhoods": [],
+        }
+    ranks = student_rank_map(rows)
+    edge_records = [
+        edge for edge in (evidence_edge_record(candidate, maps_by_id) for candidate in candidates)
+        if edge is not None
+    ]
+    focused_edges = focused_neighborhood_edges(edge_records)
+    components = connected_components_from_edges(focused_edges)
+    neighborhoods = []
+    for index, student_ids in enumerate(components, start=1):
+        student_set = set(student_ids)
+        component_edges = [
+            edge for edge in edge_records
+            if set(edge.get("pair", [])) <= student_set
+            and (
+                edge.get("pair_key") in {focused.get("pair_key") for focused in focused_edges}
+                or (not edge.get("ambiguous") and edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE)
+            )
+        ]
+        component_edges = sorted(component_edges, key=lambda edge: edge["pair_key"])
+        contradicting_edges = [
+            edge for edge in component_edges
+            if edge.get("contradicts_active_winner")
+            and not edge.get("ambiguous")
+            and edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE
+        ]
+        ambiguous_edges = [edge for edge in component_edges if edge.get("ambiguous")]
+        strong_edges = [
+            edge for edge in component_edges
+            if not edge.get("ambiguous") and edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE
+        ]
+        action, reason = classify_evidence_neighborhood(student_ids, component_edges)
+        seed_order = sorted(student_ids, key=lambda sid: (ranks.get(sid, 999999), sid))
+        neighborhoods.append(
+            {
+                "neighborhood_id": f"evidence_neighborhood_{index}",
+                "student_ids": seed_order,
+                "seed_order": seed_order,
+                "evidence_order": evidence_local_order(student_ids, component_edges, maps_by_id, ranks),
+                "contradicting_edges": contradicting_edges,
+                "ambiguous_edges": ambiguous_edges,
+                "confidence_density": round(len(strong_edges) / max(1, len(strong_edges) + len(ambiguous_edges)), 6),
+                "has_cycle": has_evidence_cycle(student_ids, component_edges),
+                "recommended_next_action": action,
+                "reason": reason,
+            }
+        )
+    return {
+        "generated_at": generated_at,
+        "phase": "offline_evidence_neighborhood_v1",
+        "enabled": True,
+        "source_paths": source_paths,
+        "counts": {
+            "candidate_edges": len(candidates),
+            "evidence_edges": len([edge for edge in edge_records if edge.get("confidence") in MEDIUM_HIGH_CONFIDENCE and not edge.get("ambiguous")]),
+            "contradicting_edges": len([edge for edge in edge_records if edge.get("contradicts_active_winner") and not edge.get("ambiguous")]),
+            "ambiguous_edges": len([edge for edge in edge_records if edge.get("ambiguous")]),
+            "neighborhoods": len(neighborhoods),
+        },
+        "neighborhoods": neighborhoods,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build deterministic evidence maps for student writing.")
     parser.add_argument("--texts", type=Path, default=Path(DEFAULT_TEXTS))
@@ -726,6 +1052,19 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(DEFAULT_PAIR_SIGNALS_OUTPUT),
         help="Output path used when --candidates is provided.",
+    )
+    parser.add_argument("--scores", type=Path, default=Path(DEFAULT_SCORES))
+    parser.add_argument(
+        "--committee-candidates",
+        type=Path,
+        default=None,
+        help="Optional committee_edge_candidates.json for offline evidence-neighborhood report.",
+    )
+    parser.add_argument(
+        "--neighborhood-output",
+        type=Path,
+        default=Path(DEFAULT_NEIGHBORHOOD_OUTPUT),
+        help="Output path used when --committee-candidates is provided.",
     )
     return parser
 
@@ -766,6 +1105,21 @@ def main() -> int:
                 "pair_signals": signals,
             },
         )
+    if args.committee_candidates is not None:
+        candidate_payload = load_optional_json(args.committee_candidates)
+        rows = load_score_rows(args.scores)
+        report = build_evidence_neighborhood_report(
+            maps_by_id=maps_by_id,
+            candidates=selected_candidate_items(candidate_payload),
+            rows=rows,
+            generated_at=generated_at,
+            source_paths={
+                "evidence_map": str(args.output),
+                "committee_candidates": str(args.committee_candidates),
+                "scores": str(args.scores),
+            },
+        )
+        write_json(args.neighborhood_output, report)
     return 0
 
 
