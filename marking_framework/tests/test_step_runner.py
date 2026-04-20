@@ -10,7 +10,7 @@ def test_pipeline_steps_structure():
     ids = [item["id"] for item in steps]
     assert ids[0] == "rubric"
     assert ids[-1] == "dashboard"
-    assert {"rubric", "assess", "band_seam", "consistency", "pairwise_escalation", "committee_edge_resolver", "rerank", "pairwise_eval", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
+    assert {"rubric", "assess", "band_seam", "consistency", "pairwise_escalation", "evidence_map", "committee_edge_resolver", "rerank", "pairwise_eval", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
     assert "scope_grounding" in ids
     assert "cohort_confidence" in ids
     assert all("cmd" in item and "label" in item for item in steps)
@@ -31,10 +31,13 @@ def test_pipeline_steps_structure():
     assert "outputs/consistency_checks.committee_edge.json" in pairwise_eval["cmd"]
     escalation = next(item for item in steps if item["id"] == "pairwise_escalation")
     assert "escalate_pairwise_adjudications.py" in " ".join(str(part) for part in escalation["cmd"])
+    evidence_map = next(item for item in steps if item["id"] == "evidence_map")
+    assert evidence_map["required"] is False
+    assert "evidence_map.py" in " ".join(str(part) for part in evidence_map["cmd"])
     committee = next(item for item in steps if item["id"] == "committee_edge_resolver")
     assert committee["required"] is False
     assert "committee_edge_resolver.py" in " ".join(str(part) for part in committee["cmd"])
-    assert ids.index("pairwise_escalation") < ids.index("committee_edge_resolver") < ids.index("rerank") < ids.index("pairwise_eval") < ids.index("quality_gate")
+    assert ids.index("pairwise_escalation") < ids.index("evidence_map") < ids.index("committee_edge_resolver") < ids.index("rerank") < ids.index("pairwise_eval") < ids.index("quality_gate")
     band_seam = next(item for item in steps if item["id"] == "band_seam")
     assert "band_seam_adjudication.py" in " ".join(str(part) for part in band_seam["cmd"])
     quality_gate = next(item for item in steps if item["id"] == "quality_gate")

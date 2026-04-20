@@ -203,6 +203,7 @@ def test_hero_path_calibrate_and_consistency(tmp_path, monkeypatch):
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
     assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
+    assert any("evidence_map.py" in str(part) for call in calls for part in call)
     assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
 
@@ -231,9 +232,10 @@ def test_hero_path_runs_committee_edge_resolver_between_escalation_and_rerank(tm
     assert hp.main() == 0
     rendered = [" ".join(str(part) for part in call) for call in calls]
     escalation_idx = next(idx for idx, call in enumerate(rendered) if "escalate_pairwise_adjudications.py" in call)
+    evidence_map_idx = next(idx for idx, call in enumerate(rendered) if "evidence_map.py" in call)
     committee_idx = next(idx for idx, call in enumerate(rendered) if "committee_edge_resolver.py" in call)
     rerank_idx = next(idx for idx, call in enumerate(rendered) if "global_rerank.py" in call)
-    assert escalation_idx < committee_idx < rerank_idx
+    assert escalation_idx < evidence_map_idx < committee_idx < rerank_idx
 
 
 def test_hero_path_runs_pairwise_eval_before_publish_gate(tmp_path, monkeypatch):

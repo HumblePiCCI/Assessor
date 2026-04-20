@@ -23,6 +23,7 @@ FULL_PIPELINE_STEP_IDS = (
     "band_seam",
     "consistency",
     "pairwise_escalation",
+    "evidence_map",
     "committee_edge_resolver",
     "rerank",
     "pairwise_eval",
@@ -41,6 +42,7 @@ ANCHOR_RESUME_STEP_IDS = (
     "band_seam",
     "consistency",
     "pairwise_escalation",
+    "evidence_map",
     "committee_edge_resolver",
     "rerank",
     "pairwise_eval",
@@ -109,6 +111,12 @@ def pipeline_steps() -> list[dict]:
         {"id": "band_seam", "label": "Adjudicating band seams", "cmd": ["python3", "scripts/band_seam_adjudication.py"]},
         {"id": "consistency", "label": "Collecting pairwise consistency evidence", "cmd": ["python3", "scripts/verify_consistency.py"]},
         {"id": "pairwise_escalation", "label": "Escalating unstable pairwise evidence", "cmd": ["python3", "scripts/escalate_pairwise_adjudications.py"]},
+        {
+            "id": "evidence_map",
+            "label": "Mapping claim/evidence/commentary signals",
+            "cmd": ["python3", "scripts/evidence_map.py"],
+            "required": False,
+        },
         {
             "id": "committee_edge_resolver",
             "label": "Resolving committee-edge overrides",

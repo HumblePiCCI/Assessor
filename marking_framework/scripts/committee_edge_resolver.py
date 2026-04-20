@@ -36,6 +36,7 @@ try:
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    from scripts.evidence_map import compare_evidence_maps, evidence_map_summary
     from scripts.openai_client import extract_text, responses_create
     from scripts.source_calibration import (
         DEFAULT_SOURCE_CALIBRATION,
@@ -58,6 +59,7 @@ except ImportError:  # pragma: no cover - Support running as a standalone script
         interpretive_density_delta,
         polish_vs_substance_gap,
     )
+    from evidence_map import compare_evidence_maps, evidence_map_summary  # type: ignore  # pragma: no cover
     from openai_client import extract_text, responses_create  # type: ignore  # pragma: no cover
     from source_calibration import (  # type: ignore  # pragma: no cover
         DEFAULT_SOURCE_CALIBRATION,
@@ -82,6 +84,7 @@ DEFAULT_OUTLINE = "inputs/assignment_outline.md"
 DEFAULT_ROUTING = "config/llm_routing.json"
 DEFAULT_COMMITTEE_ANCHOR = "inputs/pairwise_anchors/literary_analysis.committee.json"
 DEFAULT_SOURCE_CALIBRATION_PATH = str(DEFAULT_SOURCE_CALIBRATION.relative_to(Path(__file__).resolve().parents[1]))
+DEFAULT_EVIDENCE_MAP = "outputs/evidence_map.json"
 DEFAULT_CANDIDATES_OUT = "outputs/committee_edge_candidates.json"
 DEFAULT_DECISIONS_OUT = "outputs/committee_edge_decisions.json"
 DEFAULT_REPORT_OUT = "outputs/committee_edge_report.json"
@@ -372,6 +375,14 @@ def load_decisions(path: Path | None) -> list[dict]:
     return normalized
 
 
+def load_evidence_maps(path: Path | None) -> dict[str, dict]:
+    if path is None or not path.exists():
+        return {}
+    payload = load_optional_json(path)
+    students = payload.get("students") if isinstance(payload.get("students"), dict) else {}
+    return {str(key): value for key, value in students.items() if isinstance(value, dict)}
+
+
 def load_blind_read_fixture(path: Path | None) -> dict[str, dict]:
     if path is None:
         return {}
@@ -638,8 +649,10 @@ def build_candidates(
     genre: str,
     config: CandidateConfig,
     texts_by_id: dict[str, str] | None = None,
+    evidence_maps_by_id: dict[str, dict] | None = None,
 ) -> list[dict]:
     texts_by_id = texts_by_id or {}
+    evidence_maps_by_id = evidence_maps_by_id or {}
     normalized_rows = normalize_rows(rows)
     rows_by_id = {row["student_id"]: row for row in normalized_rows}
     student_count = max(1, len(normalized_rows))
@@ -696,6 +709,16 @@ def build_candidates(
             "loser": loser_features.to_dict(),
             "gap": gap,
         }
+        evidence_signal = {}
+        if winner in evidence_maps_by_id and loser in evidence_maps_by_id:
+            evidence_signal = compare_evidence_maps(winner, loser, evidence_maps_by_id)
+            evidence_signal["active_winner"] = winner
+            evidence_signal["active_loser"] = loser
+            evidence_signal["contradicts_active_winner"] = bool(
+                evidence_signal.get("recommended_winner") not in {"", "tie", winner}
+            )
+            evidence_signal["winner_summary"] = evidence_map_summary(evidence_maps_by_id.get(winner, {}))
+            evidence_signal["loser_summary"] = evidence_map_summary(evidence_maps_by_id.get(loser, {}))
         density_delta_loser = interpretive_density_delta(winner_features, loser_features)
         verb_delta_loser = loser_features.interpretive_verb_count - winner_features.interpretive_verb_count
         decision_basis = str(item.get("decision_basis") or "").strip()
@@ -865,6 +888,8 @@ def build_candidates(
             "keep_decision": keep_decision,
             "swap_decision": swap_decision,
         }
+        if evidence_signal:
+            details["evidence_map_pair_signal"] = evidence_signal
 
         # Heavy logging for surface_substance_inversion: user explicitly asked this
         # trigger be bucket-capped AND audited every time it fires. The log captures
@@ -942,6 +967,7 @@ def build_candidates(
                     "adjudication_source": normalize_source(item),
                 },
                 "surface_features": surface_features,
+                "evidence_map_pair_signal": evidence_signal,
                 "selection_status": "",
                 "skip_reason": "",
             }
@@ -1215,12 +1241,26 @@ def evidence_ledger_instruction_lines() -> list[str]:
 
 def candidate_selection_detail_lines(candidate: dict) -> list[str]:
     details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
-    return evidence_ledger_instruction_lines() + [
+    lines = evidence_ledger_instruction_lines() + [
         "This is a blind committee read. Do not rely on prior pairwise decisions, seed order, aggregate rank, Borda support, or committee trigger labels as evidence.",
         "Resolve the pair using the rubric, assignment, committee anchors, and essay texts only.",
         f"Candidate bucket for audit logging: {candidate.get('bucket', '')}.",
         f"Surface/substance deltas for audit logging only: {details.get('surface_substance_inversion_log', {}) or candidate.get('surface_features', {}).get('gap', {})}.",
     ]
+    evidence_signal = details.get("evidence_map_pair_signal") or candidate.get("evidence_map_pair_signal")
+    if isinstance(evidence_signal, dict) and evidence_signal:
+        lines.extend(
+            [
+                "Offline evidence-map signal is active for audit logging; verify it against the essays before relying on it.",
+                (
+                    "Evidence-map recommendation: "
+                    f"{evidence_signal.get('recommended_winner', 'tie')} "
+                    f"(confidence={evidence_signal.get('confidence', '')}, margin={evidence_signal.get('margin', '')})."
+                ),
+                "Evidence-map reasons: " + "; ".join(str(reason) for reason in evidence_signal.get("reasons", [])[:4]),
+            ]
+        )
+    return lines
 
 
 def normalize_committee_read(candidate: dict, read: dict) -> dict:
@@ -3317,6 +3357,7 @@ def artifact_source_paths(args: argparse.Namespace) -> dict:
         "routing": str(args.routing),
         "committee_anchor": str(args.committee_anchor),
         "source_calibration": str(args.source_calibration),
+        "evidence_map": str(args.evidence_map),
         "blind_read_fixture": str(args.blind_read_fixture) if args.blind_read_fixture else "",
         "read_b_fixture": str(args.read_b_fixture) if args.read_b_fixture else "",
         "read_c_fixture": str(args.read_c_fixture) if args.read_c_fixture else "",
@@ -3420,6 +3461,16 @@ def build_parser() -> argparse.ArgumentParser:
             "committee reads; default broad pipeline remains model-free at this seam."
         ),
     )
+    parser.add_argument(
+        "--evidence-map",
+        type=Path,
+        default=Path(DEFAULT_EVIDENCE_MAP),
+        help=(
+            "Optional deterministic evidence-map artifact. When present, selected "
+            "committee candidates include an offline claim/evidence/commentary signal; "
+            "default behavior remains model-free and passthrough when no decisions exist."
+        ),
+    )
     parser.add_argument("--model", default="", help="Override literary committee model")
     parser.add_argument("--reasoning", default="", help="Override literary committee reasoning")
     parser.add_argument("--max-output-tokens", type=int, default=0, help="Override literary committee max output tokens")
@@ -3466,6 +3517,7 @@ def main() -> int:
         band_seam_report = load_optional_json(args.band_seam)
         cohort_confidence = load_optional_json(args.cohort_confidence)
         class_metadata = load_optional_json(args.class_metadata)
+        evidence_maps_by_id = load_evidence_maps(args.evidence_map)
         manual_decisions = load_decisions(args.decisions)
         blind_read_fixture = load_blind_read_fixture(args.blind_read_fixture)
         read_b_fixture = load_blind_read_fixture(args.read_b_fixture)
@@ -3511,6 +3563,7 @@ def main() -> int:
         genre=genre,
         config=config,
         texts_by_id=texts_by_id,
+        evidence_maps_by_id=evidence_maps_by_id,
     )
     selected, skipped, budget = select_within_budget(candidates, config=config)
     merged_candidates = selected + skipped

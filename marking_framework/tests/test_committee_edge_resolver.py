@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from scripts import committee_edge_resolver as cer
+from scripts import evidence_map as em
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "committee_edge"
@@ -286,6 +287,31 @@ def test_trigger_polish_bias_suspected_selects_pair():
     assert "polish_bias_suspected" in candidate["triggers"]
     assert "rougher_but_stronger_latent" in candidate["triggers"]
     assert candidate["selection_status"] == ""
+
+
+def test_build_candidates_attaches_offline_evidence_map_signal():
+    payload = fixture_payload()
+    texts = surface_texts()
+    evidence_maps = em.build_evidence_maps(texts, genre="literary_analysis")
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=texts,
+        evidence_maps_by_id=evidence_maps,
+    )
+    candidate = next(item for item in candidates if item["pair_key"] == "s009::s015")
+    signal = candidate["evidence_map_pair_signal"]
+    assert signal["pair_key"] == "s009::s015"
+    assert signal["active_winner"] == candidate["escalated_summary"]["winner"]
+    assert "winner_summary" in signal
+    detail_lines = cer.candidate_selection_detail_lines(candidate)
+    assert any("Evidence-map recommendation" in line for line in detail_lines)
 
 
 def test_trigger_rougher_but_stronger_latent_requires_aggregate_support():
