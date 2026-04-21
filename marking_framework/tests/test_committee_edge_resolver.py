@@ -3202,6 +3202,32 @@ def test_packet_sourced_group_calibration_reads_priority_order_and_caps():
     )
 
 
+def test_group_calibration_prompt_uses_score_free_roster_context():
+    rows = {row["student_id"]: row for row in ghost_residual_rows()[:2]}
+    prompt = cer.group_calibration_prompt(
+        neighborhood={
+            "neighborhood_id": "group_1",
+            "student_ids": ["s015", "s003"],
+            "pair_keys": ["s003::s015"],
+            "trigger_details": [],
+        },
+        rows_by_id=rows,
+        texts={"s015": "Essay fifteen.", "s003": "Essay three."},
+        rubric="Rubric",
+        outline="Outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+
+    assert "Cohort roster:" in prompt
+    assert "s015" in prompt
+    assert "s003" in prompt
+    assert "seed_rank=" not in prompt
+    assert "composite=" not in prompt
+    assert "borda=" not in prompt
+    assert "support=" not in prompt
+
+
 def test_disabled_packet_report_falls_back_to_unresolved_read_results():
     decisions, results, summary = cer.run_group_calibration_path(
         selected=_build_ghost_candidates(),
@@ -3229,6 +3255,35 @@ def test_disabled_packet_report_falls_back_to_unresolved_read_results():
     assert summary["packet_neighborhood_count"] == 0
     assert results[0]["neighborhood_id"] == "group_1"
     assert decisions
+
+
+def _cycle_decision(pair, winner, *, confidence="high", committee_confidence="group_high", read="group-neighborhood-calibration"):
+    loser = pair[1] if pair[0] == winner else pair[0]
+    return {
+        "pair": list(pair),
+        "pair_key": cer.pair_key_from_item({"pair": list(pair)}),
+        "winner": winner,
+        "loser": loser,
+        "confidence": confidence,
+        "committee_confidence": committee_confidence,
+        "model_metadata": {"committee_read": read, "adjudication_source": "committee_edge"},
+    }
+
+
+def test_committee_override_cycle_resolution_suppresses_weakest_edge():
+    decisions = [
+        _cycle_decision(("s001", "s002"), "s001", confidence="high"),
+        _cycle_decision(("s002", "s003"), "s002", confidence="low"),
+        _cycle_decision(("s001", "s003"), "s003", confidence="high"),
+    ]
+
+    kept, report = cer.resolve_committee_override_cycles(decisions)
+
+    assert len(kept) == 2
+    assert report["suppressed_count"] == 1
+    assert report["suppressed"][0]["pair_key"] == "s002::s003"
+    assert report["suppressed"][0]["reason"] == "committee_override_cycle"
+    assert cer.find_committee_override_cycle(kept) == []
 
 
 def test_phase3d_group_calibration_emits_pair_overrides():

@@ -589,24 +589,26 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             failures.append("pairwise_eval_report_failures_present")
     if thresholds.get("pairwise_eval_require_escalated_path", False) and not metrics.get("pairwise_eval_escalated_path", False):
         failures.append("pairwise_eval_escalated_path_missing")
-    if metrics.get("committee_candidate_count", 0) > 0:
-        if not metrics.get("evidence_neighborhood_present", False):
-            failures.append("evidence_neighborhood_report_missing")
-        elif not metrics.get("evidence_neighborhood_enabled", False):
-            failures.append("evidence_neighborhood_report_disabled")
-    if metrics.get("evidence_needs_group_calibration_count", 0) > 0:
-        if not metrics.get("evidence_group_packets_present", False):
-            failures.append("evidence_group_packets_missing")
-        elif not metrics.get("evidence_group_packets_enabled", False):
-            failures.append("evidence_group_packets_disabled")
-        if metrics.get("evidence_group_packets_selected_count", 0) <= 0:
-            failures.append("evidence_group_packets_empty")
-    max_packet_students = int(metrics.get("evidence_group_packets_max_packet_students", 0) or 0)
-    if max_packet_students > 0 and metrics.get("evidence_group_packets_max_selected_packet_size", 0) > max_packet_students:
-        failures.append("evidence_group_packet_size_above_limit")
-    max_packets = int(metrics.get("evidence_group_packets_max_packets", 0) or 0)
-    if max_packets > 0 and metrics.get("evidence_group_packets_selected_count", 0) > max_packets:
-        failures.append("evidence_group_packet_count_above_limit")
+    require_evidence_packets = thresholds.get("require_evidence_group_packets", strict_release)
+    if require_evidence_packets:
+        if metrics.get("committee_candidate_count", 0) > 0:
+            if not metrics.get("evidence_neighborhood_present", False):
+                failures.append("evidence_neighborhood_report_missing")
+            elif not metrics.get("evidence_neighborhood_enabled", False):
+                failures.append("evidence_neighborhood_report_disabled")
+        if metrics.get("evidence_needs_group_calibration_count", 0) > 0:
+            if not metrics.get("evidence_group_packets_present", False):
+                failures.append("evidence_group_packets_missing")
+            elif not metrics.get("evidence_group_packets_enabled", False):
+                failures.append("evidence_group_packets_disabled")
+            if metrics.get("evidence_group_packets_selected_count", 0) <= 0:
+                failures.append("evidence_group_packets_empty")
+        max_packet_students = int(metrics.get("evidence_group_packets_max_packet_students", 0) or 0)
+        if max_packet_students > 0 and metrics.get("evidence_group_packets_max_selected_packet_size", 0) > max_packet_students:
+            failures.append("evidence_group_packet_size_above_limit")
+        max_packets = int(metrics.get("evidence_group_packets_max_packets", 0) or 0)
+        if max_packets > 0 and metrics.get("evidence_group_packets_selected_count", 0) > max_packets:
+            failures.append("evidence_group_packet_count_above_limit")
     return failures
 
 

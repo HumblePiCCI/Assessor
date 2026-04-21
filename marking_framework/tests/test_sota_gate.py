@@ -241,6 +241,7 @@ def test_assessor_spread_and_consistency_metrics(tmp_path):
 
 
 def test_evidence_packet_metrics_and_sota_invariants(tmp_path):
+    release_thresholds = {"release_mode": "candidate"}
     _write_evidence_artifacts(tmp_path)
     valid = sg.evidence_packet_metrics(
         tmp_path / "outputs/committee_edge_candidates.json",
@@ -251,6 +252,23 @@ def test_evidence_packet_metrics_and_sota_invariants(tmp_path):
     assert valid["packetized_neighborhoods_have_bounded_reads"] is True
     assert valid["needs_group_calibration_has_packets"] is True
 
+    base_metrics = {
+        "publish_gate_present": True,
+        "publish_gate_ok": True,
+        "publish_profile_order": ["dev"],
+        "publish_highest_attained_profile": "dev",
+        "assessor_files": 3,
+        "model_coverage": 1.0,
+        "nonzero_score_rate": 1.0,
+        "criteria_coverage": 1.0,
+        "evidence_coverage": 1.0,
+        "mean_assessor_sd": 0.0,
+        "p95_assessor_sd": 0.0,
+        "consistency_swap_rate": 0.0,
+        "consistency_low_confidence_rate": 0.0,
+        "benchmark_comparison_present": False,
+    }
+
     empty_dir = tmp_path / "empty"
     _write_evidence_artifacts(empty_dir, packets=[])
     empty = sg.evidence_packet_metrics(
@@ -260,25 +278,10 @@ def test_evidence_packet_metrics_and_sota_invariants(tmp_path):
     )
     assert empty["evidence_group_packets_ready"] is False
     assert empty["needs_group_calibration_has_packets"] is False
+    assert sg.evaluate({**base_metrics, **empty}, {}) == []
     assert "evidence_group_packets_missing_for_neighborhood" in sg.evaluate(
-        {
-            "publish_gate_present": True,
-            "publish_gate_ok": True,
-            "publish_profile_order": ["dev"],
-            "publish_highest_attained_profile": "dev",
-            "assessor_files": 3,
-            "model_coverage": 1.0,
-            "nonzero_score_rate": 1.0,
-            "criteria_coverage": 1.0,
-            "evidence_coverage": 1.0,
-            "mean_assessor_sd": 0.0,
-            "p95_assessor_sd": 0.0,
-            "consistency_swap_rate": 0.0,
-            "consistency_low_confidence_rate": 0.0,
-            "benchmark_comparison_present": False,
-            **empty,
-        },
-        {},
+        {**base_metrics, **empty},
+        release_thresholds,
     )
 
     oversized_dir = tmp_path / "oversized"
@@ -293,24 +296,13 @@ def test_evidence_packet_metrics_and_sota_invariants(tmp_path):
         oversized_dir / "outputs/evidence_group_calibration_packets.json",
     )
     failures = sg.evaluate(
-        {
-            "publish_gate_present": True,
-            "publish_gate_ok": True,
-            "publish_profile_order": ["dev"],
-            "publish_highest_attained_profile": "dev",
-            "assessor_files": 3,
-            "model_coverage": 1.0,
-            "nonzero_score_rate": 1.0,
-            "criteria_coverage": 1.0,
-            "evidence_coverage": 1.0,
-            "mean_assessor_sd": 0.0,
-            "p95_assessor_sd": 0.0,
-            "consistency_swap_rate": 0.0,
-            "consistency_low_confidence_rate": 0.0,
-            "benchmark_comparison_present": False,
-            **oversized,
-        },
+        {**base_metrics, **oversized},
         {},
+    )
+    assert failures == []
+    failures = sg.evaluate(
+        {**base_metrics, **oversized},
+        release_thresholds,
     )
     assert "evidence_group_packets_not_ready" in failures
     assert "evidence_group_packets_unbounded" in failures

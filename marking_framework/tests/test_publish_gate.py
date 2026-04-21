@@ -531,6 +531,13 @@ def test_publish_gate_helper_branches(tmp_path):
 
 
 def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
+    release_thresholds = {
+        "release_mode": "candidate",
+        "calibration_require_manifest": False,
+        "calibration_require_manifest_integrity": False,
+        "calibration_require_scope_match": False,
+        "calibration_require_production_profile": False,
+    }
     _write_evidence_artifacts(tmp_path)
     valid = pg.evidence_packet_metrics(
         tmp_path / "outputs/committee_edge_candidates.json",
@@ -541,6 +548,7 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
     assert valid["evidence_needs_group_calibration_count"] == 1
     assert valid["evidence_group_packets_selected_count"] == 1
     assert pg.evaluate({**_valid_publish_metrics(), **valid}, {}) == []
+    assert pg.evaluate({**_valid_publish_metrics(), **valid}, release_thresholds) == []
 
     missing_neighborhood_dir = tmp_path / "missing_neighborhood"
     (missing_neighborhood_dir / "outputs").mkdir(parents=True)
@@ -553,7 +561,10 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         missing_neighborhood_dir / "outputs/evidence_neighborhood_report.json",
         missing_neighborhood_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_neighborhood_report_missing" in pg.evaluate({**_valid_publish_metrics(), **missing_neighborhood}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **missing_neighborhood}, {}) == []
+    assert "evidence_neighborhood_report_missing" in pg.evaluate(
+        {**_valid_publish_metrics(), **missing_neighborhood}, release_thresholds
+    )
 
     disabled_dir = tmp_path / "disabled"
     _write_evidence_artifacts(disabled_dir, neighborhood_enabled=False)
@@ -562,7 +573,8 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         disabled_dir / "outputs/evidence_neighborhood_report.json",
         disabled_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_neighborhood_report_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **disabled}, {}) == []
+    assert "evidence_neighborhood_report_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled}, release_thresholds)
 
     missing_packets_dir = tmp_path / "missing_packets"
     _write_evidence_artifacts(missing_packets_dir)
@@ -572,7 +584,8 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         missing_packets_dir / "outputs/evidence_neighborhood_report.json",
         missing_packets_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    missing_packet_failures = pg.evaluate({**_valid_publish_metrics(), **missing_packets}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **missing_packets}, {}) == []
+    missing_packet_failures = pg.evaluate({**_valid_publish_metrics(), **missing_packets}, release_thresholds)
     assert "evidence_group_packets_missing" in missing_packet_failures
     assert "evidence_group_packets_empty" in missing_packet_failures
 
@@ -583,7 +596,10 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         disabled_packets_dir / "outputs/evidence_neighborhood_report.json",
         disabled_packets_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_group_packets_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled_packets}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **disabled_packets}, {}) == []
+    assert "evidence_group_packets_disabled" in pg.evaluate(
+        {**_valid_publish_metrics(), **disabled_packets}, release_thresholds
+    )
 
     empty_dir = tmp_path / "empty"
     _write_evidence_artifacts(empty_dir, packets=[])
@@ -592,7 +608,8 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         empty_dir / "outputs/evidence_neighborhood_report.json",
         empty_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_group_packets_empty" in pg.evaluate({**_valid_publish_metrics(), **empty}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **empty}, {}) == []
+    assert "evidence_group_packets_empty" in pg.evaluate({**_valid_publish_metrics(), **empty}, release_thresholds)
 
     oversized_dir = tmp_path / "oversized"
     _write_evidence_artifacts(
@@ -605,7 +622,8 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         oversized_dir / "outputs/evidence_neighborhood_report.json",
         oversized_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_group_packet_size_above_limit" in pg.evaluate({**_valid_publish_metrics(), **oversized}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **oversized}, {}) == []
+    assert "evidence_group_packet_size_above_limit" in pg.evaluate({**_valid_publish_metrics(), **oversized}, release_thresholds)
 
     too_many_dir = tmp_path / "too_many"
     _write_evidence_artifacts(
@@ -622,7 +640,8 @@ def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
         too_many_dir / "outputs/evidence_neighborhood_report.json",
         too_many_dir / "outputs/evidence_group_calibration_packets.json",
     )
-    assert "evidence_group_packet_count_above_limit" in pg.evaluate({**_valid_publish_metrics(), **too_many}, {})
+    assert pg.evaluate({**_valid_publish_metrics(), **too_many}, {}) == []
+    assert "evidence_group_packet_count_above_limit" in pg.evaluate({**_valid_publish_metrics(), **too_many}, release_thresholds)
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():

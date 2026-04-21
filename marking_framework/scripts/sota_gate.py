@@ -397,6 +397,8 @@ def publish_profile_state(payload: dict) -> dict:
 
 def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     failures = []
+    release_mode = str(thresholds.get("release_mode", "development") or "development").strip().lower()
+    strict_release = release_mode in {"candidate", "release", "production"}
     if thresholds.get("require_publish_gate_ok", True) and not metrics["publish_gate_ok"]:
         failures.append("publish_gate_not_ok")
     if not metrics["publish_gate_present"]:
@@ -425,12 +427,13 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
         failures.append("consistency_swap_rate_above_threshold")
     if metrics["consistency_low_confidence_rate"] > float(thresholds.get("max_consistency_low_confidence_rate", 1.0)):
         failures.append("consistency_low_confidence_rate_above_threshold")
-    if not metrics.get("evidence_group_packets_ready", True):
-        failures.append("evidence_group_packets_not_ready")
-    if not metrics.get("packetized_neighborhoods_have_bounded_reads", True):
-        failures.append("evidence_group_packets_unbounded")
-    if not metrics.get("needs_group_calibration_has_packets", True):
-        failures.append("evidence_group_packets_missing_for_neighborhood")
+    if thresholds.get("require_evidence_group_packets", strict_release):
+        if not metrics.get("evidence_group_packets_ready", True):
+            failures.append("evidence_group_packets_not_ready")
+        if not metrics.get("packetized_neighborhoods_have_bounded_reads", True):
+            failures.append("evidence_group_packets_unbounded")
+        if not metrics.get("needs_group_calibration_has_packets", True):
+            failures.append("evidence_group_packets_missing_for_neighborhood")
     if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_comparison_present"]:
         failures.append("benchmark_report_missing")
     if metrics["benchmark_comparison_present"]:

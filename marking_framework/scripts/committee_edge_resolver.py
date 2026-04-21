@@ -2054,6 +2054,16 @@ def row_brief(row: dict, student_count: int) -> str:
     )
 
 
+def group_row_brief(row: dict) -> str:
+    """Minimal roster context for group reads, without score/rank anchors."""
+
+    student_id = str(row.get("student_id") or "").strip()
+    name = str(row.get("student_name") or row.get("name") or row.get("display_name") or "").strip()
+    if name and name != student_id:
+        return f"{student_id}: name={name}"
+    return student_id
+
+
 def build_group_calibration_neighborhoods(
     *,
     selected: list[dict],
@@ -2357,7 +2367,6 @@ def group_calibration_prompt(
     source_calibration: Path | dict | None = None,
 ) -> str:
     student_ids = [str(sid) for sid in neighborhood.get("student_ids", [])]
-    student_count = len(rows_by_id)
     rows = [rows_by_id[sid] for sid in student_ids if sid in rows_by_id]
     essay_blocks = []
     for sid in student_ids:
@@ -2422,7 +2431,7 @@ def group_calibration_prompt(
                     grade_level=metadata_grade_level(metadata),
                 )
             ),
-            "Cohort row context:\n" + "\n".join(row_brief(row, student_count) for row in rows),
+            "Cohort roster:\n" + "\n".join(group_row_brief(row) for row in rows),
             "Evidence group packet context:\n" + (packet_context or "No packet context supplied; this neighborhood came from unresolved committee reads."),
             "Unresolved pairwise edges under calibration:\n" + "\n".join(pair_lines),
             "Essays:\n\n" + "\n\n---\n\n".join(essay_blocks),
@@ -3682,6 +3691,128 @@ def normalize_committee_decision(decision: dict, candidate_by_key: dict[str, dic
     return item
 
 
+COMMITTEE_CYCLE_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def committee_decision_edge(decision: dict) -> tuple[str, str] | None:
+    winner = str(decision.get("winner") or "").strip()
+    pair = decision.get("pair") if isinstance(decision.get("pair"), list) else []
+    pair_ids = [str(student_id).strip() for student_id in pair if str(student_id).strip()]
+    loser = str(decision.get("loser") or "").strip()
+    if not loser and winner and winner in pair_ids and len(pair_ids) == 2:
+        loser = pair_ids[1] if pair_ids[0] == winner else pair_ids[0]
+    if not winner or not loser or winner == loser:
+        return None
+    return winner, loser
+
+
+def committee_decision_strength(decision: dict) -> tuple[int, int, int, str]:
+    confidence = COMMITTEE_CYCLE_CONFIDENCE_RANK.get(vc.normalize_confidence(decision.get("confidence")), -1)
+    committee_confidence = str(decision.get("committee_confidence") or "").strip().lower()
+    if committee_confidence.endswith("high"):
+        committee_rank = 2
+    elif committee_confidence.endswith("medium"):
+        committee_rank = 1
+    elif committee_confidence.endswith("low"):
+        committee_rank = 0
+    else:
+        committee_rank = -1
+    metadata = decision.get("model_metadata") if isinstance(decision.get("model_metadata"), dict) else {}
+    trace = decision.get("committee_edge_trace") if isinstance(decision.get("committee_edge_trace"), dict) else {}
+    read = str(metadata.get("committee_read") or trace.get("read") or "").strip()
+    read_rank = {
+        "group-neighborhood-calibration": 3,
+        "C-placement-calibration": 2,
+        "C-placement-calibration-guard": 2,
+        "B-polish-trap-audit": 1,
+        "A-blind": 0,
+    }.get(read, 0)
+    return confidence, committee_rank, read_rank, str(pair_key_from_item(decision) or decision.get("pair_key") or "")
+
+
+def find_committee_override_cycle(decisions: list[dict]) -> list[dict]:
+    graph: dict[str, list[tuple[str, dict]]] = {}
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        edge = committee_decision_edge(decision)
+        if edge is None:
+            continue
+        winner, loser = edge
+        graph.setdefault(winner, []).append((loser, decision))
+    for winner in graph:
+        graph[winner].sort(key=lambda item: str(pair_key_from_item(item[1]) or item[1].get("pair_key") or ""))
+
+    visited: set[str] = set()
+
+    def dfs(node: str, path_nodes: list[str], path_decisions: list[dict]) -> list[dict]:
+        for loser, decision in graph.get(node, []):
+            if loser in path_nodes:
+                start = path_nodes.index(loser)
+                return path_decisions[start:] + [decision]
+            if loser in visited:
+                continue
+            cycle = dfs(loser, path_nodes + [loser], path_decisions + [decision])
+            if cycle:
+                return cycle
+        visited.add(node)
+        return []
+
+    for node in sorted(graph):
+        if node in visited:
+            continue
+        cycle = dfs(node, [node], [])
+        if cycle:
+            return cycle
+    return []
+
+
+def resolve_committee_override_cycles(decisions: list[dict]) -> tuple[list[dict], dict]:
+    """Suppress the weakest emitted committee edge until overrides are acyclic."""
+
+    remaining = [decision for decision in decisions if isinstance(decision, dict)]
+    suppressed: list[dict] = []
+    while True:
+        cycle = find_committee_override_cycle(remaining)
+        if not cycle:
+            break
+        weakest = min(
+            cycle,
+            key=lambda decision: (
+                committee_decision_strength(decision),
+                str(pair_key_from_item(decision) or decision.get("pair_key") or ""),
+            ),
+        )
+        weakest_key = str(pair_key_from_item(weakest) or weakest.get("pair_key") or "")
+        cycle_keys = [str(pair_key_from_item(decision) or decision.get("pair_key") or "") for decision in cycle]
+        edge = committee_decision_edge(weakest) or ("", "")
+        suppressed.append(
+            {
+                "pair_key": weakest_key,
+                "winner": edge[0],
+                "loser": edge[1],
+                "confidence": vc.normalize_confidence(weakest.get("confidence")),
+                "committee_confidence": str(weakest.get("committee_confidence") or ""),
+                "cycle_pair_keys": cycle_keys,
+                "reason": "committee_override_cycle",
+            }
+        )
+        removed = False
+        next_remaining: list[dict] = []
+        for decision in remaining:
+            if not removed and decision is weakest:
+                removed = True
+                continue
+            next_remaining.append(decision)
+        remaining = next_remaining
+    return remaining, {
+        "evaluated_count": len([decision for decision in decisions if isinstance(decision, dict)]),
+        "cycles_detected": len(suppressed),
+        "suppressed_count": len(suppressed),
+        "suppressed": suppressed,
+    }
+
+
 def merged_checks_payload(
     *,
     escalated_payload: dict,
@@ -4140,7 +4271,8 @@ def main() -> int:
                 },
             )
             return 1
-    decisions = manual_decisions + read_a_decisions + group_decisions
+    raw_decisions = manual_decisions + read_a_decisions + group_decisions
+    decisions, cycle_resolution = resolve_committee_override_cycles(raw_decisions)
     merged_payload = merged_checks_payload(
         escalated_payload=escalated_payload,
         escalated_checks=escalated_checks,
@@ -4194,6 +4326,7 @@ def main() -> int:
         "read_a_results": read_a_results,
         "group_calibration": group_summary,
         "group_calibration_results": group_results,
+        "cycle_resolution": cycle_resolution,
     }
     ledger_guard_statuses = Counter(
         str(record.get("evidence_ledger_guard_reason") or "not_evaluated")
@@ -4239,6 +4372,7 @@ def main() -> int:
         "read_results": read_a_results,
         "group_calibration_results": group_results,
         "decision_pair_keys": [decision.get("pair_key", "") for decision in normalized_decisions],
+        "cycle_resolution": cycle_resolution,
     }
     trigger_counts = Counter()
     bucket_counts = Counter()
@@ -4305,6 +4439,7 @@ def main() -> int:
         "source_calibration_guard": live_trace_payload["source_calibration_guard"],
         "evidence_map_guard": live_trace_payload["evidence_map_guard"],
         "group_calibration": group_summary,
+        "cycle_resolution": cycle_resolution,
         "phase2_ready": True,
     }
     write_json(args.candidates_output, candidate_payload)
