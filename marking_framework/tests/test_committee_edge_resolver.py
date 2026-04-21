@@ -3226,6 +3226,237 @@ def test_group_calibration_prompt_uses_score_free_roster_context():
     assert "composite=" not in prompt
     assert "borda=" not in prompt
     assert "support=" not in prompt
+    assert "edge ledger fields" in prompt
+    assert "caution_not_decisive_reason" in prompt
+
+
+def test_group_edge_response_schema_requires_ledger_fields():
+    edge_schema = cer.GROUP_CALIBRATION_RESPONSE_FORMAT["schema"]["properties"]["edge_decisions"]["items"]
+    required = set(edge_schema["required"])
+    assert {
+        "interpretive_claim_winner",
+        "proof_quality_winner",
+        "textual_specificity_winner",
+        "surface_control_winner",
+        "completion_coherence_winner",
+        "decisive_axis",
+        "routed_cautions",
+        "caution_honored",
+        "caution_not_decisive_reason",
+        "winner_text_moments",
+        "loser_text_moments",
+    } <= required
+
+
+def group_edge_ledger(
+    *,
+    winner,
+    loser,
+    decisive_axis="interpretive_claim",
+    caution_honored=True,
+    reason="",
+    winner_moments=None,
+    loser_moments=None,
+):
+    return {
+        "interpretive_claim_winner": winner,
+        "proof_quality_winner": winner,
+        "textual_specificity_winner": winner,
+        "surface_control_winner": loser,
+        "completion_coherence_winner": "tie",
+        "decisive_axis": decisive_axis,
+        "routed_cautions": ["formulaic_but_thin"],
+        "caution_honored": caution_honored,
+        "caution_not_decisive_reason": reason,
+        "winner_text_moments": winner_moments or ["winner moment one", "winner moment two"],
+        "loser_text_moments": loser_moments or ["loser moment one"],
+    }
+
+
+def test_group_edge_ledger_allows_valid_override():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "medium",
+            "rationale": "Overall order is medium confidence.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "The hard pair itself is high confidence.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                    **group_edge_ledger(winner="s009", loser="s015"),
+                }
+            ],
+        },
+    )
+    decision = cer.decision_from_group_edge_decision(
+        candidate,
+        calibration["edge_decisions"][0],
+        calibration,
+    )
+    assert decision is not None
+    assert decision["winner"] == "s009"
+    assert decision["committee_edge_trace"]["edge_decision"]["edge_ledger_status"]["accepted"] is True
+
+
+def test_group_edge_ledger_rejects_surface_control_decisive_caution_edge():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s009",
+        "confidence": "high",
+        "rationale": "Surface control should not decide this routed caution edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(winner="s009", loser="s015", decisive_axis="surface_control"),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "surface_control_decisive_without_blocker"
+
+
+def test_group_edge_ledger_rejects_prior_preservation_without_accounting():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "This mirrors the weak mini validation failure.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, cer.normalize_group_calibration(
+        {"student_ids": ["s015", "s009"], "pair_keys": ["s009::s015"]},
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "high",
+            "rationale": "",
+            "placement_notes": [],
+            "edge_decisions": [edge],
+        },
+    )["edge_decisions"][0])
+
+    assert status["accepted"] is False
+    assert status["reason"] == "missing_caution_not_decisive_reason"
+
+
+def test_group_edge_ledger_blocks_group_order_bypass_after_rejected_edge():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    packet_payload = {
+        "enabled": True,
+        "packets": [
+            {
+                "packet_id": "packet_reject",
+                "student_ids": ["s015", "s009"],
+                "seed_order": ["s015", "s009"],
+                "triggering_edges": [
+                    {
+                        "pair": ["s015", "s009"],
+                        "pair_key": "s009::s015",
+                        "recommended_winner": "s009",
+                        "active_winner": "s015",
+                        "confidence": "high",
+                        "margin": 4.0,
+                        "ambiguous": False,
+                        "reasons": ["fixture"],
+                    }
+                ],
+                "ambiguous_edges": [],
+                "recommended_read_type": "local_order_calibration",
+                "priority_score": 10,
+                "selection_status": "selected",
+            }
+        ],
+    }
+    fixtures = [
+        {
+            "neighborhood_id": "packet_reject",
+            "ordered_student_ids": ["s009", "s015"],
+            "confidence": "high",
+            "rationale": "The broad order would otherwise flip the pair.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s015",
+                    "confidence": "high",
+                    "rationale": "Weak prior-preserving edge with no ledger.",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        }
+    ]
+
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        read_results=[],
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=fixtures,
+        max_groups=1,
+        max_students=5,
+        existing_decision_keys=set(),
+        evidence_group_packets=packet_payload,
+    )
+
+    assert decisions == []
+    assert summary["override_count"] == 0
+    assert results[0]["edge_ledger_statuses"][0]["accepted"] is False
+    assert results[0]["edge_ledger_statuses"][0]["reason"] == "missing_caution_not_decisive_reason"
+    assert results[0]["skipped_explicit_edge_decision_keys"] == ["s009::s015"]
+
+
+def test_group_edge_ledger_non_caution_edge_stays_backward_compatible():
+    rows_by_id = {str(row.get("student_id")): row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    candidate = cer.candidate_from_group_pair("s015", "s009", rows_by_id, {"neighborhood_id": "group_1"})
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s009",
+        "confidence": "high",
+        "rationale": "No routed caution exists on this synthetic support edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "edge_ledger_not_required"
 
 
 def test_disabled_packet_report_falls_back_to_unresolved_read_results():

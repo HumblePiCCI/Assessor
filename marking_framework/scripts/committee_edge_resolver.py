@@ -231,6 +231,29 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "rougher_but_stronger_latent": {"type": "boolean"},
                         "mechanics_block_meaning": {"type": "boolean"},
                         "completion_floor_applied": {"type": "boolean"},
+                        "interpretive_claim_winner": {"type": "string"},
+                        "proof_quality_winner": {"type": "string"},
+                        "textual_specificity_winner": {"type": "string"},
+                        "surface_control_winner": {"type": "string"},
+                        "completion_coherence_winner": {"type": "string"},
+                        "decisive_axis": {
+                            "type": "string",
+                            "enum": [
+                                "interpretive_claim",
+                                "proof_quality",
+                                "textual_specificity",
+                                "surface_control",
+                                "completion_coherence",
+                                "mechanics",
+                                "completion_floor",
+                                "tie_or_ambiguous",
+                            ],
+                        },
+                        "routed_cautions": {"type": "array", "items": {"type": "string"}},
+                        "caution_honored": {"type": "boolean"},
+                        "caution_not_decisive_reason": {"type": "string"},
+                        "winner_text_moments": {"type": "array", "items": {"type": "string"}},
+                        "loser_text_moments": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": [
                         "pair_key",
@@ -241,6 +264,17 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "rougher_but_stronger_latent",
                         "mechanics_block_meaning",
                         "completion_floor_applied",
+                        "interpretive_claim_winner",
+                        "proof_quality_winner",
+                        "textual_specificity_winner",
+                        "surface_control_winner",
+                        "completion_coherence_winner",
+                        "decisive_axis",
+                        "routed_cautions",
+                        "caution_honored",
+                        "caution_not_decisive_reason",
+                        "winner_text_moments",
+                        "loser_text_moments",
                     ],
                     "additionalProperties": False,
                 },
@@ -2316,6 +2350,9 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
         winner = str(edge.get("winner") or "").strip()
         if pair_key not in unresolved_pair_keys or winner not in expected_set:
             continue
+        routed_cautions = edge.get("routed_cautions") if isinstance(edge.get("routed_cautions"), list) else []
+        winner_moments = edge.get("winner_text_moments") if isinstance(edge.get("winner_text_moments"), list) else []
+        loser_moments = edge.get("loser_text_moments") if isinstance(edge.get("loser_text_moments"), list) else []
         edge_decisions.append(
             {
                 "pair_key": pair_key,
@@ -2326,6 +2363,17 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
                 "rougher_but_stronger_latent": truthy(edge.get("rougher_but_stronger_latent")),
                 "mechanics_block_meaning": truthy(edge.get("mechanics_block_meaning")),
                 "completion_floor_applied": truthy(edge.get("completion_floor_applied")),
+                "interpretive_claim_winner": str(edge.get("interpretive_claim_winner") or "tie").strip() or "tie",
+                "proof_quality_winner": str(edge.get("proof_quality_winner") or "tie").strip() or "tie",
+                "textual_specificity_winner": str(edge.get("textual_specificity_winner") or "tie").strip() or "tie",
+                "surface_control_winner": str(edge.get("surface_control_winner") or "tie").strip() or "tie",
+                "completion_coherence_winner": str(edge.get("completion_coherence_winner") or "tie").strip() or "tie",
+                "decisive_axis": str(edge.get("decisive_axis") or "tie_or_ambiguous").strip() or "tie_or_ambiguous",
+                "routed_cautions": [str(caution).strip() for caution in routed_cautions if str(caution).strip()],
+                "caution_honored": truthy(edge.get("caution_honored")),
+                "caution_not_decisive_reason": str(edge.get("caution_not_decisive_reason") or "").strip(),
+                "winner_text_moments": [str(moment).strip() for moment in winner_moments if str(moment).strip()],
+                "loser_text_moments": [str(moment).strip() for moment in loser_moments if str(moment).strip()],
             }
         )
     return {
@@ -2418,6 +2466,21 @@ def group_calibration_prompt(
             "For literary analysis, prioritize defensible interpretation, proof sufficiency, and explained textual evidence over cleaner formulaic control. Do not reward mature theme words unless they are proven by specific events.",
             "If a cleaner essay is merely organized, formulaic, or complete while a rougher essay proves stronger meaning, place the rougher essay higher. If roughness blocks meaning or the response is unfinished scaffold, keep it lower.",
             "For every unresolved pair_key listed below, return an edge_decisions item. Decide that pair directly even if your full-neighborhood order remains medium confidence. Use high confidence only when the pair winner is teacher-defensible after rereading both essays.",
+            (
+                "For every edge_decisions item, fill the edge ledger fields. "
+                "Use student_ids or tie for interpretive_claim_winner, proof_quality_winner, textual_specificity_winner, "
+                "surface_control_winner, and completion_coherence_winner. decisive_axis must name the single axis that actually decides the pair."
+            ),
+            (
+                "For routed caution edges, copy the routed cautions into routed_cautions. "
+                "Set caution_honored=true only when the caution changed or directly controlled the edge decision. "
+                "If you preserve the prior/active winner despite a routed caution, set caution_honored=false, give a caution_not_decisive_reason, "
+                "and cite at least two winner_text_moments plus at least one loser_text_moments from the essays."
+            ),
+            (
+                "Do not use surface_control as decisive on a routed caution edge unless mechanics_block_meaning or completion_floor_applied is true. "
+                "If a complete/formulaic essay wins, explain the textual interpretation and proof quality that make it win, not just its organization."
+            ),
             "An edge_decisions winner may disagree with the broad ordered_student_ids only if the local pair is genuinely ambiguous; explain that tension in the edge rationale.",
             f"Class context: {class_context}",
             "Rubric:\n" + rubric.strip(),
@@ -2452,7 +2515,7 @@ def group_calibration_repair_prompt(
             reason_text,
             "Return ONLY valid JSON. No markdown fences, no prose outside JSON.",
             "The JSON must include ordered_student_ids, confidence, rationale, and placement_notes.",
-            "It must also include one edge_decisions item for every unresolved pair_key listed in the original task.",
+            "It must also include one edge_decisions item for every unresolved pair_key listed in the original task, including all required edge ledger fields.",
             "Original task:",
             original_prompt,
             "Previous invalid output:",
@@ -2676,6 +2739,73 @@ def decision_from_group_calibration(candidate: dict, calibration: dict) -> dict 
     }
 
 
+def group_edge_routed_cautions(candidate: dict, edge: dict) -> list[str]:
+    edge_cautions = edge.get("routed_cautions") if isinstance(edge.get("routed_cautions"), list) else []
+    cautions = {str(caution).strip() for caution in edge_cautions if str(caution).strip()}
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    cautions.update(str(caution).strip() for caution in details.get("escalated_cautions", []) if str(caution).strip())
+    return sorted(cautions)
+
+
+def candidate_is_caution_ignored_edge(candidate: dict, edge: dict) -> bool:
+    triggers = set(candidate.get("triggers") or [])
+    if str(candidate.get("bucket") or "") == "caution_ignored" or bool(triggers & CAUTION_IGNORED_TRIGGERS):
+        return True
+    cautions = set(group_edge_routed_cautions(candidate, edge))
+    return bool(cautions & (POLISH_LIKE_CAUTIONS | ROUGHER_STRONGER_CAUTIONS))
+
+
+def validate_group_edge_ledger(candidate: dict, edge: dict) -> dict:
+    """Validate mini's structured per-edge ledger before group edges affect rerank."""
+
+    pair_key = str(edge.get("pair_key") or candidate.get("pair_key") or "").strip()
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    winner = str(edge.get("winner") or "").strip()
+    routed_cautions = group_edge_routed_cautions(candidate, edge)
+    caution_ignored = candidate_is_caution_ignored_edge(candidate, edge)
+    status = {
+        "pair_key": pair_key,
+        "accepted": True,
+        "reason": "edge_ledger_not_required",
+        "caution_ignored": caution_ignored,
+        "prior_winner": prior_winner,
+        "winner": winner,
+        "routed_cautions": routed_cautions,
+        "decisive_axis": str(edge.get("decisive_axis") or ""),
+        "caution_honored": truthy(edge.get("caution_honored")),
+    }
+    if not caution_ignored:
+        return status
+
+    winner_moments = edge.get("winner_text_moments") if isinstance(edge.get("winner_text_moments"), list) else []
+    loser_moments = edge.get("loser_text_moments") if isinstance(edge.get("loser_text_moments"), list) else []
+    decisive_axis = str(edge.get("decisive_axis") or "").strip()
+    blocked = truthy(edge.get("mechanics_block_meaning")) or truthy(edge.get("completion_floor_applied"))
+    if decisive_axis == "surface_control" and not blocked:
+        status.update({"accepted": False, "reason": "surface_control_decisive_without_blocker"})
+        return status
+    if winner != prior_winner:
+        status["reason"] = "edge_ledger_override_allowed"
+        return status
+    if truthy(edge.get("caution_honored")):
+        status.update({"accepted": False, "reason": "prior_preserved_while_claiming_caution_honored"})
+        return status
+    if not str(edge.get("caution_not_decisive_reason") or "").strip():
+        status.update({"accepted": False, "reason": "missing_caution_not_decisive_reason"})
+        return status
+    if len([moment for moment in winner_moments if str(moment).strip()]) < 2:
+        status.update({"accepted": False, "reason": "insufficient_winner_text_moments"})
+        return status
+    if len([moment for moment in loser_moments if str(moment).strip()]) < 1:
+        status.update({"accepted": False, "reason": "missing_loser_text_moment"})
+        return status
+    if decisive_axis in {"", "tie_or_ambiguous"}:
+        status.update({"accepted": False, "reason": "missing_decisive_axis"})
+        return status
+    status["reason"] = "prior_preservation_ledger_accepted"
+    return status
+
+
 def decision_from_group_edge_decision(
     candidate: dict,
     edge: dict,
@@ -2690,6 +2820,9 @@ def decision_from_group_edge_decision(
     lower = str(seed_order.get("lower") or "").strip()
     winner = str(edge.get("winner") or "").strip()
     if winner not in {higher, lower}:
+        return None
+    ledger_status = validate_group_edge_ledger(candidate, edge)
+    if not ledger_status.get("accepted", False):
         return None
     prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
     if winner == prior_winner:
@@ -2744,6 +2877,9 @@ def decision_from_group_edge_decision(
         "confidence": vc.normalize_confidence(edge.get("confidence")),
         "polish_trap": truthy(edge.get("polish_trap")),
         "rougher_but_stronger_latent": truthy(edge.get("rougher_but_stronger_latent")),
+        "edge_ledger_status": ledger_status,
+        "decisive_axis": edge.get("decisive_axis", ""),
+        "routed_cautions": group_edge_routed_cautions(candidate, edge),
     }
     decision["committee_edge_trace"] = trace
     return decision
@@ -2833,8 +2969,10 @@ def run_group_calibration_path(
             "source": source or "not_read",
             "override_pair_keys": [],
             "edge_decision_pair_keys": [],
+            "edge_ledger_statuses": [],
             "support_pair_keys": [],
             "skipped_existing_decision_keys": [],
+            "skipped_explicit_edge_decision_keys": [],
         }
         if calibration is None:
             result["status"] = "not_read"
@@ -2843,14 +2981,21 @@ def run_group_calibration_path(
         read_count += 1
         result["status"] = "read"
         result["calibration"] = calibration
+        explicit_edge_keys: set[str] = set()
         for edge_decision in calibration.get("edge_decisions", []):
             pair_key = str(edge_decision.get("pair_key") or "")
+            if pair_key:
+                explicit_edge_keys.add(pair_key)
             if not pair_key or pair_key in existing_decision_keys:
                 continue
             candidate = candidate_by_key.get(pair_key)
             if candidate is None:
                 continue
             candidate = candidate_with_group_context(candidate, neighborhood)
+            ledger_status = validate_group_edge_ledger(candidate, edge_decision)
+            result["edge_ledger_statuses"].append(ledger_status)
+            if not ledger_status.get("accepted", False):
+                continue
             decision = decision_from_group_edge_decision(candidate, edge_decision, calibration)
             if decision is None:
                 continue
@@ -2870,6 +3015,9 @@ def run_group_calibration_path(
         result["group_order_pair_keys"] = group_pair_keys
         unresolved_pair_keys = {str(pair_key) for pair_key in neighborhood.get("pair_keys", [])}
         for pair_key in group_pair_keys:
+            if pair_key in explicit_edge_keys:
+                result["skipped_explicit_edge_decision_keys"].append(pair_key)
+                continue
             if pair_key in existing_decision_keys:
                 skipped_existing += 1
                 result["skipped_existing_decision_keys"].append(pair_key)
