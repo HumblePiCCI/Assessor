@@ -254,6 +254,10 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "caution_not_decisive_reason": {"type": "string"},
                         "winner_text_moments": {"type": "array", "items": {"type": "string"}},
                         "loser_text_moments": {"type": "array", "items": {"type": "string"}},
+                        "loser_interpretive_claim": {"type": "string"},
+                        "winner_counterclaim": {"type": "string"},
+                        "loser_claim_refutation": {"type": "string"},
+                        "claim_refutation_text_moments": {"type": "array", "items": {"type": "string"}},
                         "mechanics_blocked_student": {"type": "string"},
                         "mechanics_blocker_evidence": {"type": "array", "items": {"type": "string"}},
                         "mechanics_blocker_reason": {"type": "string"},
@@ -278,6 +282,10 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "caution_not_decisive_reason",
                         "winner_text_moments",
                         "loser_text_moments",
+                        "loser_interpretive_claim",
+                        "winner_counterclaim",
+                        "loser_claim_refutation",
+                        "claim_refutation_text_moments",
                         "mechanics_blocked_student",
                         "mechanics_blocker_evidence",
                         "mechanics_blocker_reason",
@@ -318,6 +326,9 @@ POLISH_LIKE_CAUTIONS = frozenset({"polished_but_shallow", "formulaic_but_thin"})
 ROUGHER_STRONGER_CAUTIONS = frozenset(
     {"rougher_but_stronger_content", "mechanics_impede_meaning", "incomplete_or_scaffold"}
 )
+INTERPRETATION_CONTENT_CAUTIONS = frozenset(
+    {"formulaic_but_thin", "polished_but_shallow", "rougher_but_stronger_content", "incomplete_or_scaffold"}
+)
 CAUTION_REASON_KEYWORDS = {
     "formulaic_but_thin": frozenset(
         {"formula", "formulaic", "thin", "repetitive", "repetition", "surface", "organized", "organization"}
@@ -347,6 +358,78 @@ GENERIC_CAUTION_REASON_PHRASES = frozenset(
         "clearer consequences",
         "better support",
         "more specific events",
+    }
+)
+CLAIM_REFUTATION_GENERIC_PHRASES = frozenset(
+    {
+        "more proof",
+        "stronger proof",
+        "more concrete",
+        "concrete evidence",
+        "more evidence",
+        "text grounded",
+        "text-grounded",
+        "clearer consequences",
+        "better support",
+        "more specific events",
+        "more examples",
+        "better examples",
+        "more textual evidence",
+        "more text evidence",
+        "more plot events",
+        "names more events",
+        "stronger evidence",
+        "better evidence",
+        "clearer proof",
+        "proof is stronger",
+    }
+)
+CLAIM_REFUTATION_MARKERS = frozenset(
+    {
+        "because",
+        "but",
+        "whereas",
+        "while",
+        "although",
+        "fails",
+        "does not",
+        "doesn't",
+        "not actually",
+        "only",
+        "rather than",
+        "instead",
+        "mostly",
+        "unsupported",
+        "underdeveloped",
+    }
+)
+CLAIM_REFUTATION_CONTENT_KEYWORDS = frozenset(
+    {
+        "interpret",
+        "interpretive",
+        "interpretation",
+        "meaning",
+        "claim",
+        "theme",
+        "content",
+        "accountability",
+        "identity",
+        "trauma",
+        "healing",
+        "trust",
+        "support",
+        "consequence",
+        "consequences",
+        "growth",
+        "change",
+        "responsibility",
+        "character",
+        "lesson",
+        "why",
+        "shows",
+        "reveals",
+        "suggests",
+        "proves",
     }
 )
 MECHANICS_BLOCKING_KEYWORDS = frozenset(
@@ -2443,6 +2526,11 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
             if isinstance(edge.get("mechanics_blocker_evidence"), list)
             else []
         )
+        refutation_moments = (
+            edge.get("claim_refutation_text_moments")
+            if isinstance(edge.get("claim_refutation_text_moments"), list)
+            else []
+        )
         edge_decisions.append(
             {
                 "pair_key": pair_key,
@@ -2464,6 +2552,12 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
                 "caution_not_decisive_reason": str(edge.get("caution_not_decisive_reason") or "").strip(),
                 "winner_text_moments": [str(moment).strip() for moment in winner_moments if str(moment).strip()],
                 "loser_text_moments": [str(moment).strip() for moment in loser_moments if str(moment).strip()],
+                "loser_interpretive_claim": str(edge.get("loser_interpretive_claim") or "").strip(),
+                "winner_counterclaim": str(edge.get("winner_counterclaim") or "").strip(),
+                "loser_claim_refutation": str(edge.get("loser_claim_refutation") or "").strip(),
+                "claim_refutation_text_moments": [
+                    str(moment).strip() for moment in refutation_moments if str(moment).strip()
+                ],
                 "mechanics_blocked_student": str(edge.get("mechanics_blocked_student") or "none").strip() or "none",
                 "mechanics_blocker_evidence": [
                     str(moment).strip() for moment in blocker_evidence if str(moment).strip()
@@ -2571,6 +2665,14 @@ def group_calibration_prompt(
                 "Set caution_honored=true only when the caution changed or directly controlled the edge decision. "
                 "If you preserve the prior/active winner despite a routed caution, set caution_honored=false, give a caution_not_decisive_reason, "
                 "and cite at least two winner_text_moments plus at least one loser_text_moments from the essays."
+            ),
+            (
+                "If you preserve the prior/active winner on a routed formulaic/thin, polished/shallow, rougher-stronger, "
+                "or incomplete/scaffold caution, you must also fill loser_interpretive_claim, winner_counterclaim, "
+                "loser_claim_refutation, and claim_refutation_text_moments. The refutation must directly explain why the "
+                "loser-side interpretation or content claim does not beat the prior winner; 'more proof', 'more concrete events', "
+                "or 'clearer evidence' alone is not enough. Label claim_refutation_text_moments with student_id prefixes so both "
+                "essays are represented."
             ),
             (
                 "Do not use surface_control as decisive on a routed caution edge unless mechanics_block_meaning or completion_floor_applied is true. "
@@ -2886,6 +2988,56 @@ def caution_reason_addresses_caution(edge: dict, cautions: list[str] | set[str])
     return False
 
 
+def claim_refutation_text(edge: dict, field: str) -> str:
+    return str(edge.get(field) or "").strip()
+
+
+def claim_refutation_is_generic(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if len(normalized.split()) < 8:
+        return True
+    has_generic_phrase = any(phrase in normalized for phrase in CLAIM_REFUTATION_GENERIC_PHRASES)
+    has_refutation_marker = any(marker in normalized for marker in CLAIM_REFUTATION_MARKERS)
+    has_content_keyword = any(keyword in normalized for keyword in CLAIM_REFUTATION_CONTENT_KEYWORDS)
+    return has_generic_phrase and not (has_refutation_marker and has_content_keyword)
+
+
+def claim_refutation_mentions_both_sides(edge: dict, winner: str, loser: str) -> bool:
+    raw = (
+        edge.get("claim_refutation_text_moments")
+        if isinstance(edge.get("claim_refutation_text_moments"), list)
+        else []
+    )
+    moments = [str(moment).strip().lower() for moment in raw if str(moment).strip()]
+    if len(moments) < 2:
+        return False
+    winner_lower = str(winner or "").strip().lower()
+    loser_lower = str(loser or "").strip().lower()
+    winner_hit = any(
+        token
+        and any(token in moment for moment in moments)
+        for token in (winner_lower, "winner:", "prior winner:", "prior:")
+    )
+    loser_hit = any(
+        token
+        and any(token in moment for moment in moments)
+        for token in (loser_lower, "loser:", "challenger:", "other essay:")
+    )
+    return winner_hit and loser_hit
+
+
+def claim_refutation_addresses_interpretation(edge: dict) -> bool:
+    combined = " ".join(
+        claim_refutation_text(edge, field).lower()
+        for field in ("loser_interpretive_claim", "winner_counterclaim", "loser_claim_refutation")
+    )
+    has_refutation_marker = any(marker in combined for marker in CLAIM_REFUTATION_MARKERS)
+    has_content_keyword = any(keyword in combined for keyword in CLAIM_REFUTATION_CONTENT_KEYWORDS)
+    return has_refutation_marker and has_content_keyword
+
+
 def mechanics_blocker_student(edge: dict) -> str:
     value = str(edge.get("mechanics_blocked_student") or "none").strip()
     return value or "none"
@@ -2958,6 +3110,62 @@ def mechanics_blocker_validation(candidate: dict, edge: dict, status: dict) -> d
     return None
 
 
+def prior_preservation_claim_refutation_validation(
+    candidate: dict,
+    edge: dict,
+    routed_cautions: list[str],
+    status: dict,
+) -> dict | None:
+    cautions = set(routed_cautions) & INTERPRETATION_CONTENT_CAUTIONS
+    if not cautions:
+        return None
+    # Mechanics and completion-floor blockers are already validated through
+    # their side-aware blocker paths. This guard targets proof-quality laundering
+    # when there is no accepted blocker.
+    if truthy(edge.get("mechanics_block_meaning")) or truthy(edge.get("completion_floor_applied")):
+        return None
+
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    winner = str(edge.get("winner") or "").strip()
+    loser = lower if winner == higher else higher if winner == lower else ""
+    decisive_axis = str(edge.get("decisive_axis") or "").strip()
+
+    loser_claim = claim_refutation_text(edge, "loser_interpretive_claim")
+    winner_counterclaim = claim_refutation_text(edge, "winner_counterclaim")
+    loser_refutation = claim_refutation_text(edge, "loser_claim_refutation")
+    if not loser_claim:
+        return reject_ledger(status, "missing_loser_interpretive_claim")
+    if not winner_counterclaim:
+        return reject_ledger(status, "missing_winner_counterclaim")
+    if not loser_refutation:
+        if "incomplete_or_scaffold" in cautions:
+            return reject_ledger(status, "incomplete_scaffold_without_claim_refutation")
+        if decisive_axis in {"proof_quality", "textual_specificity"}:
+            return reject_ledger(status, "proof_quality_without_claim_refutation")
+        return reject_ledger(status, "missing_loser_claim_refutation")
+    if not claim_refutation_mentions_both_sides(edge, winner, loser):
+        return reject_ledger(status, "claim_refutation_missing_both_sides")
+    if (
+        claim_refutation_is_generic(loser_claim)
+        or claim_refutation_is_generic(winner_counterclaim)
+        or claim_refutation_is_generic(loser_refutation)
+    ):
+        return reject_ledger(status, "claim_refutation_too_generic")
+    if decisive_axis in {"proof_quality", "textual_specificity"} and not claim_refutation_addresses_interpretation(edge):
+        return reject_ledger(status, "proof_quality_without_claim_refutation")
+    if "incomplete_or_scaffold" in cautions:
+        combined = " ".join(
+            claim_refutation_text(edge, field).lower()
+            for field in ("loser_interpretive_claim", "winner_counterclaim", "loser_claim_refutation")
+        )
+        scaffold_keywords = CAUTION_REASON_KEYWORDS["incomplete_or_scaffold"]
+        if not any(keyword in combined for keyword in scaffold_keywords):
+            return reject_ledger(status, "incomplete_scaffold_without_claim_refutation")
+    return None
+
+
 def prior_preservation_caution_validation(
     candidate: dict,
     edge: dict,
@@ -3011,6 +3219,12 @@ def prior_preservation_caution_validation(
         blocker_ok = mechanics_block or completion_floor
         if not (interpretation_ok or blocker_ok):
             return reject_ledger(status, "rougher_stronger_not_substantively_defeated")
+
+    claim_refutation_failure = prior_preservation_claim_refutation_validation(
+        candidate, edge, routed_cautions, status
+    )
+    if claim_refutation_failure:
+        return claim_refutation_failure
 
     return None
 
