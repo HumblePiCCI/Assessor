@@ -1,7 +1,7 @@
 # Live Cohort Runtime
 
 Status
-- Branch target: `codex/stable-bell-curve`
+- Branch target: `main`
 - Scope: runtime behavior for unfamiliar teacher cohorts after the benchmark-green release path
 
 ## What Landed
@@ -14,6 +14,7 @@ Core additions:
 - anchor-calibration pause/resume workflow
 - live rerank stability metrics in `consistency_report.json`
 - committee-consensus reporting from the existing multi-assessor panel
+- routed pairwise escalation, evidence mapping, committee-edge resolution, and hard-pair eval before final grade/dashboard output
 - engagement-gated aggregate-learning retention
 
 ## Runtime Outputs
@@ -22,6 +23,18 @@ The pipeline now emits these live-cohort artifacts when available:
 
 - `outputs/scope_grounding.json`
 - `outputs/cohort_confidence.json`
+- `outputs/band_seam_report.json`
+- `outputs/pairwise_escalation_candidates.json`
+- `outputs/pairwise_escalations.json`
+- `outputs/consistency_checks.escalated.json`
+- `outputs/evidence_map.json`
+- `outputs/evidence_neighborhood_report.json`
+- `outputs/evidence_group_calibration_packets.json`
+- `outputs/committee_edge_candidates.json`
+- `outputs/committee_edge_report.json`
+- `outputs/committee_edge_live_trace.json` when live committee reads are enabled
+- `outputs/consistency_checks.committee_edge.json`
+- `outputs/pairwise_adjudicator_eval.json`
 - `outputs/anchor_candidates.json`
 - `outputs/teacher_anchor_packet.json`
 - `outputs/cohort_anchor_calibration.json`
@@ -58,8 +71,13 @@ Anchor flow:
    - `aggregate_1`
    - `boundary`
    - `aggregate_2`
+   - `band_seam`
    - `consistency`
+   - `pairwise_escalation`
+   - `evidence_map`
+   - `committee_edge_resolver`
    - `rerank`
+   - `pairwise_eval`
    - `quality_gate`
    - `sota_gate`
    - `cohort_confidence`
@@ -68,7 +86,10 @@ Anchor flow:
 7. The anchor patch is accepted only if pre/post hold-harmless checks pass.
 8. Otherwise the pre-anchor snapshot is restored and the run finalizes with the reverted state.
 
-`pairwise` is intentionally skipped on anchor resume.
+The legacy manual `pairwise` review-prep step is intentionally skipped on anchor
+resume. The canonical pairwise consistency, escalation, evidence-map,
+committee-edge, rerank, and pairwise-eval seam still runs so the post-anchor
+order and gates consume the same judgment path as a full run.
 
 ## Hold-Harmless Metrics
 
@@ -140,6 +161,33 @@ Current implementation:
 - records whether committee mode was recommended by scope grounding
 
 This is the artifact base for later conditional repeated-run committee execution.
+
+## Routed Committee-Edge Calibration
+
+`scripts/committee_edge_resolver.py` is now the residual hard-edge seam after
+pairwise escalation and evidence mapping.
+
+Default behavior:
+- model-free
+- writes `outputs/committee_edge_candidates.json`,
+  `outputs/committee_edge_report.json`, and
+  `outputs/consistency_checks.committee_edge.json`
+- preserves passthrough behavior when no committee decisions are supplied
+
+Live behavior:
+- opt-in with `--live`, `--committee-edge-live`, or `COMMITTEE_EDGE_LIVE=1`
+- uses `config/llm_routing.json` task `literary_committee`
+- current default model for that route is `gpt-5.4-mini`
+- records A/B/C/group read traces in `outputs/committee_edge_live_trace.json`
+
+Guardrails:
+- committee-edge decisions have source precedence over escalated and cheap
+  pairwise judgments for the same pair
+- group calibration edge decisions must pass structured ledger validation before
+  emitting overrides
+- routed caution edges require caution-specific substantive validation, including
+  side-aware mechanics blocker proof when mechanics is decisive
+- rejected explicit group edges cannot re-enter through broad group-order support
 
 ## Review Learning
 

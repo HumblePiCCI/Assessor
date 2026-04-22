@@ -33,13 +33,20 @@ Quick Start
 5) Aggregate to consensus
    - `python3 scripts/aggregate_assessments.py --config config/marking_config.json`
 
-6) Collect pairwise consistency evidence and rerank globally
+6) Collect pairwise evidence, adjudicate unstable edges, and rerank globally
+   - `python3 scripts/band_seam_adjudication.py`
    - `python3 scripts/verify_consistency.py`
-   - `python3 scripts/global_rerank.py`
-   - Or via Hero Path: `python3 scripts/hero_path.py --verify-consistency --apply-consistency`
+   - `python3 scripts/escalate_pairwise_adjudications.py`
+   - `python3 scripts/evidence_map.py`
+   - `python3 scripts/committee_edge_resolver.py`
+   - `python3 scripts/global_rerank.py --judgments outputs/consistency_checks.committee_edge.json`
+   - Or via Hero Path: `python3 scripts/hero_path.py --band-seam-adjudication --verify-consistency --apply-consistency`
+   - The default resolver path is deterministic and model-free unless `--committee-edge-live` or `COMMITTEE_EDGE_LIVE=1` explicitly enables live committee reads.
    - The consistency pass expands post-seam coverage by default: it fully compares the top pack, checks band-seam/aggregate movers against that pack, and writes an audit report.
    - Pairwise judgments include genre-aware criterion notes so reviewers can see whether the model preferred meaning, evidence, genre requirements, organization, or language control.
-   - Hard-pair adjudicator evals can be run with `python3 scripts/evaluate_pairwise_adjudicator.py --judgments outputs/consistency_checks.json`; the default gold set targets the Ghost literary-analysis failure mode.
+   - Hard-pair adjudicator evals should be run on the merged committee-edge file:
+     - `python3 scripts/evaluate_pairwise_adjudicator.py --judgments outputs/consistency_checks.committee_edge.json --output outputs/pairwise_adjudicator_eval.json`
+   - The default gold set targets the Ghost literary-analysis failure mode, including rougher-but-stronger and polished-but-shallow edges.
 
 7) Review and apply grade curve
    - `python3 scripts/review_and_grade.py`
@@ -68,6 +75,15 @@ Key Outputs
 - `outputs/grade_curve.csv` (level-aware bell-curve grades based on the resolved order)
 - `outputs/pairwise_matrix.json` (normalized pairwise evidence and support/opposition weights)
 - `outputs/consistency_report.json` (rerank diagnostics, movements, and uncertainty details)
+- `outputs/band_seam_report.json` (evidence-aware level-boundary adjudication)
+- `outputs/pairwise_escalation_candidates.json` / `outputs/pairwise_escalations.json` (high-leverage routed pairwise escalation)
+- `outputs/consistency_checks.escalated.json` (cheap/orientation/escalated merged pairwise checks)
+- `outputs/evidence_map.json` (deterministic claim/evidence/commentary map)
+- `outputs/evidence_neighborhood_report.json` (offline local placement-neighborhood diagnostics)
+- `outputs/evidence_group_calibration_packets.json` (bounded packets for group calibration)
+- `outputs/committee_edge_candidates.json` / `outputs/committee_edge_report.json` (residual unstable-edge routing)
+- `outputs/committee_edge_live_trace.json` (live/fixture committee read trace when enabled)
+- `outputs/consistency_checks.committee_edge.json` (canonical rerank judgments after committee-edge merge)
 - `outputs/post_seam_pair_expansion.json` (top-pack and large-mover pair coverage audit)
 - `outputs/pairwise_adjudicator_eval.json` (hard-pair accuracy report for the pairwise adjudicator)
 - `outputs/final_order.csv` (post global rerank order)

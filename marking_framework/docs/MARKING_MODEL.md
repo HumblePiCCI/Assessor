@@ -70,14 +70,19 @@ Model Components
 - Optional review step allows manual adjustment of top/bottom before applying the curve.
 
 5b) Pairwise Evidence And Global Rerank
-- After consensus, near-adjacent essays are re-read in pairs against the assignment outline.
+- After consensus, boundary and band-seam passes run before pairwise evidence is trusted for final ordering.
 - The consistency stage emits normalized pairwise evidence rather than directly mutating the order.
+- High-leverage edges are routed through pairwise escalation before rerank.
+- Deterministic evidence maps extract claim, text-moment, commentary, plot-summary, and completion signals for selected committee candidates.
+- The committee-edge resolver builds residual candidate sets, optionally runs live/fixture A/B/C/group reads, and writes the canonical merged judgment file.
+- The default committee-edge resolver path is model-free and passthrough unless live/fixture flags are supplied.
 - A deterministic global reranker consumes:
   - seed composite features
-  - pairwise judgments
+  - `outputs/consistency_checks.committee_edge.json`
   - level-band constraints
   - displacement caps
 - This produces `final_order.csv` and `consistency_report.json` prior to curve application.
+- Routed hard-pair evaluation runs against `outputs/consistency_checks.committee_edge.json` before publish/SOTA gates.
 
 5c) Teacher Review Feedback
 - The dashboard persists structured teacher review snapshots:
