@@ -312,6 +312,37 @@ POLISH_LIKE_CAUTIONS = frozenset({"polished_but_shallow", "formulaic_but_thin"})
 ROUGHER_STRONGER_CAUTIONS = frozenset(
     {"rougher_but_stronger_content", "mechanics_impede_meaning", "incomplete_or_scaffold"}
 )
+CAUTION_REASON_KEYWORDS = {
+    "formulaic_but_thin": frozenset(
+        {"formula", "formulaic", "thin", "repetitive", "repetition", "surface", "organized", "organization"}
+    ),
+    "polished_but_shallow": frozenset(
+        {"polish", "polished", "shallow", "surface", "formula", "formulaic", "organized", "organization"}
+    ),
+    "rougher_but_stronger_content": frozenset(
+        {"rough", "rougher", "content", "meaning", "substance", "interpret", "interpretive", "interpretation"}
+    ),
+    "mechanics_impede_meaning": frozenset(
+        {"mechanic", "mechanics", "error", "errors", "grammar", "sentence", "unclear", "meaning", "block"}
+    ),
+    "incomplete_or_scaffold": frozenset(
+        {"incomplete", "scaffold", "unfinished", "fragment", "draft", "completion", "floor"}
+    ),
+}
+GENERIC_CAUTION_REASON_PHRASES = frozenset(
+    {
+        "more proof",
+        "stronger proof",
+        "more concrete",
+        "concrete evidence",
+        "more evidence",
+        "text grounded",
+        "text-grounded",
+        "clearer consequences",
+        "better support",
+        "more specific events",
+    }
+)
 NON_ESCALATED_SOURCES = frozenset({"cheap_pairwise", "orientation_audit"})
 CAUTION_IGNORED_TRIGGERS = frozenset(
     {
@@ -2755,6 +2786,94 @@ def candidate_is_caution_ignored_edge(candidate: dict, edge: dict) -> bool:
     return bool(cautions & (POLISH_LIKE_CAUTIONS | ROUGHER_STRONGER_CAUTIONS))
 
 
+def ledger_winner_value(edge: dict, axis: str) -> str:
+    return str(edge.get(f"{axis}_winner") or "tie").strip() or "tie"
+
+
+def ledger_winner_matches(edge: dict, axis: str, student_id: str, *, allow_tie: bool = False) -> bool:
+    value = ledger_winner_value(edge, axis)
+    if value == student_id:
+        return True
+    return allow_tie and value in {"tie", "tie_or_ambiguous"}
+
+
+def caution_reason_text(edge: dict) -> str:
+    return str(edge.get("caution_not_decisive_reason") or "").strip().lower()
+
+
+def caution_reason_is_generic(reason: str) -> bool:
+    if not reason:
+        return False
+    return any(phrase in reason for phrase in GENERIC_CAUTION_REASON_PHRASES)
+
+
+def caution_reason_addresses_caution(edge: dict, cautions: list[str] | set[str]) -> bool:
+    reason = caution_reason_text(edge)
+    for caution in cautions:
+        keywords = CAUTION_REASON_KEYWORDS.get(str(caution), frozenset())
+        if any(keyword in reason for keyword in keywords):
+            return True
+    return False
+
+
+def reject_ledger(status: dict, reason: str) -> dict:
+    status.update({"accepted": False, "reason": reason})
+    return status
+
+
+def prior_preservation_caution_validation(
+    candidate: dict,
+    edge: dict,
+    routed_cautions: list[str],
+    status: dict,
+) -> dict | None:
+    prior_winner = str((candidate.get("escalated_summary") or {}).get("winner") or "").strip()
+    decisive_axis = str(edge.get("decisive_axis") or "").strip()
+    mechanics_block = truthy(edge.get("mechanics_block_meaning"))
+    completion_floor = truthy(edge.get("completion_floor_applied"))
+    cautions = set(routed_cautions)
+
+    reason = caution_reason_text(edge)
+    if not caution_reason_addresses_caution(edge, cautions):
+        if caution_reason_is_generic(reason):
+            return reject_ledger(status, "caution_reason_too_generic")
+        return reject_ledger(status, "caution_reason_missing_caution_reference")
+
+    if "mechanics_impede_meaning" in cautions:
+        if decisive_axis == "mechanics" and not mechanics_block:
+            return reject_ledger(status, "mechanics_decisive_without_blocker")
+        if mechanics_block and not caution_reason_addresses_caution(edge, {"mechanics_impede_meaning"}):
+            return reject_ledger(status, "caution_reason_missing_caution_reference")
+
+    if "incomplete_or_scaffold" in cautions:
+        if decisive_axis in {"completion_coherence", "completion_floor"} and not completion_floor:
+            return reject_ledger(status, "completion_decisive_without_floor")
+        if completion_floor and not caution_reason_addresses_caution(edge, {"incomplete_or_scaffold"}):
+            return reject_ledger(status, "caution_reason_missing_caution_reference")
+
+    if "formulaic_but_thin" in cautions:
+        interpretation_ok = ledger_winner_matches(edge, "interpretive_claim", prior_winner, allow_tie=True)
+        proof_ok = ledger_winner_matches(edge, "proof_quality", prior_winner)
+        axis_ok = decisive_axis in {"interpretive_claim", "proof_quality", "textual_specificity"}
+        surface_only = ledger_winner_matches(edge, "surface_control", prior_winner) and not ledger_winner_matches(
+            edge, "interpretive_claim", prior_winner
+        )
+        if not (interpretation_ok and proof_ok and axis_ok) or surface_only:
+            return reject_ledger(status, "formulaic_thin_not_substantively_defeated")
+
+    if "polished_but_shallow" in cautions:
+        if not ledger_winner_matches(edge, "interpretive_claim", prior_winner):
+            return reject_ledger(status, "polished_shallow_not_substantively_defeated")
+
+    if "rougher_but_stronger_content" in cautions:
+        interpretation_ok = ledger_winner_matches(edge, "interpretive_claim", prior_winner)
+        blocker_ok = mechanics_block or completion_floor
+        if not (interpretation_ok or blocker_ok):
+            return reject_ledger(status, "rougher_stronger_not_substantively_defeated")
+
+    return None
+
+
 def validate_group_edge_ledger(candidate: dict, edge: dict) -> dict:
     """Validate mini's structured per-edge ledger before group edges affect rerank."""
 
@@ -2782,26 +2901,33 @@ def validate_group_edge_ledger(candidate: dict, edge: dict) -> dict:
     decisive_axis = str(edge.get("decisive_axis") or "").strip()
     blocked = truthy(edge.get("mechanics_block_meaning")) or truthy(edge.get("completion_floor_applied"))
     if decisive_axis == "surface_control" and not blocked:
-        status.update({"accepted": False, "reason": "surface_control_decisive_without_blocker"})
-        return status
+        return reject_ledger(status, "surface_control_decisive_without_blocker")
+    if decisive_axis == "mechanics" and not truthy(edge.get("mechanics_block_meaning")):
+        return reject_ledger(status, "mechanics_decisive_without_blocker")
+    if decisive_axis == "completion_floor" and not truthy(edge.get("completion_floor_applied")):
+        return reject_ledger(status, "completion_decisive_without_floor")
+    if (
+        "incomplete_or_scaffold" in set(routed_cautions)
+        and decisive_axis == "completion_coherence"
+        and not truthy(edge.get("completion_floor_applied"))
+    ):
+        return reject_ledger(status, "completion_decisive_without_floor")
     if winner != prior_winner:
         status["reason"] = "edge_ledger_override_allowed"
         return status
     if truthy(edge.get("caution_honored")):
-        status.update({"accepted": False, "reason": "prior_preserved_while_claiming_caution_honored"})
-        return status
+        return reject_ledger(status, "prior_preserved_while_claiming_caution_honored")
     if not str(edge.get("caution_not_decisive_reason") or "").strip():
-        status.update({"accepted": False, "reason": "missing_caution_not_decisive_reason"})
-        return status
+        return reject_ledger(status, "missing_caution_not_decisive_reason")
     if len([moment for moment in winner_moments if str(moment).strip()]) < 2:
-        status.update({"accepted": False, "reason": "insufficient_winner_text_moments"})
-        return status
+        return reject_ledger(status, "insufficient_winner_text_moments")
     if len([moment for moment in loser_moments if str(moment).strip()]) < 1:
-        status.update({"accepted": False, "reason": "missing_loser_text_moment"})
-        return status
+        return reject_ledger(status, "missing_loser_text_moment")
     if decisive_axis in {"", "tie_or_ambiguous"}:
-        status.update({"accepted": False, "reason": "missing_decisive_axis"})
-        return status
+        return reject_ledger(status, "missing_decisive_axis")
+    substantive_failure = prior_preservation_caution_validation(candidate, edge, routed_cautions, status)
+    if substantive_failure:
+        return substantive_failure
     status["reason"] = "prior_preservation_ledger_accepted"
     return status
 

@@ -3255,17 +3255,23 @@ def group_edge_ledger(
     decisive_axis="interpretive_claim",
     caution_honored=True,
     reason="",
+    routed_cautions=None,
+    interpretive_claim_winner=None,
+    proof_quality_winner=None,
+    textual_specificity_winner=None,
+    surface_control_winner=None,
+    completion_coherence_winner=None,
     winner_moments=None,
     loser_moments=None,
 ):
     return {
-        "interpretive_claim_winner": winner,
-        "proof_quality_winner": winner,
-        "textual_specificity_winner": winner,
-        "surface_control_winner": loser,
-        "completion_coherence_winner": "tie",
+        "interpretive_claim_winner": interpretive_claim_winner or winner,
+        "proof_quality_winner": proof_quality_winner or winner,
+        "textual_specificity_winner": textual_specificity_winner or winner,
+        "surface_control_winner": surface_control_winner or loser,
+        "completion_coherence_winner": completion_coherence_winner or "tie",
         "decisive_axis": decisive_axis,
-        "routed_cautions": ["formulaic_but_thin"],
+        "routed_cautions": routed_cautions or ["formulaic_but_thin"],
         "caution_honored": caution_honored,
         "caution_not_decisive_reason": reason,
         "winner_text_moments": winner_moments or ["winner moment one", "winner moment two"],
@@ -3358,6 +3364,265 @@ def test_group_edge_ledger_rejects_prior_preservation_without_accounting():
 
     assert status["accepted"] is False
     assert status["reason"] == "missing_caution_not_decisive_reason"
+
+
+def test_group_edge_ledger_rejects_generic_caution_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner has more proof.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="More concrete evidence and clearer consequences.",
+            interpretive_claim_winner="tie",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "caution_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_reason_missing_caution_reference():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner has a better central claim.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            reason="Its claim is more developed and easier to apply across the essay.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "caution_reason_missing_caution_reference"
+
+
+def test_group_edge_ledger_rejects_formulaic_prior_preservation_on_proof_only():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "This mirrors the packet-context mini failure.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="Although s015 is formulaic, that is not decisive because its proof names more events.",
+            interpretive_claim_winner="s009",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "formulaic_thin_not_substantively_defeated"
+
+
+def test_group_edge_ledger_allows_formulaic_prior_preservation_when_substantive():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The proof is not merely formulaic.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason=(
+                "s015 is formulaic and repetitive, but the thinness concern is not decisive because "
+                "its interpretation is at least tied and its proof explains consequences across events."
+            ),
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
+
+
+def test_group_edge_ledger_rejects_polished_shallow_without_interpretation_win():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s013")
+    edge = {
+        "pair_key": "s003::s013",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "The polished side has more examples.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s013",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            routed_cautions=["polished_but_shallow"],
+            reason="The polished and shallow risk is not decisive because s003 has more proof.",
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s003",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "polished_shallow_not_substantively_defeated"
+
+
+def test_group_edge_ledger_rejects_rougher_stronger_when_prior_only_wins_proof():
+    candidate = _get_candidate(_build_ghost_candidates(), "s019::s022")
+    edge = {
+        "pair_key": "s019::s022",
+        "winner": "s019",
+        "confidence": "high",
+        "rationale": "The prior winner cites more evidence.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s019",
+            loser="s022",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            routed_cautions=["rougher_but_stronger_content"],
+            reason="The rougher-but-stronger content concern is not decisive because s019 has more proof.",
+            interpretive_claim_winner="s022",
+            proof_quality_winner="s019",
+            textual_specificity_winner="s019",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "rougher_stronger_not_substantively_defeated"
+
+
+def test_group_edge_ledger_allows_rougher_stronger_when_prior_wins_interpretation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s019::s022")
+    edge = {
+        "pair_key": "s019::s022",
+        "winner": "s019",
+        "confidence": "high",
+        "rationale": "The prior winner wins meaning, not just proof volume.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s019",
+            loser="s022",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["rougher_but_stronger_content"],
+            reason=(
+                "The rougher side is not actually stronger in content because s019 develops "
+                "a clearer interpretation of Ghost's accountability."
+            ),
+            interpretive_claim_winner="s019",
+            proof_quality_winner="s019",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
+
+
+def test_group_edge_ledger_rejects_mechanics_without_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics decide this edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning"],
+            reason="The mechanics errors are not decisive enough to block meaning.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_decisive_without_blocker"
+
+
+def test_group_edge_ledger_rejects_completion_without_floor():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s009")
+    edge = {
+        "pair_key": "s003::s009",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "Completion decides this edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s009",
+            decisive_axis="completion_coherence",
+            caution_honored=False,
+            routed_cautions=["incomplete_or_scaffold"],
+            reason="The incomplete scaffold concern is not decisive because s003 is more complete.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "completion_decisive_without_floor"
 
 
 def test_group_edge_ledger_blocks_group_order_bypass_after_rejected_edge():
