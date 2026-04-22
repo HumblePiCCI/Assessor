@@ -3228,6 +3228,9 @@ def test_group_calibration_prompt_uses_score_free_roster_context():
     assert "support=" not in prompt
     assert "edge ledger fields" in prompt
     assert "caution_not_decisive_reason" in prompt
+    assert "loser_interpretive_claim" in prompt
+    assert "loser_claim_refutation" in prompt
+    assert "'more proof'" in prompt
 
 
 def test_group_edge_response_schema_requires_ledger_fields():
@@ -3245,6 +3248,10 @@ def test_group_edge_response_schema_requires_ledger_fields():
         "caution_not_decisive_reason",
         "winner_text_moments",
         "loser_text_moments",
+        "loser_interpretive_claim",
+        "winner_counterclaim",
+        "loser_claim_refutation",
+        "claim_refutation_text_moments",
         "mechanics_blocked_student",
         "mechanics_blocker_evidence",
         "mechanics_blocker_reason",
@@ -3266,6 +3273,10 @@ def group_edge_ledger(
     completion_coherence_winner=None,
     winner_moments=None,
     loser_moments=None,
+    loser_interpretive_claim=None,
+    winner_counterclaim=None,
+    loser_claim_refutation=None,
+    claim_refutation_text_moments=None,
     mechanics_blocked_student="none",
     mechanics_blocker_evidence=None,
     mechanics_blocker_reason="",
@@ -3282,6 +3293,28 @@ def group_edge_ledger(
         "caution_not_decisive_reason": reason,
         "winner_text_moments": winner_moments or ["winner moment one", "winner moment two"],
         "loser_text_moments": loser_moments or ["loser moment one"],
+        "loser_interpretive_claim": (
+            loser_interpretive_claim
+            if loser_interpretive_claim is not None
+            else f"{loser} claims Ghost's inner change is best explained through trust and accountability."
+        ),
+        "winner_counterclaim": (
+            winner_counterclaim
+            if winner_counterclaim is not None
+            else f"{winner} counters with an interpretation about consequences shaping Ghost's responsibility."
+        ),
+        "loser_claim_refutation": loser_claim_refutation
+        if loser_claim_refutation is not None
+        else (
+            f"{loser}'s trust/accountability claim is not stronger because it is mostly asserted, "
+            f"while {winner} connects the claim to explained consequences and character change."
+        ),
+        "claim_refutation_text_moments": claim_refutation_text_moments
+        if claim_refutation_text_moments is not None
+        else [
+            f"{winner}: explains how a consequence changes Ghost's responsibility.",
+            f"{loser}: names a theme but leaves the claim less developed.",
+        ],
         "mechanics_blocked_student": mechanics_blocked_student,
         "mechanics_blocker_evidence": mechanics_blocker_evidence or [],
         "mechanics_blocker_reason": mechanics_blocker_reason,
@@ -3426,6 +3459,216 @@ def test_group_edge_ledger_rejects_reason_missing_caution_reference():
 
     assert status["accepted"] is False
     assert status["reason"] == "caution_reason_missing_caution_reference"
+
+
+def test_group_edge_ledger_rejects_prior_preservation_missing_loser_claim():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner wins, but the loser claim is not named.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            reason="The formulaic thinness concern is not decisive because s015 wins meaning.",
+            interpretive_claim_winner="s015",
+            proof_quality_winner="s015",
+            loser_interpretive_claim="",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "missing_loser_interpretive_claim"
+
+
+def test_group_edge_ledger_rejects_prior_preservation_missing_counterclaim():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s013")
+    edge = {
+        "pair_key": "s003::s013",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "The prior winner wins, but no counterclaim is given.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s013",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["polished_but_shallow"],
+            reason="The polished and shallow risk is not decisive because s003 wins interpretation.",
+            interpretive_claim_winner="s003",
+            winner_counterclaim="",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "missing_winner_counterclaim"
+
+
+def test_group_edge_ledger_rejects_prior_preservation_missing_refutation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s019::s022")
+    edge = {
+        "pair_key": "s019::s022",
+        "winner": "s019",
+        "confidence": "high",
+        "rationale": "The prior winner wins, but the loser claim is not refuted.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s019",
+            loser="s022",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["rougher_but_stronger_content"],
+            reason="The rougher-but-stronger content concern is not decisive because s019 wins meaning.",
+            interpretive_claim_winner="s019",
+            loser_claim_refutation="",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "missing_loser_claim_refutation"
+
+
+def test_group_edge_ledger_rejects_proof_quality_without_claim_refutation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner preserves on proof quality.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="Although s015 is formulaic, that is not decisive because its proof is stronger.",
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+            loser_claim_refutation="",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "proof_quality_without_claim_refutation"
+
+
+def test_group_edge_ledger_rejects_claim_refutation_missing_both_sides():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner has a one-sided refutation.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="Although s015 is formulaic, that is not decisive because its interpretation is better proven.",
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+            claim_refutation_text_moments=[
+                "s015: explains accountability through consequences.",
+                "s015: connects Coach's punishment to change.",
+            ],
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "claim_refutation_missing_both_sides"
+
+
+def test_group_edge_ledger_rejects_generic_claim_refutation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s013")
+    edge = {
+        "pair_key": "s003::s013",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "The prior winner has generic proof-volume language.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s013",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["polished_but_shallow"],
+            reason="The polished and shallow risk is not decisive because s003 wins interpretation.",
+            interpretive_claim_winner="s003",
+            loser_claim_refutation="s003 has more concrete evidence and more examples than s013.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "claim_refutation_too_generic"
+
+
+def test_group_edge_ledger_rejects_incomplete_scaffold_without_claim_refutation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s009")
+    edge = {
+        "pair_key": "s003::s009",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "The prior winner preserves without answering scaffold risk.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s009",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["incomplete_or_scaffold"],
+            reason="The incomplete scaffold concern is not decisive because s003 wins meaning.",
+            interpretive_claim_winner="s003",
+            loser_claim_refutation=(
+                "s009's alternate claim is not stronger because it is less connected to character change."
+            ),
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "incomplete_scaffold_without_claim_refutation"
 
 
 def test_group_edge_ledger_rejects_formulaic_prior_preservation_on_proof_only():
