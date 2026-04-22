@@ -3791,6 +3791,36 @@ def test_group_edge_ledger_rejects_mechanics_blocker_not_meaning_blocking():
     assert status["reason"] == "mechanics_blocker_not_meaning_blocking"
 
 
+def test_group_edge_ledger_rejects_bare_meaning_mechanics_blocker_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["wording issue one", "wording issue two"],
+            mechanics_blocker_reason="The student's meaning is weaker and unstable.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_not_meaning_blocking"
+
+
 def test_group_edge_ledger_allows_substantive_mechanics_blocker():
     candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
     edge = {

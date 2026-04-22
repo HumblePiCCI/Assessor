@@ -351,8 +351,10 @@ GENERIC_CAUTION_REASON_PHRASES = frozenset(
 )
 MECHANICS_BLOCKING_KEYWORDS = frozenset(
     {
-        "meaning",
         "unrecoverable",
+        "meaning is unrecoverable",
+        "meaning is not recoverable",
+        "not reliably recoverable",
         "cannot recover",
         "can't recover",
         "cannot follow",
@@ -360,6 +362,8 @@ MECHANICS_BLOCKING_KEYWORDS = frozenset(
         "not understandable",
         "incomprehensible",
         "unreadable",
+        "block meaning",
+        "blocks meaning",
         "blocks",
         "blocked",
         "prevents",
