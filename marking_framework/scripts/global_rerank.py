@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - Support running as a script
 
 CONFIDENCE_WEIGHTS = {"low": 0.5, "medium": 1.0, "high": 2.0}
 DEFAULT_LEVEL_ORDER = {"1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "4+": 5.0}
+COMMITTEE_DIRECT_EDGE_KIND = "committee_direct_edge"
 
 
 def now_iso() -> str:
@@ -109,6 +110,10 @@ def winner_side_from_decision(value) -> str:
 
 def confidence_weight(confidence: str) -> float:
     return float(CONFIDENCE_WEIGHTS.get(normalize_confidence(confidence), CONFIDENCE_WEIGHTS["low"]))
+
+
+def confidence_rank(confidence: str) -> int:
+    return {"low": 0, "medium": 1, "high": 2}.get(normalize_confidence(confidence), 0)
 
 
 def clamp_exp_input(value: float) -> float:
@@ -226,6 +231,7 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         decision_basis = str(item.get("decision_basis", "") or "").strip()
         cautions_applied = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
         decision_checks = item.get("decision_checks") if isinstance(item.get("decision_checks"), dict) else {}
+        committee_edge_trace = item.get("committee_edge_trace") if isinstance(item.get("committee_edge_trace"), dict) else {}
         source = adjudication_source(item)
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
@@ -249,6 +255,8 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "decision_basis": decision_basis,
                 "cautions_applied": cautions_applied,
                 "decision_checks": decision_checks,
+                "committee_confidence": str(item.get("committee_confidence") or ""),
+                "committee_edge_trace": committee_edge_trace,
                 "winner": winner,
                 "loser": loser,
                 "model_metadata": model_metadata,
@@ -612,6 +620,98 @@ def direct_weight(direction: dict[tuple[str, str], float], winner: str, loser: s
     return float(direction.get((winner, loser), 0.0) or 0.0)
 
 
+def truthy_metadata_flag(metadata: dict, *keys: str) -> bool:
+    for key in keys:
+        if truthy(metadata.get(key)):
+            return True
+    return False
+
+
+def committee_trace(judgment: dict) -> dict:
+    trace = judgment.get("committee_edge_trace")
+    return trace if isinstance(trace, dict) else {}
+
+
+def committee_edge_cycle_suppressed(judgment: dict) -> bool:
+    metadata = judgment.get("model_metadata") if isinstance(judgment.get("model_metadata"), dict) else {}
+    trace = committee_trace(judgment)
+    cycle = trace.get("cycle_resolution") if isinstance(trace.get("cycle_resolution"), dict) else {}
+    return (
+        truthy_metadata_flag(
+            metadata,
+            "cycle_suppressed",
+            "suppressed_by_cycle",
+            "committee_cycle_suppressed",
+            "committee_direct_cycle_suppressed",
+        )
+        or truthy_metadata_flag(
+            trace,
+            "cycle_suppressed",
+            "suppressed_by_cycle",
+            "committee_cycle_suppressed",
+            "committee_direct_cycle_suppressed",
+        )
+        or truthy_metadata_flag(cycle, "suppressed", "cycle_suppressed")
+    )
+
+
+def committee_edge_superseded(judgment: dict) -> bool:
+    metadata = judgment.get("model_metadata") if isinstance(judgment.get("model_metadata"), dict) else {}
+    return any(
+        key.startswith("superseded_by_") and truthy(value)
+        for key, value in metadata.items()
+    )
+
+
+def committee_confidence_rank(judgment: dict) -> int:
+    value = str(judgment.get("committee_confidence") or "").strip().lower()
+    if value.endswith("high"):
+        return 2
+    if value.endswith("medium"):
+        return 1
+    if value.endswith("low"):
+        return 0
+    return -1
+
+
+def committee_read_rank(judgment: dict) -> int:
+    metadata = judgment.get("model_metadata") if isinstance(judgment.get("model_metadata"), dict) else {}
+    trace = committee_trace(judgment)
+    read = str(metadata.get("committee_read") or trace.get("read") or "").strip()
+    return {
+        "group-neighborhood-calibration": 3,
+        "C-placement-calibration": 2,
+        "C-placement-calibration-guard": 2,
+        "B-polish-trap-audit": 1,
+        "A-blind": 0,
+    }.get(read, 0)
+
+
+def protected_committee_direct_edges(judgments: list[dict]) -> list[dict]:
+    edges = []
+    for judgment in judgments:
+        if judgment.get("adjudication_source") != "committee_edge":
+            continue
+        winner = str(judgment.get("winner") or "").strip()
+        loser = str(judgment.get("loser") or "").strip()
+        if not winner or not loser or winner == loser:
+            continue
+        if committee_edge_cycle_suppressed(judgment) or committee_edge_superseded(judgment):
+            continue
+        edges.append(judgment)
+    return sorted(
+        edges,
+        key=lambda item: (
+            -confidence_rank(item.get("confidence")),
+            -committee_confidence_rank(item),
+            -committee_read_rank(item),
+            str(item.get("pair_key") or pair_key(item.get("winner", ""), item.get("loser", ""))),
+            str(item.get("winner", "")),
+            str(item.get("loser", "")),
+        ),
+    )
+
+
 def crossing_allowed(
     lower_row: dict,
     higher_row: dict,
@@ -686,6 +786,7 @@ def build_constraints(
     raw_scores: dict[str, float],
     direction: dict[tuple[str, str], float],
     caps: dict[str, dict],
+    judgments: list[dict] | None = None,
     *,
     max_cross_level_gap: int,
     max_cross_rubric_gap: float,
@@ -701,6 +802,28 @@ def build_constraints(
     allowed_crossings = []
     blocked_crossings = []
     overridden_crossings = []
+
+    for judgment in protected_committee_direct_edges(judgments or []):
+        winner = str(judgment.get("winner") or "").strip()
+        loser = str(judgment.get("loser") or "").strip()
+        note = {
+            "kind": COMMITTEE_DIRECT_EDGE_KIND,
+            "src": winner,
+            "dst": loser,
+            "detail": {
+                "pair": list(judgment.get("pair", [])),
+                "pair_key": str(judgment.get("pair_key") or pair_key(winner, loser)),
+                "confidence": normalize_confidence(judgment.get("confidence")),
+                "committee_confidence": str(judgment.get("committee_confidence") or ""),
+                "adjudication_source": judgment.get("adjudication_source", "committee_edge"),
+                "decision": normalize_decision(judgment.get("decision")),
+                "decision_basis": str(judgment.get("decision_basis") or ""),
+                "cautions_applied": list(judgment.get("cautions_applied", [])) if isinstance(judgment.get("cautions_applied"), list) else [],
+                "reason": "protected direct committee-edge adjudication",
+            },
+        }
+        if not add_edge(adjacency, indegree, added_edges, winner, loser, note):
+            dropped_edges.append({**note, "reason": "committee_direct_cycle_suppressed_by_rerank_safety"})
 
     draft_floor_rows = [row for row in rows if row.get("_draft_completion_floor_applied")]
     complete_rows = [row for row in rows if not row.get("_draft_completion_floor_applied")]
@@ -957,7 +1080,11 @@ def build_final_rows(
                 "displacement": displacement,
                 "displacement_cap": int(cap_info["cap"]),
                 "displacement_cap_label": cap_info["label"],
-                "constraint_touch_count": edge_counts.get(("level_lock", sid), 0) + edge_counts.get(("strong_pairwise_evidence", sid), 0),
+                "constraint_touch_count": (
+                    edge_counts.get(("level_lock", sid), 0)
+                    + edge_counts.get(("strong_pairwise_evidence", sid), 0)
+                    + edge_counts.get((COMMITTEE_DIRECT_EDGE_KIND, sid), 0)
+                ),
                 "notes": base_row["rerank_notes"],
             }
         )
@@ -991,6 +1118,11 @@ def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict
     }
     violations = []
     satisfied = 0
+    committee_total = 0
+    committee_satisfied = 0
+    committee_violations = 0
+    committee_added = 0
+    committee_dropped = 0
     total_weight = 0.0
     violated_weight = 0.0
     high_confidence_violations = 0
@@ -999,14 +1131,26 @@ def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict
         loser = str(judgment.get("loser", "") or "").strip()
         if winner not in final_rank_map or loser not in final_rank_map or winner == loser:
             continue
+        source = str(judgment.get("adjudication_source", "cheap_pairwise") or "cheap_pairwise")
+        is_committee = source == "committee_edge"
+        committee_edge_added = (winner, loser, COMMITTEE_DIRECT_EDGE_KIND) in added_edges
+        committee_edge_dropped = (winner, loser, COMMITTEE_DIRECT_EDGE_KIND) in dropped_edges
+        if is_committee:
+            committee_total += 1
+            committee_added += int(committee_edge_added)
+            committee_dropped += int(committee_edge_dropped)
         weight = float(judgment.get("weight", 0.0) or 0.0)
         total_weight += weight
         winner_rank = int(final_rank_map[winner])
         loser_rank = int(final_rank_map[loser])
         if winner_rank < loser_rank:
             satisfied += 1
+            if is_committee:
+                committee_satisfied += 1
             continue
         violated_weight += weight
+        if is_committee:
+            committee_violations += 1
         if normalize_confidence(judgment.get("confidence")) == "high":
             high_confidence_violations += 1
         violations.append(
@@ -1016,12 +1160,15 @@ def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict
                 "loser": loser,
                 "winner_final_rank": winner_rank,
                 "loser_final_rank": loser_rank,
+                "adjudication_source": source,
                 "confidence": normalize_confidence(judgment.get("confidence")),
                 "weight": round(weight, 6),
                 "decision": normalize_decision(judgment.get("decision")),
                 "decision_basis": str(judgment.get("decision_basis", "") or ""),
                 "cautions_applied": list(judgment.get("cautions_applied", [])) if isinstance(judgment.get("cautions_applied"), list) else [],
                 "rationale": str(judgment.get("rationale", "") or "").strip(),
+                "committee_direct_edge_added": committee_edge_added,
+                "committee_direct_edge_dropped": committee_edge_dropped,
                 "strong_pairwise_edge_added": (winner, loser, "strong_pairwise_evidence") in added_edges,
                 "strong_pairwise_edge_dropped": (winner, loser, "strong_pairwise_evidence") in dropped_edges,
             }
@@ -1032,6 +1179,11 @@ def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict
         "direct_edge_satisfied_count": satisfied,
         "direct_edge_violation_count": len(violations),
         "high_confidence_direct_edge_violation_count": high_confidence_violations,
+        "committee_direct_edge_count": committee_total,
+        "committee_direct_edge_satisfied_count": committee_satisfied,
+        "committee_direct_edge_violation_count": committee_violations,
+        "committee_direct_edge_added_count": committee_added,
+        "committee_direct_edge_dropped_count": committee_dropped,
         "direct_edge_violation_weight": round(violated_weight, 6),
         "direct_edge_weight": round(total_weight, 6),
         "direct_edge_violation_rate": round((len(violations) / total) if total else 0.0, 6),
@@ -1132,6 +1284,7 @@ def run_global_rerank(
         raw_scores,
         directional,
         caps,
+        judgments,
         max_cross_level_gap=max_cross_level_gap,
         max_cross_rubric_gap=max_cross_rubric_gap,
         min_crossing_margin=min_crossing_margin,
@@ -1211,12 +1364,14 @@ def run_global_rerank(
             "boundary_disagreement_concentration": conflict_summary["boundary_disagreement_concentration"],
             "level_lock_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"] == "level_lock"),
             "strong_pairwise_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"] == "strong_pairwise_evidence"),
+            "committee_direct_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"] == COMMITTEE_DIRECT_EDGE_KIND),
             "cap_edges_added": sum(1 for item in constraint_meta["added_edges"] if item["kind"].startswith("displacement_cap")),
             "dropped_edges": len(constraint_meta["dropped_edges"]),
             "allowed_crossings": len(constraint_meta["allowed_crossings"]),
             "blocked_crossings": len(constraint_meta["blocked_crossings"]),
             "direct_edge_violations": direct_edges["direct_edge_violation_count"],
             "high_confidence_direct_edge_violations": direct_edges["high_confidence_direct_edge_violation_count"],
+            "committee_direct_edge_violations": direct_edges["committee_direct_edge_violation_count"],
             "direct_edge_weighted_violation_rate": direct_edges["direct_edge_weighted_violation_rate"],
         },
         "constraints": constraint_meta,

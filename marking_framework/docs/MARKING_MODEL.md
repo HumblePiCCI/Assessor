@@ -81,6 +81,7 @@ Model Components
   - `outputs/consistency_checks.committee_edge.json`
   - level-band constraints
   - displacement caps
+- Surviving direct committee-edge judgments are graph constraints, not just additional pairwise weights. When `adjudication_source="committee_edge"` reaches rerank, the winner is protected by a `committee_direct_edge` unless that edge has already been cycle-suppressed or superseded.
 - This produces `final_order.csv` and `consistency_report.json` prior to curve application.
 - Routed hard-pair evaluation runs against `outputs/consistency_checks.committee_edge.json` before publish/SOTA gates.
 
@@ -103,7 +104,7 @@ Model Components
 - The Wish must target the biggest improvement to overall quality.
 
 Decision Rules
-- Final ranking is seeded by the composite score (weighted: rubric + conventions + comparative) and resolved by the global reranker using pairwise evidence plus level-lock constraints.
+- Final ranking is seeded by the composite score (weighted: rubric + conventions + comparative) and resolved by the global reranker using protected committee-edge constraints, pairwise evidence, and level-lock constraints.
 - Adjusted level band is resolved before fine-grained ordering.
 - Tie-breakers in order: composite bucket, Borda bucket, rubric after penalty, conventions mistake rate, student ID.
 - Conventions penalty triggers if mistake rate exceeds threshold (default: 7%).
