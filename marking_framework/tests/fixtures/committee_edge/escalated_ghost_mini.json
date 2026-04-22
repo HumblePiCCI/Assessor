@@ -1,0 +1,31 @@
+{
+  "generated_at": "2026-04-17T00:00:00+00:00",
+  "checks": [
+    {
+      "pair": ["s015", "s009"],
+      "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 2, "lower_rank": 3},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "confidence": "medium",
+      "decision_basis": "organization",
+      "cautions_applied": [],
+      "rationale": "Escalated pass favored the cleaner structure.",
+      "model_metadata": {"adjudication_source": "escalated_adjudication"}
+    },
+    {
+      "pair": ["s013", "s003"],
+      "seed_order": {"higher": "s013", "lower": "s003", "higher_rank": 5, "lower_rank": 6},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Settled content edge.",
+      "model_metadata": {"adjudication_source": "escalated_adjudication"}
+    }
+  ],
+  "pairwise_escalation": {
+    "escalation_count": 2,
+    "escalated_pair_keys": ["s003::s013", "s009::s015"]
+  }
+}

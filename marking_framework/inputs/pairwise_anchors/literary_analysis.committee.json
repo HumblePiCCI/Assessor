@@ -1,0 +1,67 @@
+{
+  "genre": "literary_analysis",
+  "decision_axes": [
+    {
+      "id": "interpretation_depth",
+      "prompt": "Which essay advances a defensible literary claim about what the text means, beyond restating events?"
+    },
+    {
+      "id": "proof_sufficiency",
+      "prompt": "Which essay sustains that claim across the whole response with specific, explained textual evidence?"
+    },
+    {
+      "id": "polish_trap",
+      "prompt": "Is the cleaner essay winning on surface form, length, formula, or topic sentences rather than meaning?"
+    },
+    {
+      "id": "rougher_but_stronger_latent",
+      "prompt": "Is a rougher essay advancing a genuinely deeper interpretation that the broad pass may have discounted?"
+    },
+    {
+      "id": "alternate_theme_validity",
+      "prompt": "If the essays argue different themes, which theme is more textually grounded?"
+    },
+    {
+      "id": "mechanics_block_meaning",
+      "prompt": "Do sentence-level errors make the analysis unrecoverable?"
+    },
+    {
+      "id": "completion_floor_applied",
+      "prompt": "Is either response an unfinished scaffold that should be floored below complete essays?"
+    }
+  ],
+  "anchors": [
+    {
+      "title": "Deeper interpretation with weaker proof",
+      "decision_rule": "A rougher or more sophisticated interpretation beats a formulaic essay only when it is supported by at least two sustained moments from the text."
+    },
+    {
+      "title": "Mature theme vocabulary is not proof",
+      "decision_rule": "Words like trauma, healing, identity, trust, accountability, or support do not count unless the student connects them to specific events and explains how the events prove the claim."
+    },
+    {
+      "title": "Full proof beats narrower sophistication",
+      "decision_rule": "A complete, multi-event proof of an on-prompt consequence claim can beat a rougher essay whose deeper theme is mostly asserted."
+    },
+    {
+      "title": "Consequences, accountability, and trust are co-equal frames",
+      "decision_rule": "A trauma/healing or trust/accountability reading wins over a consequences reading only when it is better developed, not because it sounds deeper."
+    },
+    {
+      "title": "Five-paragraph control is not decisive",
+      "decision_rule": "Topic-sentence scaffolding is positive only when it also sustains interpretive work."
+    },
+    {
+      "title": "Plot summary ceiling",
+      "decision_rule": "Organized summary of events without explanation of meaning caps a paper below essays that explain why events matter."
+    },
+    {
+      "title": "Mechanics threshold",
+      "decision_rule": "Mechanics are decisive only when they make the analysis hard to follow; otherwise they are secondary."
+    },
+    {
+      "title": "Completion floor for scaffolds",
+      "decision_rule": "Scaffold remnants place below all complete essays unless the complete essays are off-task."
+    }
+  ]
+}

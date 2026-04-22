@@ -1,0 +1,22 @@
+{
+  "genre": "summary_report",
+  "anchors": [
+    {
+      "title": "Accuracy and selection win",
+      "decision_rule": "Prefer the summary that captures the main idea and essential supporting points accurately, even if another response is longer."
+    },
+    {
+      "title": "Copied or dumped detail is weak",
+      "decision_rule": "Do not reward source-like fluency, copied wording, or excessive detail over concise synthesis in the student's own words."
+    },
+    {
+      "title": "No invented content",
+      "decision_rule": "Major distortions or invented details can outweigh smoother organization."
+    }
+  ],
+  "caution_checks": [
+    "Does the response select essential ideas rather than list everything?",
+    "Does it preserve the source meaning accurately?",
+    "Is length being mistaken for completeness?"
+  ]
+}

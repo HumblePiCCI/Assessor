@@ -21,6 +21,10 @@ def make_config() -> dict:
             "severe_collapse_min_rubric_percent": 58.0,
             "severe_collapse_target_floor_percent": 70.0,
             "severe_collapse_max_adjustment_percent": 12.0,
+            "bootstrap_scope_severe_collapse_min_rubric_percent": 64.0,
+            "bootstrap_scope_severe_collapse_min_borda_percent": 0.85,
+            "bootstrap_scope_severe_collapse_max_rank_sd": 1.0,
+            "bootstrap_scope_severe_collapse_target_floor_percent": 67.0,
             "early_grade_narrative_boundary_bonus_percent": 2.0,
         },
         "levels": {
@@ -75,6 +79,45 @@ def test_boundary_calibrator_rescues_severe_collapse(tmp_path):
     assert "severe_collapse_rescue" in row["flags"]
     assert row["level_with_modifier"] == "3"
     assert report["movement_count"] == 1
+
+
+def test_boundary_calibrator_bootstrap_scope_is_more_conservative(tmp_path):
+    scope = write_scope(
+        tmp_path,
+        {
+            "grade_level": 7,
+            "assignment_genre": "literary_analysis",
+            "generated_by": "bootstrap",
+        },
+    )
+    rows = [
+        {
+            "student_id": "s1",
+            "rubric_mean_percent": 62.67,
+            "rubric_after_penalty_percent": 62.67,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 0.92,
+            "rank_sd": 0.47,
+            "rubric_sd_points": 2.2,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.92,
+            "_borda_bucket": 92.0,
+            "conventions_mistake_rate_percent": 1.0,
+        }
+    ]
+
+    updated, report = apply_boundary_calibration(rows, make_config(), scope)
+    row = updated[0]
+    assert row["rubric_after_penalty_percent"] == 62.67
+    assert row["adjusted_level"] == "2"
+    assert row["boundary_calibration_reason"] == ""
+    assert report["movement_count"] == 0
 
 
 def test_boundary_calibrator_uplifts_early_grade_narrative_boundary(tmp_path):

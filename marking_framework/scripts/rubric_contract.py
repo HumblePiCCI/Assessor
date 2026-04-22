@@ -792,7 +792,7 @@ def runtime_rubric_context(
     raw_text, extraction = extract_document_text(rubric_path)
     normalized = load_json(normalized_path) if normalized_path else {}
     verification = load_json(verification_path) if verification_path else {}
-    if normalized:
+    if normalized and raw_text.strip():
         rubric_text = prompt_text_from_normalized(normalized, include_raw_text=True)
     else:
         rubric_text = raw_text

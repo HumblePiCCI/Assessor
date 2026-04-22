@@ -102,6 +102,8 @@ def load_scope_context(metadata_path: Path, profiles_path: Path, routing_path: P
         "scoring_scale_size": scoring_scale_size,
         "source_family": str(metadata.get("source_family", "") or "").strip(),
         "rubric_family": str(metadata.get("rubric_family", "") or "").strip(),
+        "metadata_generated_by": str(metadata.get("generated_by", "") or "").strip().lower(),
+        "bootstrap_generated": str(metadata.get("generated_by", "") or "").strip().lower() == "bootstrap",
         "prompt_shared": bool(metadata.get("prompt_shared", False)),
         "sample_count": int(_num(metadata.get("sample_count"), 0)),
         "is_small_ordinal_portfolio": small_ordinal_portfolio,
@@ -336,6 +338,22 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     severe_min_rubric = _num(calibration_cfg.get("severe_collapse_min_rubric_percent"), 58.0)
     severe_floor = _num(calibration_cfg.get("severe_collapse_target_floor_percent"), floor_level_3)
     severe_max_adjustment = _num(calibration_cfg.get("severe_collapse_max_adjustment_percent"), 14.0)
+    bootstrap_severe_min_rubric = _num(
+        calibration_cfg.get("bootstrap_scope_severe_collapse_min_rubric_percent"),
+        severe_min_rubric,
+    )
+    bootstrap_severe_min_borda = _num(
+        calibration_cfg.get("bootstrap_scope_severe_collapse_min_borda_percent"),
+        strong_borda_min,
+    )
+    bootstrap_severe_max_rank_sd = _num(
+        calibration_cfg.get("bootstrap_scope_severe_collapse_max_rank_sd"),
+        max_rank_sd,
+    )
+    bootstrap_severe_floor = _num(
+        calibration_cfg.get("bootstrap_scope_severe_collapse_target_floor_percent"),
+        severe_floor,
+    )
     top_boundary_margin = _num(calibration_cfg.get("top_boundary_margin_percent"), 6.0)
     early_bonus = _num(calibration_cfg.get("early_grade_narrative_boundary_bonus_percent"), 2.0)
     default_max_adjustment = _num(calibration_cfg.get("max_score_adjustment_percent"), 8.0)
@@ -356,6 +374,9 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     source_rank_strategy = str(source_scale_profile.get("rank_strategy", "") or "").strip().lower()
     source_disable_severe_collapse = bool(source_scale_profile.get("disable_severe_collapse_floor", False))
     source_rank_map = _source_rank_map(rows, source_rank_strategy) if source_scale_profile_name else {}
+    bootstrap_scope_guard = bool(scope.get("bootstrap_generated")) and not str(scope.get("source_family", "") or "").strip() and (
+        str(scope.get("rubric_family", "") or "").strip().lower() in {"", "rubric_unknown"}
+    )
 
     provisional = sorted(rows, key=_sort_key)
     provisional_rank_map = {row.get("student_id", ""): idx for idx, row in enumerate(provisional, start=1)}
@@ -383,14 +404,30 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
         target_score = current_score
         reasons = []
         capped = False
+        source_top_boundary_blocked = False
 
         if adjusted_level in {"1", "2"} and not source_disable_severe_collapse:
+            severe_min_gate = severe_min_rubric
+            severe_floor_target = severe_floor
+            severe_borda_gate = strong_borda_min
+            severe_rank_sd_gate = max_rank_sd
+            if bootstrap_scope_guard:
+                severe_min_gate = max(severe_min_gate, bootstrap_severe_min_rubric)
+                severe_floor_target = min(severe_floor_target, bootstrap_severe_floor)
+                severe_borda_gate = max(severe_borda_gate, bootstrap_severe_min_borda)
+                severe_rank_sd_gate = min(severe_rank_sd_gate, bootstrap_severe_max_rank_sd)
             severe_signal = (
-                (strong_support and base_score >= severe_min_rubric)
+                (
+                    provisional_rank <= strong_rank_limit
+                    and borda_percent >= severe_borda_gate
+                    and rank_sd <= severe_rank_sd_gate
+                    and rubric_sd <= max_rubric_sd_points
+                    and base_score >= severe_min_gate
+                )
                 or level_gap >= severe_gap_levels
             )
             if severe_signal:
-                target_score = max(target_score, severe_floor)
+                target_score = max(target_score, severe_floor_target)
                 reasons.append("severe_collapse_floor")
 
         boundary_margin = top_boundary_margin
@@ -417,6 +454,8 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                 and rank_sd <= source_max_rank_sd
                 and rubric_sd <= source_max_rubric_sd
             )
+            if source_supported and source_rank > 1 and 0.0 < source_ceiling < floor_level_4:
+                source_top_boundary_blocked = True
             if source_supported and current_score < source_floor:
                 target_score = max(target_score, source_floor)
                 reasons.append(f"source_scale_floor:{source_scale_profile_name}")
@@ -427,7 +466,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                 target_score = source_anchor
                 reasons.append(f"source_scale_anchor:{source_scale_profile_name}")
 
-        top_boundary_supported = strong_support
+        top_boundary_supported = strong_support and not source_top_boundary_blocked
         if adjusted_level == "3" and top_boundary_supported and current_score >= (floor_level_4 - boundary_margin):
             target_score = max(target_score, floor_level_4)
             reasons.append("top_boundary_uplift")

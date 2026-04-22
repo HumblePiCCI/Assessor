@@ -10,7 +10,7 @@ def test_pipeline_steps_structure():
     ids = [item["id"] for item in steps]
     assert ids[0] == "rubric"
     assert ids[-1] == "dashboard"
-    assert {"rubric", "assess", "consistency", "rerank", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
+    assert {"rubric", "assess", "band_seam", "consistency", "pairwise_escalation", "evidence_map", "committee_edge_resolver", "rerank", "pairwise_eval", "quality_gate", "sota_gate", "grade"}.issubset(set(ids))
     assert "scope_grounding" in ids
     assert "cohort_confidence" in ids
     assert all("cmd" in item and "label" in item for item in steps)
@@ -24,6 +24,22 @@ def test_pipeline_steps_structure():
     assert "processing/conventions_report.csv" in conventions["cmd"]
     rerank = next(item for item in steps if item["id"] == "rerank")
     assert "global_rerank.py" in " ".join(str(part) for part in rerank["cmd"])
+    assert "outputs/consistency_checks.committee_edge.json" in rerank["cmd"]
+    pairwise_eval = next(item for item in steps if item["id"] == "pairwise_eval")
+    assert pairwise_eval["required"] is False
+    assert "evaluate_pairwise_adjudicator.py" in " ".join(str(part) for part in pairwise_eval["cmd"])
+    assert "outputs/consistency_checks.committee_edge.json" in pairwise_eval["cmd"]
+    escalation = next(item for item in steps if item["id"] == "pairwise_escalation")
+    assert "escalate_pairwise_adjudications.py" in " ".join(str(part) for part in escalation["cmd"])
+    evidence_map = next(item for item in steps if item["id"] == "evidence_map")
+    assert evidence_map["required"] is False
+    assert "evidence_map.py" in " ".join(str(part) for part in evidence_map["cmd"])
+    committee = next(item for item in steps if item["id"] == "committee_edge_resolver")
+    assert committee["required"] is False
+    assert "committee_edge_resolver.py" in " ".join(str(part) for part in committee["cmd"])
+    assert ids.index("pairwise_escalation") < ids.index("evidence_map") < ids.index("committee_edge_resolver") < ids.index("rerank") < ids.index("pairwise_eval") < ids.index("quality_gate")
+    band_seam = next(item for item in steps if item["id"] == "band_seam")
+    assert "band_seam_adjudication.py" in " ".join(str(part) for part in band_seam["cmd"])
     quality_gate = next(item for item in steps if item["id"] == "quality_gate")
     assert quality_gate["required"] is False
     sota_gate = next(item for item in steps if item["id"] == "sota_gate")
@@ -33,6 +49,12 @@ def test_pipeline_steps_structure():
     assert step_runner.pipeline_step_ids() == tuple(ids)
     anchor_ids = [item["id"] for item in step_runner.anchor_resume_steps()]
     assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
+
+
+def test_committee_edge_resolver_live_env_appends_flag(monkeypatch):
+    monkeypatch.setenv("COMMITTEE_EDGE_LIVE", "1")
+    cmd = step_runner.pipeline_step_command("committee_edge_resolver")
+    assert "--live" in cmd
 
 
 def test_can_stream_subprocess_detection():

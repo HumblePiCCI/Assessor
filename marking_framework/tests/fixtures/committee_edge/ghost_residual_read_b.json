@@ -1,0 +1,130 @@
+{
+  "generated_at": "2026-04-17T00:00:00+00:00",
+  "reads": [
+    {
+      "pair_key": "s009::s015",
+      "winner": "s009",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content", "formulaic_but_thin"],
+      "rationale": "Read B polish-trap audit: Logan's essay wins the prior on polish, not on proof. Jack's interpretation of trauma and accountability survives scrutiny; the proof argument for Logan does not.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s009",
+      "winner": "s009",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Read B polish-trap audit: Easton's plot summary does not survive scrutiny on proof. Jack's interpretive density holds up across the rubric axes.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s013",
+      "winner": "s013",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["polished_but_shallow"],
+      "rationale": "Read B polish-trap audit: Easton's response is polished but not proven. Kyle's identity reading is the stronger substance.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s019::s022",
+      "winner": "s022",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": [],
+      "rationale": "Read B polish-trap audit: Sienna's proof survives scrutiny; Naomi's broader theme vocabulary lacks consistent support.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "A",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "none",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "Sienna wins on proof, not just polish.",
+        "rougher_loses_because": "Naomi's interpretation is less consistently proven.",
+        "interpretation_depth": "A",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": false,
+        "alternate_theme_validity": "A",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s004::s008",
+      "winner": "s008",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Read B polish-trap audit: Hudson L's leadership-theme interpretation survives. Farris's summary does not carry the proof load the prior decision assigned it.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    }
+  ]
+}

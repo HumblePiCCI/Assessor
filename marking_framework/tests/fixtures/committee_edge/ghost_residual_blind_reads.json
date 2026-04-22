@@ -1,0 +1,130 @@
+{
+  "generated_at": "2026-04-17T00:00:00+00:00",
+  "reads": [
+    {
+      "pair_key": "s009::s015",
+      "winner": "s009",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content", "formulaic_but_thin"],
+      "rationale": "Jack has the stronger interpretation and Logan is more formulaic.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s009",
+      "winner": "s009",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Jack's rougher essay develops a stronger literary reading than Easton's cleaner summary.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s003::s013",
+      "winner": "s013",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["polished_but_shallow"],
+      "rationale": "Kyle has more meaningful interpretation than Easton's polished but shallow response.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s019::s022",
+      "winner": "s022",
+      "confidence": "high",
+      "decision_basis": "evidence_development",
+      "cautions_applied": [],
+      "rationale": "Sienna's response is better proven; Naomi's mature theme vocabulary is less controlled.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "A",
+        "better_text_evidence_explanation": "A",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "none",
+        "completion_advantage": "A",
+        "cleaner_wins_on_substance": "Sienna wins on proof, not just polish.",
+        "rougher_loses_because": "Naomi's interpretation is less consistently proven.",
+        "interpretation_depth": "A",
+        "proof_sufficiency": "A",
+        "polish_trap": false,
+        "rougher_but_stronger_latent": false,
+        "alternate_theme_validity": "A",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    },
+    {
+      "pair_key": "s004::s008",
+      "winner": "s008",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Hudson L has stronger content despite rougher control.",
+      "criterion_notes": [],
+      "decision_checks": {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": true,
+        "rougher_but_stronger_latent": true,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": false,
+        "completion_floor_applied": false
+      }
+    }
+  ]
+}

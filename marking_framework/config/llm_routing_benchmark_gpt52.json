@@ -20,6 +20,12 @@
       "temperature": 0.0,
       "max_output_tokens": 500
     },
+    "pairwise_escalator": {
+      "model": "gpt-5.2",
+      "reasoning": "medium",
+      "temperature": 0.0,
+      "max_output_tokens": 900
+    },
     "feedback_drafter": {
       "model": "gpt-5.2",
       "reasoning": "medium",

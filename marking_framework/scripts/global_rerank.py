@@ -4,15 +4,20 @@ import csv
 import json
 import math
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 try:
+    from scripts.adjudication_source import dedupe_by_precedence, normalize_source
     from scripts.aggregate_helpers import get_level_bands
     from scripts.local_teacher_prior import compute_teacher_preference_adjustments
     from scripts.levels import normalize_level
 except ImportError:  # pragma: no cover - Support running as a script
+    from adjudication_source import dedupe_by_precedence, normalize_source  # pragma: no cover
     from aggregate_helpers import get_level_bands  # pragma: no cover
     from local_teacher_prior import compute_teacher_preference_adjustments  # pragma: no cover
     from levels import normalize_level  # pragma: no cover
@@ -59,6 +64,13 @@ def num(value, default=0.0) -> float:
         return float(default)
 
 
+def truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    return token in {"1", "true", "yes", "y"}
+
+
 def normalize_confidence(value) -> str:
     token = str(value or "").strip().lower()
     if token in {"high"}:
@@ -71,6 +83,28 @@ def normalize_confidence(value) -> str:
 def normalize_decision(value) -> str:
     token = str(value or "").strip().upper()
     return "SWAP" if token == "SWAP" else "KEEP"
+
+
+def adjudication_source(item: dict) -> str:
+    return normalize_source(item)
+
+
+def normalize_winner_side(value) -> str:
+    token = str(value or "").strip().upper()
+    return token if token in {"A", "B"} else ""
+
+
+def decision_from_winner_side(value) -> str:
+    side = normalize_winner_side(value)
+    if side == "A":
+        return "KEEP"
+    if side == "B":
+        return "SWAP"
+    return ""
+
+
+def winner_side_from_decision(value) -> str:
+    return "B" if normalize_decision(value) == "SWAP" else "A"
 
 
 def confidence_weight(confidence: str) -> float:
@@ -116,6 +150,16 @@ def normalize_feature(values: dict[str, float]) -> dict[str, float]:
     return {key: (value - lo) / scale for key, value in values.items()}
 
 
+def clamp01(value, default=0.0) -> float:
+    return max(0.0, min(1.0, num(value, default)))
+
+
+def seed_percentile(seed_rank: int, student_count: int) -> float:
+    if student_count <= 1:
+        return 1.0
+    return max(0.0, min(1.0, 1.0 - ((int(seed_rank) - 1) / max(student_count - 1, 1))))
+
+
 def load_seed_rows(path: Path, config: dict) -> list[dict]:
     rows = load_rows(path)
     if not rows:
@@ -145,6 +189,13 @@ def load_seed_rows(path: Path, config: dict) -> list[dict]:
         )
         item["_composite_score"] = num(row.get("composite_score"), 0.0)
         item["_borda_feature"] = num(row.get("borda_percent"), num(row.get("borda_points"), 0.0))
+        flags = {token.strip() for token in str(row.get("flags", "") or "").split(";") if token.strip()}
+        item["_draft_completion_floor_applied"] = truthy(row.get("draft_completion_floor_applied")) or ("draft_completion_floor" in flags)
+        item["_severe_collapse_rescue"] = "severe_collapse_rescue" in flags
+        item["_pre_boundary_calibration_percent"] = num(
+            row.get("pre_boundary_calibration_percent"),
+            item["_rubric_after_penalty_percent"],
+        )
         normalized.append(item)
     return normalized
 
@@ -164,10 +215,18 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         lower = str(seed_order.get("lower") or pair[1]).strip()
         if higher not in rows_by_id or lower not in rows_by_id:
             continue
-        decision = normalize_decision(item.get("decision"))
+        winner_side = normalize_winner_side(item.get("winner_side"))
+        decision = decision_from_winner_side(winner_side) or normalize_decision(item.get("decision"))
+        if not winner_side:
+            winner_side = winner_side_from_decision(decision)
         confidence = normalize_confidence(item.get("confidence"))
         rationale = str(item.get("rationale") or item.get("reason") or "").strip()
         model_metadata = item.get("model_metadata") if isinstance(item.get("model_metadata"), dict) else {}
+        criterion_notes = item.get("criterion_notes") if isinstance(item.get("criterion_notes"), list) else []
+        decision_basis = str(item.get("decision_basis", "") or "").strip()
+        cautions_applied = item.get("cautions_applied") if isinstance(item.get("cautions_applied"), list) else []
+        decision_checks = item.get("decision_checks") if isinstance(item.get("decision_checks"), dict) else {}
+        source = adjudication_source(item)
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
         normalized.append(
@@ -182,14 +241,24 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                     "lower_rank": int(num(seed_order.get("lower_rank"), rows_by_id[lower]["seed_rank"])),
                 },
                 "decision": decision,
+                "winner_side": winner_side,
                 "confidence": confidence,
                 "weight": confidence_weight(confidence),
                 "rationale": rationale,
+                "criterion_notes": criterion_notes,
+                "decision_basis": decision_basis,
+                "cautions_applied": cautions_applied,
+                "decision_checks": decision_checks,
                 "winner": winner,
                 "loser": loser,
                 "model_metadata": model_metadata,
+                "adjudication_source": source,
+                "superseded_by_escalation": bool(model_metadata.get("superseded_by_escalation", False)),
             }
         )
+    normalized = dedupe_by_precedence(normalized, key_fn=lambda item: item["pair_key"])
+    for idx, item in enumerate(normalized, start=1):
+        item["id"] = idx
     return payload if isinstance(payload, dict) else {}, normalized
 
 
@@ -225,20 +294,28 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "judgment_count": 0,
                 "directional_weight": defaultdict(float),
                 "confidence_counts": {"low": 0, "medium": 0, "high": 0},
+                "source_counts": defaultdict(int),
                 "judgments": [],
             },
         )
         comparison["judgment_count"] += 1
         comparison["directional_weight"][f"{judgment['winner']}>{judgment['loser']}"] += judgment["weight"]
         comparison["confidence_counts"][judgment["confidence"]] += 1
+        comparison["source_counts"][judgment.get("adjudication_source", "cheap_pairwise")] += 1
         comparison["judgments"].append(
             {
                 "decision": judgment["decision"],
+                "winner_side": judgment.get("winner_side", ""),
                 "confidence": judgment["confidence"],
                 "weight": judgment["weight"],
                 "winner": judgment["winner"],
                 "loser": judgment["loser"],
                 "rationale": judgment["rationale"],
+                "criterion_notes": judgment.get("criterion_notes", []),
+                "decision_basis": judgment.get("decision_basis", ""),
+                "cautions_applied": judgment.get("cautions_applied", []),
+                "decision_checks": judgment.get("decision_checks", {}),
+                "adjudication_source": judgment.get("adjudication_source", "cheap_pairwise"),
                 "model_metadata": judgment["model_metadata"],
             }
         )
@@ -267,6 +344,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "right_over_left_weight": round(right_over_left, 6),
                 "net_preference": round(left_over_right - right_over_left, 6),
                 "confidence_counts": dict(item["confidence_counts"]),
+                "source_counts": dict(item["source_counts"]),
                 "judgments": list(item["judgments"]),
             }
         )
@@ -461,27 +539,71 @@ def compute_displacement_caps(rows: list[dict], per_student: dict, *, low_cap: i
         sid = row["student_id"]
         stability_penalty = student_stability_penalty(row, per_student)
         incident = float(per_student.get(sid, {}).get("incident_weight", 0.0) or 0.0)
+        support = float(per_student.get(sid, {}).get("support_weight", 0.0) or 0.0)
+        opposition = float(per_student.get(sid, {}).get("opposition_weight", 0.0) or 0.0)
         effective_incident = incident * max(0.25, 1.0 - stability_penalty)
-        if effective_incident >= 2.5:
-            high_cap_effective = min(count, max(1, int(high_cap)))
-            if stability_penalty >= 0.35:
-                high_cap_effective = min(high_cap_effective, max(int(medium_cap), 4))
-            cap = high_cap_effective
+        effective_support = support * max(0.25, 1.0 - stability_penalty)
+        effective_opposition = opposition * max(0.25, 1.0 - stability_penalty)
+        high_cap_effective = min(count, max(1, int(high_cap)))
+        if stability_penalty >= 0.35:
+            high_cap_effective = min(high_cap_effective, max(int(medium_cap), 4))
+        if effective_support >= 2.5:
+            up_cap = high_cap_effective
+        elif effective_support >= 1.0:
+            up_cap = min(count, max(1, int(medium_cap)))
+        else:
+            up_cap = min(count, max(1, int(low_cap)))
+
+        if effective_opposition >= 6.0:
+            down_cap = min(count, max(high_cap_effective * 3, 10))
+        elif effective_opposition >= 3.0:
+            down_cap = min(count, max(int(medium_cap) * 2, 6))
+        elif effective_opposition >= 1.0:
+            down_cap = min(count, max(int(medium_cap), 4))
+        else:
+            down_cap = min(count, max(1, int(low_cap)))
+
+        seed_pct = seed_percentile(int(row["seed_rank"]), count)
+        borda_pct = clamp01(row.get("_borda_feature"), seed_pct)
+        divergence = abs(seed_pct - borda_pct)
+        if borda_pct + 0.35 < seed_pct and effective_opposition >= effective_support + 2.0:
+            down_cap = max(down_cap, min(count, 8))
+        if borda_pct + 0.5 < seed_pct and effective_opposition >= effective_support + 4.0:
+            down_cap = max(down_cap, min(count, 12))
+
+        cap = max(up_cap, down_cap)
+        if effective_opposition >= effective_support + 2.0 and down_cap > up_cap:
+            label = "high_opposition"
+        elif effective_support >= 2.5:
             label = "high_support"
         elif effective_incident >= 1.0:
-            cap = min(count, max(1, int(medium_cap)))
-            label = "medium_support"
+            label = "mixed_evidence"
         else:
-            cap = min(count, max(1, int(low_cap)))
             label = "low_support"
         seed_rank = int(row["seed_rank"])
+        draft_floor_lock = bool(row.get("_draft_completion_floor_applied"))
+        severe_collapse_rescue = bool(row.get("_severe_collapse_rescue"))
+        rescue_best_rank = max(1, seed_rank - (2 if num(row.get("_pre_boundary_calibration_percent"), 0.0) < 67.0 else 3))
+        best_rank = seed_rank if draft_floor_lock else max(1, seed_rank - up_cap)
+        rescue_cap_active = severe_collapse_rescue and not draft_floor_lock and rescue_best_rank > best_rank
+        if rescue_cap_active:
+            best_rank = rescue_best_rank
         caps[sid] = {
             "cap": cap,
-            "label": label,
-            "best_rank": max(1, seed_rank - cap),
-            "worst_rank": min(count, seed_rank + cap),
+            "label": "completion_floor_lock" if draft_floor_lock else label,
+            "best_rank": best_rank,
+            "worst_rank": min(count, seed_rank + down_cap),
+            "up_cap": up_cap,
+            "down_cap": down_cap,
             "stability_penalty": stability_penalty,
             "effective_incident_weight": round(effective_incident, 6),
+            "effective_support_weight": round(effective_support, 6),
+            "effective_opposition_weight": round(effective_opposition, 6),
+            "seed_percentile": round(seed_pct, 6),
+            "borda_percentile": round(borda_pct, 6),
+            "borda_seed_divergence": round(divergence, 6),
+            "draft_completion_floor_lock": draft_floor_lock,
+            "severe_collapse_rescue_cap": rescue_cap_active,
         }
     return caps
 
@@ -578,6 +700,68 @@ def build_constraints(
     dropped_edges = []
     allowed_crossings = []
     blocked_crossings = []
+    overridden_crossings = []
+
+    draft_floor_rows = [row for row in rows if row.get("_draft_completion_floor_applied")]
+    complete_rows = [row for row in rows if not row.get("_draft_completion_floor_applied")]
+    for incomplete in draft_floor_rows:
+        for complete in complete_rows:
+            note = {
+                "kind": "completion_floor",
+                "src": complete["student_id"],
+                "dst": incomplete["student_id"],
+                "detail": {
+                    "complete_student_id": complete["student_id"],
+                    "incomplete_student_id": incomplete["student_id"],
+                    "reason": "completed essays outrank hard-floor incomplete scaffold drafts",
+                },
+            }
+            if not add_edge(adjacency, indegree, added_edges, complete["student_id"], incomplete["student_id"], note):
+                dropped_edges.append({**note, "reason": "cycle_avoided"})
+
+    for row in sorted(rows, key=lambda item: int(item["seed_rank"])):
+        sid = row["student_id"]
+        cap_info = caps.get(sid, {})
+        if not cap_info.get("severe_collapse_rescue_cap"):
+            continue
+        best_rank = int(cap_info["best_rank"])
+        for other in rows:
+            oid = other["student_id"]
+            if oid == sid:
+                continue
+            if int(other["seed_rank"]) < best_rank:
+                note = {
+                    "kind": "severe_collapse_rescue_cap_up",
+                    "src": oid,
+                    "dst": sid,
+                    "detail": {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]},
+                }
+                if not add_edge(adjacency, indegree, added_edges, oid, sid, note):
+                    dropped_edges.append({**note, "reason": "cycle_avoided"})
+
+    seen_pairs = set()
+    for (winner, loser), weight in sorted(direction.items()):
+        reverse = direct_weight(direction, loser, winner)
+        margin = weight - reverse
+        pair_token = tuple(sorted((winner, loser)))
+        if pair_token in seen_pairs:
+            continue
+        seen_pairs.add(pair_token)
+        if abs(margin) < float(hard_evidence_margin):
+            continue
+        src, dst = (winner, loser) if margin > 0 else (loser, winner)
+        note = {
+            "kind": "strong_pairwise_evidence",
+            "src": src,
+            "dst": dst,
+            "detail": {
+                "forward_weight": round(direct_weight(direction, src, dst), 6),
+                "reverse_weight": round(direct_weight(direction, dst, src), 6),
+                "margin": round(abs(margin), 6),
+            },
+        }
+        if not add_edge(adjacency, indegree, added_edges, src, dst, note):
+            dropped_edges.append({**note, "reason": "cycle_avoided"})
 
     for higher in rows:
         for lower in rows:
@@ -605,33 +789,24 @@ def build_constraints(
                 allowed_crossings.append(detail)
                 continue
             blocked_crossings.append(detail)
+            reverse_margin = direct_weight(direction, lower["student_id"], higher["student_id"]) - direct_weight(direction, higher["student_id"], lower["student_id"])
+            direct_pairwise_override = (
+                int(detail.get("level_gap", 99)) <= 1
+                and abs(float(detail.get("rubric_gap", 999.0))) <= max(float(max_cross_rubric_gap), 2.0) + 4.0
+                and reverse_margin >= float(hard_evidence_margin)
+            )
+            if direct_pairwise_override:
+                overridden_crossings.append(
+                    {
+                        **detail,
+                        "reason": "direct_high_confidence_pairwise_override",
+                        "reverse_margin": round(reverse_margin, 6),
+                    }
+                )
+                continue
             note = {"kind": "level_lock", "src": higher["student_id"], "dst": lower["student_id"], "detail": detail}
             if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
-
-    seen_pairs = set()
-    for (winner, loser), weight in sorted(direction.items()):
-        reverse = direct_weight(direction, loser, winner)
-        margin = weight - reverse
-        pair_token = tuple(sorted((winner, loser)))
-        if pair_token in seen_pairs:
-            continue
-        seen_pairs.add(pair_token)
-        if abs(margin) < float(hard_evidence_margin):
-            continue
-        src, dst = (winner, loser) if margin > 0 else (loser, winner)
-        note = {
-            "kind": "strong_pairwise_evidence",
-            "src": src,
-            "dst": dst,
-            "detail": {
-                "forward_weight": round(direct_weight(direction, src, dst), 6),
-                "reverse_weight": round(direct_weight(direction, dst, src), 6),
-                "margin": round(abs(margin), 6),
-            },
-        }
-        if not add_edge(adjacency, indegree, added_edges, src, dst, note):
-            dropped_edges.append({**note, "reason": "cycle_avoided"})
 
     for row in sorted(rows, key=lambda item: (caps[item["student_id"]]["cap"], item["seed_rank"], item["student_id"])):
         sid = row["student_id"]
@@ -666,6 +841,7 @@ def build_constraints(
         "dropped_edges": dropped_edges,
         "allowed_crossings": allowed_crossings,
         "blocked_crossings": blocked_crossings,
+        "overridden_crossings": overridden_crossings,
     }
 
 
@@ -734,6 +910,10 @@ def build_final_rows(
             notes.append("held_seed_position")
         if abs(displacement) > int(cap_info["cap"]):
             notes.append("cap_relaxed_for_hard_constraints")
+        if cap_info.get("draft_completion_floor_lock"):
+            notes.append("draft_completion_floor_lock")
+        if cap_info.get("severe_collapse_rescue_cap"):
+            notes.append("severe_collapse_rescue_cap")
         if per_student_metrics.get("support_weight", 0.0) > per_student_metrics.get("opposition_weight", 0.0):
             notes.append("net_pairwise_support")
         elif per_student_metrics.get("opposition_weight", 0.0) > per_student_metrics.get("support_weight", 0.0):
@@ -752,6 +932,10 @@ def build_final_rows(
         base_row["rerank_displacement"] = displacement
         base_row["rerank_displacement_cap"] = int(cap_info["cap"])
         base_row["rerank_displacement_cap_label"] = cap_info["label"]
+        base_row["rerank_best_rank"] = int(cap_info["best_rank"])
+        base_row["rerank_worst_rank"] = int(cap_info["worst_rank"])
+        base_row["rerank_up_cap"] = int(cap_info.get("up_cap", cap_info["cap"]))
+        base_row["rerank_down_cap"] = int(cap_info.get("down_cap", cap_info["cap"]))
         base_row["rerank_notes"] = ";".join(notes)
         final_rows.append(base_row)
         score_rows.append(
@@ -791,6 +975,69 @@ def pairwise_agreement(final_rank_map: dict[str, int], judgments: list[dict]) ->
         if final_rank_map[judgment["winner"]] < final_rank_map[judgment["loser"]]:
             agree += weight
     return round((agree / total) if total else 1.0, 6)
+
+
+def direct_edge_diagnostics(final_rank_map: dict[str, int], judgments: list[dict], constraints: dict | None = None) -> dict:
+    constraints = constraints if isinstance(constraints, dict) else {}
+    added_edges = {
+        (str(item.get("src", "")), str(item.get("dst", "")), str(item.get("kind", "")))
+        for item in constraints.get("added_edges", [])
+        if isinstance(item, dict)
+    }
+    dropped_edges = {
+        (str(item.get("src", "")), str(item.get("dst", "")), str(item.get("kind", "")))
+        for item in constraints.get("dropped_edges", [])
+        if isinstance(item, dict)
+    }
+    violations = []
+    satisfied = 0
+    total_weight = 0.0
+    violated_weight = 0.0
+    high_confidence_violations = 0
+    for judgment in judgments:
+        winner = str(judgment.get("winner", "") or "").strip()
+        loser = str(judgment.get("loser", "") or "").strip()
+        if winner not in final_rank_map or loser not in final_rank_map or winner == loser:
+            continue
+        weight = float(judgment.get("weight", 0.0) or 0.0)
+        total_weight += weight
+        winner_rank = int(final_rank_map[winner])
+        loser_rank = int(final_rank_map[loser])
+        if winner_rank < loser_rank:
+            satisfied += 1
+            continue
+        violated_weight += weight
+        if normalize_confidence(judgment.get("confidence")) == "high":
+            high_confidence_violations += 1
+        violations.append(
+            {
+                "pair": list(judgment.get("pair", [])),
+                "winner": winner,
+                "loser": loser,
+                "winner_final_rank": winner_rank,
+                "loser_final_rank": loser_rank,
+                "confidence": normalize_confidence(judgment.get("confidence")),
+                "weight": round(weight, 6),
+                "decision": normalize_decision(judgment.get("decision")),
+                "decision_basis": str(judgment.get("decision_basis", "") or ""),
+                "cautions_applied": list(judgment.get("cautions_applied", [])) if isinstance(judgment.get("cautions_applied"), list) else [],
+                "rationale": str(judgment.get("rationale", "") or "").strip(),
+                "strong_pairwise_edge_added": (winner, loser, "strong_pairwise_evidence") in added_edges,
+                "strong_pairwise_edge_dropped": (winner, loser, "strong_pairwise_evidence") in dropped_edges,
+            }
+        )
+    total = satisfied + len(violations)
+    return {
+        "direct_edge_count": total,
+        "direct_edge_satisfied_count": satisfied,
+        "direct_edge_violation_count": len(violations),
+        "high_confidence_direct_edge_violation_count": high_confidence_violations,
+        "direct_edge_violation_weight": round(violated_weight, 6),
+        "direct_edge_weight": round(total_weight, 6),
+        "direct_edge_violation_rate": round((len(violations) / total) if total else 0.0, 6),
+        "direct_edge_weighted_violation_rate": round((violated_weight / total_weight) if total_weight else 0.0, 6),
+        "violations": violations,
+    }
 
 
 def write_csv(path: Path, rows: list[dict]):
@@ -904,6 +1151,7 @@ def run_global_rerank(
     )
     final_rank_map = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
     agreement = pairwise_agreement(final_rank_map, judgments)
+    direct_edges = direct_edge_diagnostics(final_rank_map, judgments, constraint_meta)
     swap_count = sum(1 for judgment in judgments if judgment.get("decision") == "SWAP")
     low_confidence_count = sum(1 for judgment in judgments if judgment.get("confidence") == "low")
     movements = [
@@ -967,8 +1215,12 @@ def run_global_rerank(
             "dropped_edges": len(constraint_meta["dropped_edges"]),
             "allowed_crossings": len(constraint_meta["allowed_crossings"]),
             "blocked_crossings": len(constraint_meta["blocked_crossings"]),
+            "direct_edge_violations": direct_edges["direct_edge_violation_count"],
+            "high_confidence_direct_edge_violations": direct_edges["high_confidence_direct_edge_violation_count"],
+            "direct_edge_weighted_violation_rate": direct_edges["direct_edge_weighted_violation_rate"],
         },
         "constraints": constraint_meta,
+        "direct_edge_diagnostics": direct_edges,
         "movements": movements,
         "teacher_prior": {
             "active": bool(teacher_meta.get("active", False)) if isinstance(teacher_meta, dict) else False,

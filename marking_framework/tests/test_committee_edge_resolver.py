@@ -1,0 +1,4466 @@
+import csv
+import copy
+import json
+from pathlib import Path
+
+from scripts import committee_edge_resolver as cer
+from scripts import evidence_map as em
+
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "committee_edge"
+
+
+def write_csv(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def base_rows():
+    return [
+        {
+            "student_id": "s015",
+            "seed_rank": "2",
+            "consensus_rank": "2",
+            "adjusted_level": "3",
+            "composite_score": "0.60",
+            "borda_percent": "0.60",
+        },
+        {
+            "student_id": "s009",
+            "seed_rank": "3",
+            "consensus_rank": "3",
+            "adjusted_level": "3",
+            "composite_score": "0.91",
+            "borda_percent": "0.92",
+        },
+        {
+            "student_id": "s013",
+            "seed_rank": "5",
+            "consensus_rank": "5",
+            "adjusted_level": "3",
+            "composite_score": "0.80",
+            "borda_percent": "0.80",
+        },
+        {
+            "student_id": "s003",
+            "seed_rank": "6",
+            "consensus_rank": "6",
+            "adjusted_level": "3",
+            "composite_score": "0.70",
+            "borda_percent": "0.70",
+        },
+    ]
+
+
+def fixture_payload():
+    return json.loads((FIXTURE_DIR / "escalated_ghost_mini.json").read_text(encoding="utf-8"))
+
+
+def surface_texts():
+    return {
+        "s015": "\n\n".join(
+            [
+                "First, Ghost has consequences. He steals shoes. He runs fast. He learns a lesson. The paragraph is organized and complete.",
+                "Second, Coach gives consequences. The team helps. Ghost changes. This paragraph has clean transitions and a clear topic sentence.",
+                "Another reason is consequences. Ghost gets in trouble. He works hard. The essay stays neat and easy to follow.",
+                "In conclusion, Ghost learns about consequences. The final paragraph repeats the claim with polished control.",
+            ]
+        ),
+        "s009": (
+            "Ghost keeps running because fear controls him after the gunshot. "
+            "Coach's support reveals that trust is what lets him face consequences. "
+            "This demonstrates growth because accountability becomes a way to heal."
+        ),
+        "s013": "Kyle explains support because it changes Ghost.",
+        "s003": "Easton summarizes the plot.",
+    }
+
+
+def test_passthrough_when_no_decisions_preserves_checks_identical(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    payload = fixture_payload()
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, base_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in surface_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert decisions["decisions"] == []
+
+
+def test_committee_anchor_selection_details_can_include_external_source_calibration(tmp_path):
+    anchor = tmp_path / "literary_analysis.committee.json"
+    source_pack = tmp_path / "sources.json"
+    anchor.write_text(
+        json.dumps(
+            {
+                "decision_axes": [{"id": "interpretation_depth", "prompt": "Which essay explains meaning?"}],
+                "anchors": [{"title": "Plot summary ceiling", "decision_rule": "Summary without explanation loses."}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_pack.write_text(
+        json.dumps(
+            {
+                "global_anchor_rules": [{"id": "guard", "rule": "Use source rules as calibration only."}],
+                "sources": [
+                    {
+                        "id": "public_source",
+                        "name": "Public Source",
+                        "provider": "State",
+                        "url": "https://example.org/source.pdf",
+                        "genres": ["literary_analysis"],
+                        "grades": [7],
+                        "scale": {"label": "teacher comments"},
+                        "rights_note": "Link only.",
+                        "calibration_rules": [
+                            {
+                                "id": "evidence_commentary",
+                                "applies_to": ["literary_analysis"],
+                                "rule": "Evidence must be explained before polish can decide.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    details = cer.committee_anchor_selection_details(
+        anchor,
+        source_calibration=source_pack,
+        genre="literary_analysis",
+        grade_level=7,
+    )
+
+    joined = "\n".join(details)
+    assert "Plot summary ceiling: Summary without explanation loses." in joined
+    assert "External teacher-scored calibration sources are active" in joined
+    assert "public_source:evidence_commentary" in joined
+
+
+def test_run_blind_read_a_passes_external_source_calibration_to_judge(tmp_path, monkeypatch):
+    anchor = tmp_path / "literary_analysis.committee.json"
+    source_pack = tmp_path / "sources.json"
+    anchor.write_text(json.dumps({"anchors": []}), encoding="utf-8")
+    source_pack.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "id": "cal_source",
+                        "name": "Calibration Source",
+                        "provider": "Teachers",
+                        "url": "https://example.org/calibration.pdf",
+                        "genres": ["literary_analysis"],
+                        "grades": [7],
+                        "scale": {"label": "teacher band"},
+                        "rights_note": "Link only.",
+                        "calibration_rules": [
+                            {
+                                "id": "commentary",
+                                "applies_to": ["literary_analysis"],
+                                "rule": "Commentary must explain evidence, not just name it.",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate = {
+        "pair_key": "s009::s015",
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 2, "lower_rank": 3},
+        "bucket": "caution_ignored",
+        "triggers": ["caution_raised_but_winner_polish_like"],
+        "trigger_details": {},
+    }
+    captured = {}
+
+    def fake_judge(*args, **kwargs):
+        captured["selection_details"] = kwargs["selection_details"]
+        return {
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "B explains the evidence.",
+            "criterion_notes": [],
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "decision_checks": {
+                "deeper_interpretation": "B",
+                "better_text_evidence_explanation": "B",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "tie",
+                "cleaner_wins_on_substance": "",
+                "rougher_loses_because": "",
+                "interpretation_depth": "B",
+                "proof_sufficiency": "B",
+                "polish_trap": True,
+                "rougher_but_stronger_latent": True,
+                "alternate_theme_validity": "B",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+            },
+        }
+
+    monkeypatch.setattr(cer.vc, "judge_pair_with_orientation_audit", fake_judge)
+    rows_by_id = {row["student_id"]: row for row in cer.vc.prepare_rows(base_rows())}
+
+    read = cer.run_blind_read_a(
+        candidate,
+        rows_by_id,
+        surface_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis", "grade_level": 7},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=500,
+        anchor_dir=tmp_path,
+        committee_anchor=anchor,
+        source_calibration=source_pack,
+    )
+
+    assert read["winner"] == "s009"
+    joined = "\n".join(captured["selection_details"])
+    assert "cal_source:commentary" in joined
+    assert "do not quote, reproduce, or infer any full source essay text" in joined
+
+
+def test_trigger_polish_bias_suspected_selects_pair():
+    payload = fixture_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=surface_texts(),
+    )
+    candidate = next(item for item in candidates if item["pair_key"] == "s009::s015")
+    assert "polish_bias_suspected" in candidate["triggers"]
+    assert "rougher_but_stronger_latent" in candidate["triggers"]
+    assert candidate["selection_status"] == ""
+
+
+def test_build_candidates_attaches_offline_evidence_map_signal():
+    payload = fixture_payload()
+    texts = surface_texts()
+    evidence_maps = em.build_evidence_maps(texts, genre="literary_analysis")
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=texts,
+        evidence_maps_by_id=evidence_maps,
+    )
+    candidate = next(item for item in candidates if item["pair_key"] == "s009::s015")
+    signal = candidate["evidence_map_pair_signal"]
+    assert signal["pair_key"] == "s009::s015"
+    assert signal["active_winner"] == candidate["escalated_summary"]["winner"]
+    assert "winner_summary" in signal
+    detail_lines = cer.candidate_selection_detail_lines(candidate)
+    assert any("Evidence-map recommendation" in line for line in detail_lines)
+
+
+def test_trigger_rougher_but_stronger_latent_requires_aggregate_support():
+    payload = fixture_payload()
+    positive = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(min_trigger_score=1),
+        texts_by_id=surface_texts(),
+    )
+    assert "rougher_but_stronger_latent" in next(item for item in positive if item["pair_key"] == "s009::s015")["triggers"]
+
+    rows = base_rows()
+    for row in rows:
+        if row["student_id"] == "s009":
+            row["composite_score"] = "0.50"
+            row["borda_percent"] = "0.50"
+    negative = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=rows,
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(min_trigger_score=1),
+        texts_by_id=surface_texts(),
+    )
+    assert "rougher_but_stronger_latent" not in next(item for item in negative if item["pair_key"] == "s009::s015")["triggers"]
+
+
+def test_trigger_escalated_vs_direct_matrix_conflict():
+    payload = fixture_payload()
+    matrix = {
+        "comparisons": [
+            {
+                "pair": ["s015", "s009"],
+                "left_over_right_weight": 0.0,
+                "right_over_left_weight": 2.0,
+            }
+        ]
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix=matrix,
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=surface_texts(),
+    )
+    assert "escalated_vs_direct_matrix_conflict" in next(item for item in candidates if item["pair_key"] == "s009::s015")["triggers"]
+
+
+def test_trigger_cohort_confidence_missing_is_silent():
+    assert cer.load_optional_json(Path("/definitely/not/here.json")) == {}
+    payload = fixture_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=surface_texts(),
+    )
+    assert all("cohort_confidence_unstable" not in item["triggers"] for item in candidates)
+
+
+def test_budget_caps_enforced_per_bucket():
+    candidates = [
+        {
+            "pair_key": f"s{i}::t{i}",
+            "committee_score": 100 - i,
+            "bucket": "top_pack",
+            "seed_order": {"higher_rank": i + 1, "lower_rank": i + 2},
+        }
+        for i in range(3)
+    ]
+    selected, skipped, budget = cer.select_within_budget(
+        candidates,
+        config=cer.CandidateConfig(max_candidates=3, max_top_pack=1),
+    )
+    assert len(selected) == 1
+    assert len(skipped) == 2
+    assert skipped[0]["skip_reason"] == "max_top_pack_committee_edges_exceeded"
+    assert budget["selected_bucket_counts"]["top_pack"] == 1
+
+
+def test_committee_score_is_deterministic_under_input_reordering():
+    payload = fixture_payload()
+    kwargs = dict(
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=surface_texts(),
+    )
+    first = cer.build_candidates(escalated_checks=payload["checks"], **kwargs)
+    second = cer.build_candidates(escalated_checks=list(reversed(payload["checks"])), **kwargs)
+    assert first == second
+
+
+def test_min_trigger_score_filters_weak_signals():
+    check = {
+        "pair": ["s013", "s003"],
+        "seed_order": {"higher": "s013", "lower": "s003", "higher_rank": 5, "lower_rank": 6},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "confidence": "high",
+        "decision_basis": "content_reasoning",
+        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=surface_texts(),
+    )
+    assert candidates == []
+
+
+def test_already_committee_edge_source_is_not_a_candidate():
+    check = fixture_payload()["checks"][0]
+    check = {**check, "model_metadata": {"adjudication_source": "committee_edge"}}
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=base_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(min_trigger_score=1),
+        texts_by_id=surface_texts(),
+    )
+    assert candidates == []
+
+
+# -----------------------------------------------------------------------------
+# Phase 2a: Ghost residual coverage
+# -----------------------------------------------------------------------------
+
+GHOST_RESIDUAL_PAIR_KEYS = (
+    "s003::s009",
+    "s003::s013",
+    "s004::s008",
+    "s009::s015",
+    "s019::s022",
+)
+
+
+def ghost_residual_payload():
+    return json.loads((FIXTURE_DIR / "ghost_residual_escalated.json").read_text(encoding="utf-8"))
+
+
+def ghost_residual_rows():
+    """Rows covering all eight residual students plus level/rank metadata.
+
+    Adjusted levels intentionally create level_cross on s019::s022 and
+    s004::s008 so the never_escalated_high_leverage trigger has a leverage
+    signal to latch onto. s003::s009 stays intra-level because the
+    escalated caution + loser-interpretation signal already drives the
+    caution_raised trigger without needing a level cross.
+    """
+    return [
+        {"student_id": "s015", "seed_rank": "1", "consensus_rank": "1",
+         "adjusted_level": "3", "composite_score": "0.78", "borda_percent": "0.78"},
+        {"student_id": "s003", "seed_rank": "4", "consensus_rank": "4",
+         "adjusted_level": "3", "composite_score": "0.75", "borda_percent": "0.75"},
+        {"student_id": "s022", "seed_rank": "7", "consensus_rank": "7",
+         "adjusted_level": "3", "composite_score": "0.70", "borda_percent": "0.70"},
+        {"student_id": "s009", "seed_rank": "9", "consensus_rank": "9",
+         "adjusted_level": "3", "composite_score": "0.68", "borda_percent": "0.68"},
+        {"student_id": "s004", "seed_rank": "10", "consensus_rank": "10",
+         "adjusted_level": "3", "composite_score": "0.66", "borda_percent": "0.66"},
+        {"student_id": "s019", "seed_rank": "12", "consensus_rank": "12",
+         "adjusted_level": "2", "composite_score": "0.60", "borda_percent": "0.60"},
+        {"student_id": "s013", "seed_rank": "14", "consensus_rank": "14",
+         "adjusted_level": "3", "composite_score": "0.58", "borda_percent": "0.58"},
+        {"student_id": "s008", "seed_rank": "18", "consensus_rank": "18",
+         "adjusted_level": "2", "composite_score": "0.55", "borda_percent": "0.55"},
+    ]
+
+
+def ghost_residual_texts():
+    """Synthetic texts whose surface features mirror the Ghost residual pattern.
+
+    Design targets (verified against literary_surface_features.compute_surface_features):
+    - s015: polish-heavy (6 paragraphs, formulaic markers, 0 interpretive verbs).
+      surface_delta vs s009 is >= 1.0 → surface_substance_inversion can fire.
+    - s009: short, high interpretive density (~1.75, 7 verbs) — stronger interpretation.
+    - s003: plot-summary style, 0 verbs, low density.
+    - s013: moderate density; Tier 0 (polished_but_shallow) doesn't require density dominance.
+    - s022 / s019: s019 is interpretive-dense, s022 is surface-controlled — mirrors the
+      Ghost orientation_audit SWAP that flipped s022→s019 despite s022 being the gold winner.
+    - s004 / s008: s008 has 6+ more interpretive verbs than s004, so loser-dominant holds
+      via the verb-delta path even when density is close.
+    """
+    return {
+        "s015": "\n\n".join(
+            [
+                "First, Ghost has consequences. Ghost learns an important lesson. The opening paragraph establishes the claim and the organization is tidy.",
+                "Second, Coach gives consequences. The team helps Ghost. Ghost changes. This paragraph has clean transitions and a clear topic sentence.",
+                "Third, Ghost faces choices. He runs fast. He works hard. He pays consequences. The essay stays neat and easy to follow.",
+                "Another reason is consequences. Ghost gets in trouble. He keeps running. He faces the team.",
+                "Finally, Ghost accepts consequences. The paragraph uses clean phrasing.",
+                "In conclusion, Ghost learns about consequences. The final paragraph restates the claim with polished control and clean sentences.",
+            ]
+        ),
+        "s009": (
+            "Ghost keeps running because fear controls him after the gunshot. "
+            "Coach support reveals that trust is what lets him face consequences. "
+            "This demonstrates growth because accountability becomes a way to heal. "
+            "The gunshot suggests that trauma shapes every choice, which means the story proves healing is possible."
+        ),
+        "s003": (
+            "Easton summarizes the plot. Ghost joins the track team. He runs track and causes problems. "
+            "Coach gives him tough love. Ghost learns about consequences."
+        ),
+        "s013": (
+            "Kyle writes about identity. Ghost wants to be someone else. He chooses to run. "
+            "The team gives him a place to belong because he needs it."
+        ),
+        "s022": (
+            "Sienna is careful and controlled. Ghost runs track. He makes choices. Coach helps. "
+            "The story ends with growth because Ghost works hard."
+        ),
+        "s019": (
+            "Naomi explores many ideas because Ghost is complicated. Fear reveals that pain controls him. "
+            "The gunshot suggests trauma. Track symbolizes escape. Coach proves support matters. "
+            "His stealing illustrates shame, which means every choice represents survival. "
+            "The evidence demonstrates that healing requires trust."
+        ),
+        "s004": (
+            "Farris writes a short summary. Ghost runs track because he needs a place. He causes trouble. "
+            "Coach supports him. The book ends with growth."
+        ),
+        "s008": (
+            "Hudson attempts a leadership theme because Ghost struggles to lead himself. "
+            "His choices reveal fear but suggest growth. Track demonstrates that effort represents healing. "
+            "The story shows that leadership means taking responsibility even when it is hard."
+        ),
+    }
+
+
+def ghost_residual_neighborhood_evidence_map():
+    scores = {
+        "s009": 35.0,
+        "s015": 30.0,
+        "s003": 30.6,
+        "s013": 30.4,
+        "s022": 23.0,
+        "s019": 22.0,
+        "s008": 19.0,
+        "s004": 11.0,
+    }
+    return {
+        "students": {
+            student_id: {
+                "student_id": student_id,
+                "summary": {
+                    "evidence_map_score": score,
+                    "completion_floor_applied": False,
+                    "integrated_analysis_count": 0,
+                    "commentary_unit_count": 0,
+                    "distinct_literary_concept_count": 0,
+                    "focus_score": 0.0,
+                    "plot_summary_unit_count": 0,
+                },
+                "units": [],
+            }
+            for student_id, score in scores.items()
+        }
+    }
+
+
+def test_phase2a_triggers_all_five_ghost_residuals():
+    """All five Ghost residual pair keys must land in caution_ignored and clear the budget."""
+    payload = ghost_residual_payload()
+    config = cer.CandidateConfig()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=config,
+        texts_by_id=ghost_residual_texts(),
+    )
+    by_key = {candidate["pair_key"]: candidate for candidate in candidates}
+    for pk in GHOST_RESIDUAL_PAIR_KEYS:
+        assert pk in by_key, f"missing candidate for {pk}"
+        candidate = by_key[pk]
+        assert candidate["bucket"] == "caution_ignored", (
+            f"{pk}: expected caution_ignored bucket, got {candidate['bucket']}"
+        )
+        assert candidate["committee_score"] >= config.caution_ignored_min_trigger_score, (
+            f"{pk}: score {candidate['committee_score']} below caution_ignored threshold"
+        )
+        triggers = set(candidate["triggers"])
+        assert triggers & cer.CAUTION_IGNORED_TRIGGERS, (
+            f"{pk}: no caution-ignored trigger fired (triggers={sorted(triggers)})"
+        )
+    selected, skipped, _budget = cer.select_within_budget(candidates, config=config)
+    selected_keys = {candidate["pair_key"] for candidate in selected}
+    for pk in GHOST_RESIDUAL_PAIR_KEYS:
+        assert pk in selected_keys, (
+            f"{pk} was not selected within Phase 2a budget "
+            f"(skipped={[c['pair_key'] for c in skipped]})"
+        )
+
+
+def test_phase2a_never_escalated_pair_enters_candidate_pool():
+    """A never-escalated orientation_audit / cheap_pairwise pair must fire the
+    never_escalated_high_leverage trigger and land in the caution_ignored bucket
+    — these are pairs the escalation routing never saw but the product still
+    cares about because the cheap judge explicitly flagged rougher-stronger risk.
+    """
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    # orientation_audit SWAP branch: s019::s022
+    s019 = next(c for c in candidates if c["pair_key"] == "s019::s022")
+    assert "never_escalated_high_leverage" in s019["triggers"]
+    assert s019["trigger_details"]["winner_source"] == "orientation_audit"
+    assert s019["trigger_details"]["non_escalated_source"] is True
+    assert s019["bucket"] == "caution_ignored"
+    # cheap_pairwise KEEP branch: s004::s008
+    s004 = next(c for c in candidates if c["pair_key"] == "s004::s008")
+    assert "never_escalated_high_leverage" in s004["triggers"]
+    assert s004["trigger_details"]["winner_source"] == "cheap_pairwise"
+    assert s004["bucket"] == "caution_ignored"
+
+
+def test_phase2a_caution_raised_but_polish_like_fires_when_cheap_judge_left_it():
+    """cheap_pairwise KEEP that explicitly raised polished_but_shallow should
+    fire caution_raised_but_winner_polish_like (Tier 0 priority in the bucket)
+    even without density dominance on the loser side — polished_but_shallow is
+    such a rare, high-signal caution that any KEEP that raised it is suspect.
+    """
+    check = {
+        "pair": ["s003", "s013"],
+        "seed_order": {"higher": "s003", "lower": "s013", "higher_rank": 4, "lower_rank": 14},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "winner": "s003",
+        "loser": "s013",
+        "confidence": "high",
+        "decision_basis": "content_reasoning",
+        "cautions_applied": ["polished_but_shallow"],
+        "model_metadata": {"adjudication_source": "cheap_pairwise"},
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s003::s013")
+    assert "caution_raised_but_winner_polish_like" in candidate["triggers"]
+    assert candidate["bucket"] == "caution_ignored"
+    # Tier 0 is reserved for polished_but_shallow + KEEP (rare, highest-signal pattern)
+    assert candidate["caution_ignored_priority_tier"] == 0
+    assert candidate["trigger_details"]["polished_but_shallow_raised"] is True
+    assert candidate["trigger_details"]["keep_decision"] is True
+
+
+def test_phase2a_rougher_stronger_latent_deduped_when_caution_trigger_fires():
+    """When the explicit caution trigger fires, the latent (aggregate-based)
+    trigger encodes the same signal and is removed to prevent score stacking
+    from elevating borderline pairs above the residual patterns.
+    """
+    check = {
+        "pair": ["s015", "s009"],
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 1, "lower_rank": 9},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "winner": "s015",
+        "loser": "s009",
+        "confidence": "medium",
+        "decision_basis": "evidence_development",
+        "cautions_applied": ["incomplete_or_scaffold"],
+        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+    }
+    # Flip composite/borda so the loser outscores the winner on aggregate
+    # — this is the precondition for rougher_but_stronger_latent to fire.
+    rows = ghost_residual_rows()
+    for row in rows:
+        if row["student_id"] == "s009":
+            row["composite_score"] = "0.95"
+            row["borda_percent"] = "0.95"
+        elif row["student_id"] == "s015":
+            row["composite_score"] = "0.55"
+            row["borda_percent"] = "0.55"
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=rows,
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+    # The caution trigger must be present; the latent trigger must be suppressed.
+    assert "caution_raised_but_ignored_rougher_stronger" in candidate["triggers"]
+    assert "rougher_but_stronger_latent" not in candidate["triggers"]
+
+
+def test_phase2a_candidate_priority_handles_non_int_tier_values():
+    """candidate_priority must not crash on malformed priority-tier values.
+
+    Regression guard for the falsy-int bug: earlier code used
+    `tier = int(candidate.get(..., 3) or 3)` which (a) collapsed tier 0
+    (a falsy int) to tier 3, and (b) would crash on non-numeric values.
+    The current implementation returns tier=3 on both None and non-numeric.
+    """
+    # Tier 0 must remain tier 0 (not collapse to 3 via falsy-int short-circuit).
+    tier0 = {
+        "pair_key": "a::b",
+        "bucket": "caution_ignored",
+        "committee_score": 100,
+        "seed_order": {"higher_rank": 1, "lower_rank": 2},
+        "caution_ignored_priority_tier": 0,
+    }
+    # Non-numeric tier falls back to tier 3.
+    bad_tier = {
+        "pair_key": "c::d",
+        "bucket": "caution_ignored",
+        "committee_score": 100,
+        "seed_order": {"higher_rank": 3, "lower_rank": 4},
+        "caution_ignored_priority_tier": "not-a-number",
+    }
+    # Non-caution_ignored bucket forces tier=3 regardless of stored tier.
+    not_caution = {
+        "pair_key": "e::f",
+        "bucket": "top_pack",
+        "committee_score": 100,
+        "seed_order": {"higher_rank": 5, "lower_rank": 6},
+        "caution_ignored_priority_tier": 0,
+    }
+    assert cer.candidate_priority(tier0)[0] == 0
+    assert cer.candidate_priority(bad_tier)[0] == 3
+    assert cer.candidate_priority(not_caution)[0] == 3
+
+
+def test_phase2a_surface_substance_inversion_fires_without_any_caution():
+    """surface_substance_inversion is the broadest Phase 2a heuristic — it must
+    fire on pairs with NO caution raised at all when the gap geometry shows
+    polish-over-substance. The trigger must land the pair in the caution_ignored
+    bucket (so it is always bucket-capped) and emit a heavily-logged detail entry.
+    """
+    check = {
+        "pair": ["s015", "s009"],
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 1, "lower_rank": 9},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "winner": "s015",
+        "loser": "s009",
+        "confidence": "medium",
+        # content_reasoning basis avoids polish_bias_suspected (which is
+        # basis-filtered to organization/language_control) — the test isolates
+        # surface_substance_inversion as the only caution-ignored-family trigger.
+        "decision_basis": "content_reasoning",
+        "cautions_applied": [],
+        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+    triggers = set(candidate["triggers"])
+    assert "surface_substance_inversion" in triggers
+    # No caution was raised — this must be the only Phase 2a caution-family trigger.
+    assert "caution_raised_but_winner_polish_like" not in triggers
+    assert "caution_raised_but_ignored_rougher_stronger" not in triggers
+    # Bucket must be caution_ignored so the surface_substance_inversion fires are
+    # always bucket-capped and never flood the overall candidate pool.
+    assert candidate["bucket"] == "caution_ignored"
+    # Heavy logging: the surface_substance_inversion_log records the deltas,
+    # cautions, and source every time the trigger fires — even with no caution.
+    log = candidate["trigger_details"].get("surface_substance_inversion_log")
+    assert log is not None, "surface_substance_inversion_log must be attached"
+    assert log["any_caution_raised"] is False
+    assert log["surface_delta"] >= cer.CandidateConfig.polish_bias_surface_sd
+    assert log["substance_delta"] <= 0.0
+    assert log["cautions_raised"] == []
+    assert log["winner_source"] == "escalated_adjudication"
+
+
+# -----------------------------------------------------------------------------
+# Phase 2b: single blind committee Read A
+# -----------------------------------------------------------------------------
+
+
+def test_phase2b_live_flag_off_preserves_phase1_passthrough(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    payload = ghost_residual_payload()
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["decisions"] == []
+
+
+def test_phase2b_blind_read_a_override_rule_applied():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+
+    def read(winner, confidence="medium", **checks):
+        return cer.normalize_committee_read(
+            candidate,
+            {
+                "winner": winner,
+                "confidence": confidence,
+                "decision_basis": "content_reasoning",
+                "decision_checks": {
+                    "deeper_interpretation": "B",
+                    "better_text_evidence_explanation": "B",
+                    "cleaner_or_more_formulaic": "A",
+                    "rougher_but_stronger_content": "B",
+                    "completion_advantage": "tie",
+                    "cleaner_wins_on_substance": "",
+                    "rougher_loses_because": "",
+                    "interpretation_depth": "B",
+                    "proof_sufficiency": "B",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "alternate_theme_validity": "B",
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                    **checks,
+                },
+            },
+        )
+
+    assert cer.read_a_override_decision(candidate, read("s009", polish_trap=True)) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", rougher_but_stronger_latent=True)) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="high", interpretation_depth="B")) == (
+        True,
+        "committee_read_a_override",
+    )
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="low", polish_trap=True))[1] == "committee_read_a_low_confidence"
+    assert cer.read_a_override_decision(candidate, read("s009", polish_trap=True, mechanics_block_meaning=True))[1] == "committee_read_a_blocked_by_mechanics_or_completion"
+    assert cer.read_a_override_decision(candidate, read("s009", confidence="high", interpretation_depth="tie"))[1] == "committee_read_a_inconclusive"
+
+
+def test_phase2b_read_a_concurrence_does_not_override():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = next(c for c in candidates if c["pair_key"] == "s009::s015")
+    read = cer.normalize_committee_read(
+        candidate,
+        {
+            "winner": "s015",
+            "confidence": "high",
+            "decision_basis": "evidence_development",
+            "decision_checks": {
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+            },
+        },
+    )
+    assert cer.read_a_override_decision(candidate, read) == (False, "committee_read_a_concurred")
+
+
+def test_phase2b_budget_cap_on_live_reads():
+    payload = ghost_residual_payload()
+    candidates = cer.build_candidates(
+        escalated_checks=payload["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    selected, _skipped, _budget = cer.select_within_budget(candidates, config=cer.CandidateConfig())
+    fixture = cer.load_blind_read_fixture(FIXTURE_DIR / "ghost_residual_blind_reads.json")
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+    )
+    assert summary["read_count"] == 2
+    assert len(decisions) == 2
+    assert any(item["status"] == "max_reads_exceeded" for item in read_results)
+
+
+def test_phase2b_merged_precedence_when_override(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--max-reads",
+            "5",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [item for item in merged["checks"] if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"]
+    assert len(committee_items) == 5
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["override_count"] == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+
+
+def test_phase2b_live_mode_uses_selected_candidates_and_monkeypatched_reader(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    routing = tmp_path / "config" / "llm_routing.json"
+    routing.parent.mkdir()
+    routing.write_text(json.dumps({"tasks": {"literary_committee": {"model": "strong", "reasoning": "high", "max_output_tokens": 500}}}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    calls = []
+
+    def fake_read(candidate, rows_by_id, texts, rubric, outline, metadata, **kwargs):
+        calls.append(candidate["pair_key"])
+        return cer.normalize_committee_read(
+            candidate,
+            {
+                "winner": (candidate["escalated_summary"]["loser"]),
+                "confidence": "high",
+                "decision_basis": "content_reasoning",
+                "decision_checks": {
+                    "interpretation_depth": "B",
+                    "proof_sufficiency": "B",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "alternate_theme_validity": "B",
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+            },
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--live",
+            "--no-live-read-b",
+            "--max-reads",
+            "3",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--rubric",
+            str(inputs / "rubric.md"),
+            "--outline",
+            str(inputs / "assignment_outline.md"),
+            "--routing",
+            str(routing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    live_trace = json.loads((outputs / "committee_edge_live_trace.json").read_text(encoding="utf-8"))
+    assert len(calls) == 3
+    assert decisions["read_a"]["live"] is True
+    assert decisions["read_a"]["read_count"] == 3
+    assert decisions["read_a"]["skipped_max_reads"] > 0
+    assert live_trace["phase"] == "3e"
+    assert live_trace["enabled"] is True
+    assert live_trace["read_a"]["read_count"] == 3
+    assert "ledger_guard" in live_trace
+
+
+def test_decisions_fixture_supersedes_escalated_in_merged_file(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(fixture_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, base_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in surface_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--decisions",
+            str(FIXTURE_DIR / "committee_decisions_one_override.json"),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    assert merged["committee_edge"]["passthrough"] is False
+    assert merged["committee_edge"]["decision_count"] == 1
+    assert merged["checks"][0]["model_metadata"]["superseded_by_committee_edge"] is True
+    assert merged["checks"][-1]["model_metadata"]["adjudication_source"] == "committee_edge"
+    assert merged["checks"][-1]["winner"] == "s009"
+
+
+def test_merged_file_has_expected_top_level_keys():
+    payload = fixture_payload()
+    merged = cer.merged_checks_payload(
+        escalated_payload=payload,
+        escalated_checks=payload["checks"],
+        decisions=[],
+        candidates=[],
+        budget={"selected": 0, "skipped": 0},
+    )
+    assert {"generated_at", "checks", "pairwise_escalation", "committee_edge"} <= set(merged)
+    assert merged["committee_edge"]["phase"] == 1
+
+
+def test_main_returns_1_when_escalated_file_missing(tmp_path, monkeypatch):
+    report = tmp_path / "report.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(tmp_path / "missing.json"),
+            "--report-output",
+            str(report),
+        ],
+    )
+    assert cer.main() == 1
+    assert "not found" in json.loads(report.read_text(encoding="utf-8"))["error"]
+
+
+# -----------------------------------------------------------------------------
+# Phase 3a: multi-read (Read A + Read B polish-trap auditor) + residual-first
+# read priority
+# -----------------------------------------------------------------------------
+
+
+def _build_ghost_candidates():
+    """Build the full Phase 2a candidate list for the Ghost residual cohort."""
+    return cer.build_candidates(
+        escalated_checks=ghost_residual_payload()["checks"],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+
+
+def _get_candidate(candidates, pair_key):
+    return next(c for c in candidates if c["pair_key"] == pair_key)
+
+
+def _with_evidence_map_signal(candidate, *, winner, confidence="high", margin=3.0, completion_floor=False):
+    candidate = copy.deepcopy(candidate)
+    seed_order = candidate["seed_order"]
+    higher = seed_order["higher"]
+    lower = seed_order["lower"]
+    loser = lower if winner == higher else higher
+    signal = {
+        "pair": [higher, lower],
+        "pair_key": candidate["pair_key"],
+        "recommended_winner": winner,
+        "confidence": confidence,
+        "margin": margin,
+        "scores": {winner: 10.0 + margin, loser: 10.0},
+        "summaries": {
+            winner: {
+                "completion_floor_applied": completion_floor,
+                "evidence_map_score": 10.0 + margin,
+                "commentary_unit_count": 4,
+                "integrated_analysis_count": 3,
+                "band_signal": "solid_analysis",
+            },
+            loser: {
+                "completion_floor_applied": False,
+                "evidence_map_score": 10.0,
+                "commentary_unit_count": 1,
+                "integrated_analysis_count": 0,
+                "band_signal": "thin_or_summary_heavy",
+            },
+        },
+        "reasons": [f"{winner} stronger offline claim/evidence/commentary"],
+        "active_winner": candidate["escalated_summary"]["winner"],
+        "active_loser": candidate["escalated_summary"]["loser"],
+        "contradicts_active_winner": winner != candidate["escalated_summary"]["winner"],
+        "winner_summary": {},
+        "loser_summary": {},
+    }
+    candidate["evidence_map_pair_signal"] = signal
+    candidate.setdefault("trigger_details", {})["evidence_map_pair_signal"] = signal
+    return candidate
+
+
+def _read_a_from_fixture(candidate, fixture_name="ghost_residual_blind_reads.json"):
+    fixture = cer.load_blind_read_fixture(FIXTURE_DIR / fixture_name)
+    return cer.read_from_fixture(candidate, fixture)
+
+
+def _make_read(candidate, *, winner, confidence="high", cautions=None, **checks):
+    defaults = {
+        "deeper_interpretation": "B",
+        "better_text_evidence_explanation": "B",
+        "cleaner_or_more_formulaic": "A",
+        "rougher_but_stronger_content": "B",
+        "completion_advantage": "tie",
+        "cleaner_wins_on_substance": "",
+        "rougher_loses_because": "",
+        "interpretation_depth": "B",
+        "proof_sufficiency": "B",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "alternate_theme_validity": "B",
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+    defaults.update(checks)
+    return cer.normalize_committee_read(
+        candidate,
+        {
+            "winner": winner,
+            "confidence": confidence,
+            "decision_basis": "content_reasoning",
+            "cautions_applied": list(cautions or []),
+            "decision_checks": defaults,
+        },
+    )
+
+
+def _ledger(*, a_depth="weak", a_proof="weak", b_depth="weak", b_proof="weak", a_blocked=False, b_blocked=False):
+    return {
+        "A": {
+            "central_claim": "Essay A claim",
+            "specific_text_moments": ["moment A1"],
+            "explained_moment_count": 1,
+            "interpretation_depth": a_depth,
+            "proof_sufficiency": a_proof,
+            "plot_summary_only": a_depth in {"none", "weak"},
+            "formulaic_control_only": a_depth in {"none", "weak"},
+            "mechanics_block_meaning": a_blocked,
+            "completion_floor_applied": False,
+            "strongest_substance_reason": "A reason",
+        },
+        "B": {
+            "central_claim": "Essay B claim",
+            "specific_text_moments": ["moment B1", "moment B2", "moment B3"],
+            "explained_moment_count": 3,
+            "interpretation_depth": b_depth,
+            "proof_sufficiency": b_proof,
+            "plot_summary_only": False,
+            "formulaic_control_only": False,
+            "mechanics_block_meaning": b_blocked,
+            "completion_floor_applied": False,
+            "strongest_substance_reason": "B reason",
+        },
+    }
+
+
+def _source_checks(
+    *,
+    winner="B",
+    evidence="B",
+    commentary="B",
+    surface="A",
+    surface_decisive=False,
+    mature_theme_without_proof="none",
+    completion_scaffold=False,
+):
+    return {
+        "source_calibrated_winner": winner,
+        "evidence_explained_not_named": evidence,
+        "commentary_depth": commentary,
+        "surface_control_advantage": surface,
+        "surface_control_is_decisive": surface_decisive,
+        "mature_theme_without_proof": mature_theme_without_proof,
+        "completion_floor_has_observable_scaffold": completion_scaffold,
+        "active_rubric_remains_authority": True,
+        "source_calibration_rationale": "Source rules prefer explained commentary over surface control.",
+    }
+
+
+def test_phase3a_read_priority_polished_but_shallow_keep_is_tier_0():
+    candidates = _build_ghost_candidates()
+    # s003::s013: cheap_pairwise + polished_but_shallow caution + KEEP → Tier 0
+    tier_polish = cer.committee_read_priority(_get_candidate(candidates, "s003::s013"))[0]
+    assert tier_polish == 0
+
+
+def test_phase3a_read_priority_escalated_level_seam_is_tier_1():
+    candidates = _build_ghost_candidates()
+    # s009::s015: escalated + formulaic_but_thin caution + KEEP across a level seam.
+    tier_formulaic = cer.committee_read_priority(_get_candidate(candidates, "s009::s015"))[0]
+    assert tier_formulaic == 1
+    # s003::s009: escalated + incomplete_or_scaffold + loser interpretation dominant.
+    tier_incomplete = cer.committee_read_priority(_get_candidate(candidates, "s003::s009"))[0]
+    assert tier_incomplete == 1
+
+
+def test_phase3a_read_priority_orientation_swap_large_mover_is_tier_2():
+    candidates = _build_ghost_candidates()
+    # s019::s022: orientation_audit + rougher_but_stronger_content + SWAP + top-10 crossing.
+    tier_swap = cer.committee_read_priority(_get_candidate(candidates, "s019::s022"))[0]
+    assert tier_swap == 2
+
+
+def test_phase3a_read_priority_cheap_rougher_crossing_is_tier_3():
+    candidates = _build_ghost_candidates()
+    # s004::s008: cheap_pairwise + rougher_but_stronger_content + KEEP + top-10 crossing.
+    tier_keep = cer.committee_read_priority(_get_candidate(candidates, "s004::s008"))[0]
+    assert tier_keep == 3
+
+
+def test_phase3a_read_priority_surface_inversion_without_polish_caution_is_tier_5():
+    """A candidate with surface_substance_inversion but no polish/rougher caution and
+    an escalated source should land in Tier 5 (after the residual-specific tiers).
+    """
+    check = {
+        "pair": ["s015", "s009"],
+        "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 1, "lower_rank": 9},
+        "winner_side": "A",
+        "decision": "KEEP",
+        "winner": "s015",
+        "loser": "s009",
+        "confidence": "medium",
+        "decision_basis": "content_reasoning",
+        "cautions_applied": [],
+        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+    }
+    candidates = cer.build_candidates(
+        escalated_checks=[check],
+        escalation_candidates={},
+        matrix={},
+        rows=ghost_residual_rows(),
+        band_seam_report={},
+        cohort_confidence={},
+        genre="literary_analysis",
+        config=cer.CandidateConfig(),
+        texts_by_id=ghost_residual_texts(),
+    )
+    candidate = _get_candidate(candidates, "s009::s015")
+    assert "surface_substance_inversion" in candidate["triggers"]
+    assert not (set(candidate["trigger_details"]["escalated_cautions"]) & cer.POLISH_LIKE_CAUTIONS)
+    assert cer.committee_read_priority(candidate)[0] == 5
+
+
+def test_phase3a_read_priority_non_caution_ignored_bucket_is_tier_9():
+    synthetic = {
+        "pair_key": "a::b",
+        "bucket": "top_pack",
+        "committee_score": 120,
+        "seed_order": {"higher_rank": 1, "lower_rank": 2},
+        "triggers": ["top10_or_boundary"],
+        "trigger_details": {"winner_source": "escalated_adjudication", "keep_decision": True},
+    }
+    assert cer.committee_read_priority(synthetic)[0] == 9
+
+
+def test_phase3a_max_reads_reads_all_five_residual_shapes_without_ghost_ids(tmp_path, monkeypatch):
+    """Acceptance: given a synthetic cohort where 5 residual-shaped pairs share the
+    priority space with 15 non-residual caution_ignored fillers, --max-reads 12
+    must read all five residual-shaped pairs. The priority function uses only
+    structural signals (cautions, source, decision, SSI trigger); no Ghost IDs.
+    """
+    residuals = _build_ghost_candidates()
+    # Synthetic filler candidates mimic the live Ghost failure: high-score
+    # orientation-audit KEEP edges with formulaic/rougher cautions. The old read
+    # sorter put these first because it sorted by trigger score; the fixed sorter
+    # puts residual-specific evidence patterns first.
+    fillers = []
+    for i in range(15):
+        pair_key = f"f{i:02d}a::f{i:02d}b"
+        fillers.append(
+            {
+                "pair": [f"f{i:02d}a", f"f{i:02d}b"],
+                "pair_key": pair_key,
+                "bucket": "caution_ignored",
+                "committee_score": 500 - i,
+                "caution_ignored_priority_tier": 2,
+                "triggers": [
+                    "caution_raised_but_ignored_rougher_stronger",
+                    "caution_raised_but_winner_polish_like",
+                    "never_escalated_high_leverage",
+                    "surface_substance_inversion",
+                ],
+                "seed_order": {
+                    "higher": f"f{i:02d}a",
+                    "lower": f"f{i:02d}b",
+                    "higher_rank": 100 + i,
+                    "lower_rank": 120 + i,
+                },
+                "trigger_details": {
+                    "winner_source": "orientation_audit",
+                    "escalated_cautions": ["formulaic_but_thin", "rougher_but_stronger_content"],
+                    "keep_decision": True,
+                    "swap_decision": False,
+                    "top10_cross": False,
+                    "level_cross": False,
+                    "loser_interpretation_dominant": True,
+                    "polished_but_shallow_raised": False,
+                    "aggregate_support_margin": -0.05,
+                    "surface_substance_inversion_log": {"surface_delta": 2.0, "substance_delta": -0.5},
+                },
+                "escalated_summary": {
+                    "winner": f"f{i:02d}a",
+                    "loser": f"f{i:02d}b",
+                    "winner_side": "A",
+                    "decision": "KEEP",
+                    "confidence": "high",
+                    "decision_basis": "content_reasoning",
+                    "adjudication_source": "escalated_adjudication",
+                },
+                "selection_status": "selected",
+                "selection_reasons": [],
+                "surface_features": {"winner": {}, "loser": {}, "gap": {}},
+                "skip_reason": "",
+            }
+        )
+    selected = residuals + fillers
+    ordered = sorted(selected, key=cer.committee_read_priority)
+    top_12_pair_keys = {c["pair_key"] for c in ordered[:12]}
+    for pk in GHOST_RESIDUAL_PAIR_KEYS:
+        assert pk in top_12_pair_keys, f"residual {pk} not in top 12 reads"
+
+
+def test_phase3a_should_invoke_read_b_on_a_concur_with_caution_ignored():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    # A concurs with the prior winner (s015) → B must audit because bucket = caution_ignored
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_a_concurred_on_caution_ignored"
+
+
+def test_phase3a_should_invoke_read_b_on_interp_vs_proof_split():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s019::s022")
+    # s019::s022: seed.higher=s022 (A side), seed.lower=s019 (B side). Prior winner=s019.
+    # A picks the LOSER per prior (s022) → no concur, so check (1) does not fire.
+    # A's own checks show interp favors loser (B=s019) and proof favors winner (A=s022) —
+    # the classic polish-trap signature: the pick "wins on proof" but lacks interpretive depth.
+    # Escalated cautions include rougher_but_stronger_content (NOT polish-like),
+    # so check (3) won't pre-empt check (2).
+    read_a = _make_read(
+        candidate,
+        winner="s022",
+        confidence="medium",
+        interpretation_depth="B",  # loser side for A.winner=s022
+        proof_sufficiency="A",  # winner side for A.winner=s022
+    )
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_interp_vs_proof_split"
+
+
+def test_phase3a_should_invoke_read_b_on_polish_like_caution_present_in_escalated():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s003::s013")  # escalated_cautions includes polished_but_shallow
+    read_a = _make_read(candidate, winner="s013", confidence="high")
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_polish_like_caution_raised"
+
+
+def test_phase3a_should_invoke_read_b_on_rougher_latent_without_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s003::s009")
+    # A flagged rougher_but_stronger_latent but was LOW conf → Phase 2b gate does not fire
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="low",  # blocks Phase 2b override even with trap signal
+        rougher_but_stronger_latent=True,
+    )
+    # Preconditions for the test.
+    assert cer.read_a_override_decision(candidate, read_a)[0] is False
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is True
+    assert reason == "committee_read_b_rougher_latent_without_override"
+
+
+def test_phase3a_should_not_invoke_read_b_when_a_high_conf_clean_interp_to_winner():
+    """When A is high conf, interpretation favors winner, and no polish caution is
+    present anywhere, Read B should not audit (A already settled the pair clean).
+    """
+    candidates = _build_ghost_candidates()
+    # s019::s022 has escalated_cautions=[rougher_but_stronger_content] (not polish-like).
+    candidate = _get_candidate(candidates, "s019::s022")
+    read_a = _make_read(
+        candidate,
+        winner="s022",  # not the prior winner (s019) → a_picked_loser=True
+        confidence="high",
+        interpretation_depth="A",  # winner_side=A → interp favors winner
+        proof_sufficiency="A",
+        # No polish_trap / rougher_but_stronger_latent / polish_like caution anywhere on A.
+    )
+    # Precondition: A overrides under Phase 2b.
+    assert cer.read_a_override_decision(candidate, read_a)[0] is True
+    should_run, reason = cer.should_invoke_read_b(candidate, read_a)
+    assert should_run is False
+    assert reason == "committee_read_b_not_needed"
+
+
+# -----------------------------------------------------------------------------
+# Phase 3e: evidence-ledger guard for self-contradictory committee reads
+# -----------------------------------------------------------------------------
+
+
+def test_phase3e_evidence_ledger_guard_flips_prior_concurrence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    # Read A preserves the prior winner (s015), but its own ledger says Essay B
+    # has stronger interpretation/proof and no blocker. The deterministic guard
+    # must flip to s009 instead of letting a polish-biased concurrence stand.
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="medium",
+        interpretation_depth="A",
+        proof_sufficiency="A",
+        evidence_ledger=_ledger(a_depth="weak", a_proof="adequate", b_depth="strong", b_proof="strong"),
+    )
+    guard_read, reason = cer.evidence_ledger_guard_decision(candidate, read_a, read_label="A")
+    assert reason == "committee_read_a_evidence_ledger_override"
+    assert guard_read is not None
+    assert guard_read["winner"] == "s009"
+    assert guard_read["winner_side"] == "B"
+    assert guard_read["decision"] == "SWAP"
+    assert guard_read["decision_checks"]["polish_trap"] is True
+    assert guard_read["decision_checks"]["rougher_but_stronger_latent"] is True
+    assert guard_read["evidence_ledger_guard"]["guard_winner"] == "s009"
+
+
+def test_phase3e_evidence_ledger_guard_does_not_flip_when_alternate_blocked():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(
+            a_depth="weak",
+            a_proof="adequate",
+            b_depth="strong",
+            b_proof="strong",
+            b_blocked=True,
+        ),
+    )
+    guard_read, reason = cer.evidence_ledger_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_ledger_guard_ledger_supports_winner"
+
+
+def test_source_calibration_guard_flips_prior_concurrence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="medium",
+        interpretation_depth="A",
+        proof_sufficiency="A",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            surface="A",
+            surface_decisive=False,
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert reason == "committee_read_a_source_calibration_override"
+    assert guard_read is not None
+    assert guard_read["winner"] == "s009"
+    assert guard_read["winner_side"] == "B"
+    checks = guard_read["decision_checks"]["source_calibration_checks"]
+    assert checks["source_calibrated_winner"] == "B"
+    assert checks["completion_floor_has_observable_scaffold"] is False
+    assert guard_read["source_calibration_guard"]["guard_winner"] == "s009"
+
+
+def test_source_calibration_guard_does_not_flip_unproven_mature_theme():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            mature_theme_without_proof="B",
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "source_calibration_guard_checklist_supports_winner"
+
+
+def test_source_calibration_guard_does_not_flip_observable_completion_scaffold():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s015",
+        confidence="high",
+        evidence_ledger=_ledger(a_depth="adequate", a_proof="adequate", b_depth="adequate", b_proof="adequate"),
+        source_calibration_checks=_source_checks(
+            winner="B",
+            evidence="B",
+            commentary="B",
+            completion_scaffold=True,
+        ),
+    )
+    guard_read, reason = cer.source_calibration_guard_decision(candidate, read_a, read_label="A")
+    assert guard_read is None
+    assert reason == "source_calibration_guard_checklist_supports_winner"
+
+
+def test_evidence_map_guard_flips_four_strong_residual_prior_concurrences():
+    candidates = _build_ghost_candidates()
+    expected = {
+        "s009::s015": "s009",
+        "s003::s009": "s009",
+        "s019::s022": "s022",
+        "s004::s008": "s008",
+    }
+    for pair_key, expected_winner in expected.items():
+        candidate = _with_evidence_map_signal(
+            _get_candidate(candidates, pair_key),
+            winner=expected_winner,
+            confidence="high",
+            margin=3.0,
+        )
+        read = _make_read(
+            candidate,
+            winner=candidate["escalated_summary"]["winner"],
+            confidence="medium",
+        )
+        guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+        assert reason == "committee_read_a_evidence_map_override"
+        assert guard_read is not None
+        assert guard_read["winner"] == expected_winner
+        assert guard_read["model_metadata"]["adjudication_source"] == "committee_evidence_map_guard"
+        assert guard_read["evidence_map_guard"]["guard_winner"] == expected_winner
+
+
+def test_evidence_map_guard_does_not_flip_low_confidence_tie():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s003::s013"),
+        winner="tie",
+        confidence="low",
+        margin=0.2,
+    )
+    read = _make_read(
+        candidate,
+        winner=candidate["escalated_summary"]["winner"],
+        confidence="high",
+    )
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_tie"
+
+
+def test_evidence_map_guard_blocks_override_against_strong_map():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    prior_winner = candidate["escalated_summary"]["winner"]
+    prior_loser = candidate["escalated_summary"]["loser"]
+    candidate = _with_evidence_map_signal(
+        candidate,
+        winner=prior_winner,
+        confidence="high",
+        margin=2.5,
+    )
+    read = _make_read(candidate, winner=prior_loser, confidence="high", polish_trap=True)
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_blocks_override"
+
+
+def test_evidence_map_guard_does_not_flip_completion_floor_recommended_winner():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s009::s015"),
+        winner="s009",
+        confidence="high",
+        margin=5.0,
+        completion_floor=True,
+    )
+    read = _make_read(
+        candidate,
+        winner=candidate["escalated_summary"]["winner"],
+        confidence="high",
+    )
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read, read_label="A")
+    assert guard_read is None
+    assert reason == "evidence_map_guard_recommended_winner_blocked"
+
+
+def test_run_read_path_emits_evidence_map_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    candidate = _with_evidence_map_signal(
+        _get_candidate(candidates, "s009::s015"),
+        winner="s009",
+        confidence="high",
+        margin=4.0,
+    )
+    selected = [candidate]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is cleaner.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(a_depth="strong", a_proof="strong", b_depth="weak", b_proof="weak"),
+                "source_calibration_checks": _source_checks(winner="A", evidence="A", commentary="A"),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_evidence_map_override"
+    assert decisions[0]["committee_edge_trace"]["evidence_map_guard"]["guard_winner"] == "s009"
+    assert read_results[0]["status"] == "committee_read_a_evidence_map_override"
+    assert read_results[0]["evidence_map_guard_emitted"] is True
+
+
+def test_run_read_path_blocks_a_only_override_against_evidence_map():
+    candidates = _build_ghost_candidates()
+    base = _get_candidate(candidates, "s009::s015")
+    candidate = _with_evidence_map_signal(
+        base,
+        winner=base["escalated_summary"]["winner"],
+        confidence="high",
+        margin=4.0,
+    )
+    selected = [candidate]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": base["escalated_summary"]["loser"],
+            "confidence": "high",
+            "decision_basis": "content_reasoning",
+            "cautions_applied": ["rougher_but_stronger_content"],
+            "rationale": "Read A wants to override against the offline map.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "interpretation_depth": "B",
+                "proof_sufficiency": "B",
+                "polish_trap": True,
+                "rougher_but_stronger_latent": True,
+                "alternate_theme_validity": "B",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(a_depth="weak", a_proof="weak", b_depth="strong", b_proof="strong"),
+                "source_calibration_checks": _source_checks(winner="B", evidence="B", commentary="B"),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+    )
+    assert summary["read_count"] == 1
+    assert decisions == []
+    assert read_results[0]["status"] == "evidence_map_guard_blocks_override"
+    assert read_results[0]["evidence_map_guard_blocked_override"] is True
+
+
+def test_main_reports_evidence_map_guard_counts(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = copy.deepcopy(ghost_residual_payload())
+    payload["checks"] = [item for item in payload["checks"] if cer.pair_key_from_item(item) == "s009::s015"]
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(
+        json.dumps(
+            {
+                "students": em.build_evidence_maps(ghost_residual_texts(), genre="literary_analysis"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--max-reads",
+            "1",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    report = json.loads((outputs / "committee_edge_report.json").read_text(encoding="utf-8"))
+    trace = json.loads((outputs / "committee_edge_live_trace.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert report["evidence_map_guard"]["evaluated_count"] == 1
+    assert report["evidence_map_guard"]["override_count"] == 1
+    assert trace["evidence_map_guard"]["statuses"] == {"committee_read_a_evidence_map_override": 1}
+    assert decisions["decisions"][0]["winner"] == "s009"
+
+
+def test_main_writes_offline_evidence_neighborhood_report(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = ghost_residual_payload()
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(json.dumps(ghost_residual_neighborhood_evidence_map()), encoding="utf-8")
+    neighborhood = outputs / "evidence_neighborhood_report.json"
+    packets = outputs / "evidence_group_calibration_packets.json"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--evidence-neighborhood-output",
+            str(neighborhood),
+            "--evidence-group-packets-output",
+            str(packets),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    packet_report = json.loads(packets.read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert report["enabled"] is True
+    assert report["counts"]["neighborhoods"] == 3
+    actions = {
+        tuple(neighborhood["student_ids"]): neighborhood["recommended_next_action"]
+        for neighborhood in report["neighborhoods"]
+    }
+    assert actions[("s015", "s003", "s009", "s013")] == "needs_group_calibration"
+    assert actions[("s022", "s019")] == "pair_guard_only"
+    assert actions[("s004", "s008")] == "pair_guard_only"
+    top = next(
+        item for item in report["neighborhoods"]
+        if set(item["student_ids"]) == {"s015", "s003", "s009", "s013"}
+    )
+    assert top["evidence_order"][0] == "s009"
+    assert {edge["pair_key"] for edge in top["ambiguous_edges"]} == {"s003::s013"}
+    assert packet_report["enabled"] is True
+    assert packet_report["counts"]["selected_packets"] == 3
+    assert all(len(packet["student_ids"]) <= 5 for packet in packet_report["packets"])
+    read_types = {packet["recommended_read_type"] for packet in packet_report["packets"]}
+    assert read_types == {"local_order_calibration", "pair_guard_review"}
+
+
+def test_main_writes_disabled_evidence_neighborhood_report_when_map_missing(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = copy.deepcopy(ghost_residual_payload())
+    payload["checks"] = [item for item in payload["checks"] if cer.pair_key_from_item(item) == "s009::s015"]
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    neighborhood = outputs / "evidence_neighborhood_report.json"
+    packets = outputs / "evidence_group_calibration_packets.json"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(outputs / "missing_evidence_map.json"),
+            "--evidence-neighborhood-output",
+            str(neighborhood),
+            "--evidence-group-packets-output",
+            str(packets),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    report = json.loads(neighborhood.read_text(encoding="utf-8"))
+    packet_report = json.loads(packets.read_text(encoding="utf-8"))
+    assert report["enabled"] is False
+    assert report["reason"] == "evidence_map_missing"
+    assert report["counts"]["candidate_edges"] == 1
+    assert packet_report["enabled"] is False
+    assert packet_report["reason"] == "evidence_map_missing"
+    assert packet_report["packets"] == []
+
+
+def test_main_group_fixture_reads_evidence_packet_without_pair_reads(tmp_path, monkeypatch):
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    payload = ghost_residual_payload()
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8")
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+    evidence_map = outputs / "evidence_map.json"
+    evidence_map.write_text(json.dumps(ghost_residual_neighborhood_evidence_map()), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--evidence-map",
+            str(evidence_map),
+            "--group-calibration-fixture",
+            str(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+            "--max-group-calibrations",
+            "1",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["group_calibration"]["neighborhood_source"] == "evidence_group_packets"
+    assert decisions["group_calibration"]["read_count"] == 1
+    assert decisions["group_calibration_results"][0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert decisions["group_calibration_results"][0]["source"] == "fixture"
+
+
+def test_phase3e_run_read_path_emits_ledger_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015")]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is more complete, but Jack has the stronger interpretation.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "deeper_interpretation": "A",
+                "better_text_evidence_explanation": "A",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "A",
+                "cleaner_wins_on_substance": "Logan is complete.",
+                "rougher_loses_because": "Jack is rougher.",
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(
+                    a_depth="weak",
+                    a_proof="adequate",
+                    b_depth="strong",
+                    b_proof="strong",
+                ),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_evidence_ledger_override"
+    assert read_results[0]["status"] == "committee_read_a_evidence_ledger_override"
+    assert read_results[0]["evidence_ledger_guard_emitted"] is True
+
+
+def test_run_read_path_emits_source_calibration_guard_before_read_b():
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015")]
+    fixture = {
+        "s009::s015": {
+            "pair_key": "s009::s015",
+            "winner": "s015",
+            "confidence": "medium",
+            "decision_basis": "evidence_development",
+            "cautions_applied": ["formulaic_but_thin"],
+            "rationale": "Logan is more complete, but source calibration favors Jack's commentary.",
+            "criterion_notes": [],
+            "decision_checks": {
+                "deeper_interpretation": "A",
+                "better_text_evidence_explanation": "A",
+                "cleaner_or_more_formulaic": "A",
+                "rougher_but_stronger_content": "B",
+                "completion_advantage": "A",
+                "cleaner_wins_on_substance": "Logan is complete.",
+                "rougher_loses_because": "Jack is rougher.",
+                "interpretation_depth": "A",
+                "proof_sufficiency": "A",
+                "polish_trap": False,
+                "rougher_but_stronger_latent": False,
+                "alternate_theme_validity": "A",
+                "mechanics_block_meaning": False,
+                "completion_floor_applied": False,
+                "evidence_ledger": _ledger(
+                    a_depth="strong",
+                    a_proof="strong",
+                    b_depth="adequate",
+                    b_proof="adequate",
+                ),
+                "source_calibration_checks": _source_checks(
+                    winner="B",
+                    evidence="B",
+                    commentary="B",
+                    surface="A",
+                    surface_decisive=False,
+                ),
+            },
+        }
+    }
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=None,
+        max_read_c=None,
+        live=False,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key=fixture,
+        read_b_fixture={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "winner": "s015",
+                "confidence": "high",
+                "decision_basis": "evidence_development",
+                "decision_checks": {"evidence_ledger": _ledger()},
+            }
+        },
+    )
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 0
+    assert len(decisions) == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_override_reason"] == "committee_read_a_source_calibration_override"
+    assert read_results[0]["status"] == "committee_read_a_source_calibration_override"
+    assert read_results[0]["source_calibration_guard_emitted"] is True
+
+
+def test_phase3e_live_read_error_records_and_continues(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [_get_candidate(candidates, "s009::s015"), _get_candidate(candidates, "s003::s013")]
+    calls = []
+
+    def flaky_read(candidate, *args, **kwargs):
+        calls.append(candidate["pair_key"])
+        if len(calls) == 1:
+            raise RuntimeError("temporary model failure")
+        return _make_read(
+            candidate,
+            winner=candidate["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", flaky_read)
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=None,
+        max_read_c=None,
+        live=True,
+        live_read_b=False,
+        live_read_c=False,
+        fixture_by_key={},
+    )
+    assert calls == [candidate["pair_key"] for candidate in sorted(selected, key=cer.committee_read_priority)]
+    assert read_results[0]["status"] == "read_a_error"
+    assert "temporary model failure" in read_results[0]["error"]
+    assert summary["read_attempt_count"] == 2
+    assert summary["read_a_error_count"] == 1
+    assert summary["read_count"] == 1
+    assert len(decisions) == 1
+
+
+def test_phase3a_resolve_ab_agree_high_conf_emits_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert reason == "committee_read_ab_agree_override"
+    assert decision is read_b
+    assert decision["winner"] == "s009"
+
+
+def test_phase3a_resolve_ab_agree_medium_conf_requires_polish_trap_signal():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high")
+    # Medium without trap → weak agreement
+    read_b_weak = _make_read(candidate, winner="s009", confidence="medium")
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b_weak)
+    assert decision is None
+    assert reason == "committee_read_ab_weak_agreement"
+    # Medium WITH trap → override
+    read_b_trap = _make_read(candidate, winner="s009", confidence="medium", polish_trap=True)
+    decision2, reason2 = cer.resolve_a_b(candidate, read_a, read_b_trap)
+    assert reason2 == "committee_read_ab_agree_override"
+    assert decision2 is read_b_trap
+
+
+def test_phase3a_resolve_ab_agree_low_conf_no_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", confidence="high")
+    read_b = _make_read(candidate, winner="s009", confidence="low", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_weak_agreement"
+
+
+def test_phase3a_resolve_ab_both_concur_with_prior_no_edge():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")  # concurs with prior
+    read_b = _make_read(candidate, winner="s015")
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_concurred"
+
+
+def test_phase3a_resolve_ab_split_a_loser_b_prior_no_edge():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)  # A overrides
+    read_b = _make_read(candidate, winner="s015", confidence="high", polish_trap=True)  # B reverts
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_split_b_confirms_prior"
+
+
+def test_phase3a_resolve_ab_b_overturns_concur_with_trap_emits_b_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")  # A concurred with prior
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert reason == "committee_read_b_override"
+    assert decision is read_b
+
+
+def test_phase3a_resolve_ab_b_overturns_concur_without_trap_is_ambiguous():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015")
+    read_b = _make_read(candidate, winner="s009", confidence="high")  # no trap flagged
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_split_no_trap"
+
+
+def test_phase3a_resolve_ab_completion_floor_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)
+    read_b = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        completion_floor_applied=True,
+    )
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_b_blocked_by_mechanics_or_completion"
+
+
+def test_phase3a_resolve_ab_mechanics_block_meaning_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s009", polish_trap=True)
+    read_b = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_b_blocked_by_mechanics_or_completion"
+
+
+def test_phase3b_resolve_ab_a_block_on_agreed_winner_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    read_b = _make_read(candidate, winner="s009", confidence="high", polish_trap=True)
+    decision, reason = cer.resolve_a_b(candidate, read_a, read_b)
+    assert decision is None
+    assert reason == "committee_read_ab_blocked_by_a_mechanics_or_completion"
+
+
+def test_phase3c_should_invoke_read_c_on_ab_concurred_caution_ignored():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    should_run, reason = cer.should_invoke_read_c(
+        candidate,
+        read_a,
+        read_b,
+        "committee_read_ab_concurred",
+    )
+    assert should_run is True
+    assert reason == "committee_read_c_ab_concurred_on_caution_ignored"
+
+
+def test_phase3c_resolve_abc_high_conf_placement_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        rougher_but_stronger_latent=True,
+    )
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_concurred",
+    )
+    assert decision is read_c
+    assert reason == "committee_read_c_placement_override"
+
+
+def test_phase3c_resolve_abc_requires_high_confidence():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(candidate, winner="s015", confidence="high")
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(candidate, winner="s009", confidence="medium", polish_trap=True)
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_concurred",
+    )
+    assert decision is None
+    assert reason == "committee_read_c_not_high_confidence"
+
+
+def test_phase3c_prior_read_block_on_c_winner_blocks_override():
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+    read_a = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        mechanics_block_meaning=True,
+    )
+    read_b = _make_read(candidate, winner="s015", confidence="high")
+    read_c = _make_read(
+        candidate,
+        winner="s009",
+        confidence="high",
+        polish_trap=True,
+        rougher_but_stronger_latent=True,
+    )
+    decision, reason = cer.resolve_a_b_c(
+        candidate,
+        read_a,
+        read_b,
+        read_c,
+        "committee_read_ab_split_b_confirms_prior",
+    )
+    assert decision is None
+    assert reason == "committee_read_c_blocked_by_prior_read_mechanics_or_completion"
+
+
+def test_phase3c_live_read_c_runs_after_ab_concurrence(monkeypatch):
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_c(candidate_arg, _read_a, _read_b, ab_reason, *_args, **_kwargs):
+        assert ab_reason == "committee_read_ab_concurred"
+        return _make_read(
+            candidate_arg,
+            winner="s009",
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+    monkeypatch.setattr(cer, "run_placement_read_c", fake_read_c)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=1,
+        max_read_c=1,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert summary["read_count"] == 1
+    assert summary["read_b_count"] == 1
+    assert summary["read_c_count"] == 1
+    assert summary["override_count"] == 1
+    assert decisions[0]["winner"] == "s009"
+    assert decisions[0]["model_metadata"]["committee_read"] == "A+B+C"
+    assert read_results[0]["status"] == "committee_read_c_placement_override"
+    assert read_results[0]["read_c_invoked"] is True
+
+
+def test_phase3c_max_read_c_caps_live_placement_reads(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [
+        _get_candidate(candidates, "s003::s013"),
+        _get_candidate(candidates, "s009::s015"),
+    ]
+    calls = {"c": 0}
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_c(candidate_arg, _read_a, _read_b, _ab_reason, *_args, **_kwargs):
+        calls["c"] += 1
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+            rougher_but_stronger_latent=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+    monkeypatch.setattr(cer, "run_placement_read_c", fake_read_c)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=2,
+        max_read_c=1,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert calls["c"] == 1
+    assert summary["read_count"] == 2
+    assert summary["read_b_count"] == 2
+    assert summary["read_c_count"] == 1
+    assert summary["skipped_max_read_c"] == 1
+    assert len(decisions) == 1
+    assert any(item.get("read_c_status") == "max_read_c_exceeded" for item in read_results)
+
+
+def test_phase3b_live_read_b_runs_when_invoked(monkeypatch):
+    candidates = _build_ghost_candidates()
+    candidate = _get_candidate(candidates, "s009::s015")
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        assert candidate_arg["pair_key"] == "s009::s015"
+        return _make_read(candidate_arg, winner="s015", confidence="high")
+
+    def fake_read_b(candidate_arg, read_a, *_args, **_kwargs):
+        assert candidate_arg["pair_key"] == "s009::s015"
+        assert read_a["winner"] == "s015"
+        return _make_read(candidate_arg, winner="s009", confidence="high", polish_trap=True)
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=1,
+        max_read_b=1,
+        max_read_c=None,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert summary["read_count"] == 1
+    assert summary["read_b_live"] is True
+    assert summary["read_b_count"] == 1
+    assert summary["override_count"] == 1
+    assert decisions[0]["winner"] == "s009"
+    assert read_results[0]["status"] == "committee_read_b_override"
+    assert read_results[0]["read_b_invoked"] is True
+
+
+def test_phase3b_max_read_b_caps_live_audits(monkeypatch):
+    candidates = _build_ghost_candidates()
+    selected = [
+        _get_candidate(candidates, "s003::s013"),
+        _get_candidate(candidates, "s009::s015"),
+    ]
+    calls = {"b": 0}
+
+    def fake_read_a(candidate_arg, *_args, **_kwargs):
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["winner"],
+            confidence="high",
+        )
+
+    def fake_read_b(candidate_arg, _read_a, *_args, **_kwargs):
+        calls["b"] += 1
+        return _make_read(
+            candidate_arg,
+            winner=candidate_arg["escalated_summary"]["loser"],
+            confidence="high",
+            polish_trap=True,
+        )
+
+    monkeypatch.setattr(cer, "run_blind_read_a", fake_read_a)
+    monkeypatch.setattr(cer, "run_blind_read_b", fake_read_b)
+
+    decisions, read_results, summary = cer.run_read_a_path(
+        selected=selected,
+        rows=ghost_residual_rows(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="rubric",
+        outline="outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1,
+        anchor_dir=FIXTURE_DIR,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        max_reads=2,
+        max_read_b=1,
+        max_read_c=None,
+        live=True,
+        live_read_b=True,
+        live_read_c=True,
+        fixture_by_key={},
+    )
+
+    assert calls["b"] == 1
+    assert summary["read_count"] == 2
+    assert summary["read_b_count"] == 1
+    assert summary["skipped_max_read_b"] == 1
+    assert len(decisions) == 1
+    assert any(item.get("read_b_status") == "max_read_b_exceeded" for item in read_results)
+
+
+def test_phase3a_fixture_ab_all_five_residuals_flip(tmp_path, monkeypatch):
+    """End-to-end: with both A and B fixtures, all five Ghost residual-shaped
+    pairs flip to the loser. Some flip via A+B agreement (polish-like caution),
+    the rest flip via A-only Phase 2b override (B's invocation conditions not met).
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_read_b.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    # All five residual pairs have an override edge.
+    assert len(committee_items) == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    # Read A was called at least for all 5; Read B ran for at least the 2 pairs
+    # where polish-like cautions trigger invocation (s009::s015 formulaic_but_thin,
+    # s003::s013 polished_but_shallow). The other 3 go via A-only.
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["read_b_count"] >= 2
+    assert decisions["read_a"]["override_count"] == 5
+    # At least the A+B confirmed overrides are tagged phase=3a.
+    phase_3a_items = [
+        item for item in committee_items
+        if str(item.get("model_metadata", {}).get("phase", "")) == "3a"
+    ]
+    assert len(phase_3a_items) >= 2
+    for item in phase_3a_items:
+        assert item["model_metadata"]["committee_read"] == "A+B"
+        assert "read_a" in item["committee_edge_trace"]
+        assert "read_b" in item["committee_edge_trace"]
+
+
+def test_phase3c_fixture_c_flips_residuals_after_ab_concurrence(tmp_path, monkeypatch):
+    """End-to-end: when A/B both preserve the prior on residual-shaped pairs,
+    Read C placement calibration can still emit the five gold override edges.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-c-fixture",
+            str(FIXTURE_DIR / "ghost_residual_read_c.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    assert len(committee_items) == 5
+    assert set(merged["committee_edge"]["superseded_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert decisions["read_a"]["read_count"] == 5
+    assert decisions["read_a"]["read_b_count"] == 5
+    assert decisions["read_a"]["read_c_count"] == 5
+    assert decisions["read_c"]["read_count"] == 5
+    assert decisions["read_a"]["override_count"] == 5
+    for item in committee_items:
+        assert item["model_metadata"]["committee_read"] == "A+B+C"
+        assert item["model_metadata"]["phase"] == "3b"
+        assert "read_c" in item["committee_edge_trace"]
+
+
+def _prior_group_read_results():
+    return [
+        {
+            "pair_key": pair_key,
+            "bucket": "caution_ignored",
+            "status": "committee_read_c_confirms_prior",
+            "override_emitted": False,
+            "read_b_invoked": True,
+            "read_c_invoked": True,
+        }
+        for pair_key in GHOST_RESIDUAL_PAIR_KEYS
+    ]
+
+
+def packet_edge(pair, active_winner, recommended_winner, *, confidence="high", margin=3.0, ambiguous=False):
+    return {
+        "pair": list(pair),
+        "pair_key": "::".join(sorted(pair)),
+        "recommended_winner": recommended_winner,
+        "active_winner": active_winner,
+        "confidence": confidence,
+        "margin": margin,
+        "contradicts_active_winner": bool(recommended_winner not in {"", "tie", active_winner}),
+        "ambiguous": ambiguous,
+        "scores": {pair[0]: 10.0, pair[1]: 9.0},
+        "reasons": ["packet fixture"],
+    }
+
+
+def group_packet_payload_fixture():
+    return {
+        "enabled": True,
+        "packets": [
+            {
+                "packet_id": "evidence_group_packet_002",
+                "selection_status": "selected",
+                "priority_score": 120,
+                "recommended_read_type": "pair_guard_review",
+                "reason": "lower priority packet",
+                "source_neighborhood_id": "evidence_neighborhood_2",
+                "source_component_size": 2,
+                "student_ids": ["s022", "s019"],
+                "seed_order": ["s022", "s019"],
+                "evidence_order": ["s022", "s019"],
+                "triggering_edges": [packet_edge(("s022", "s019"), "s019", "s022", margin=2.0)],
+                "ambiguous_edges": [],
+            },
+            {
+                "packet_id": "evidence_group_packet_001",
+                "selection_status": "selected",
+                "priority_score": 300,
+                "recommended_read_type": "local_order_calibration",
+                "reason": "highest priority packet",
+                "source_neighborhood_id": "evidence_neighborhood_1",
+                "source_component_size": 4,
+                "student_ids": ["s015", "s003", "s009", "s013"],
+                "seed_order": ["s015", "s003", "s009", "s013"],
+                "evidence_order": ["s009", "s013", "s015", "s003"],
+                "triggering_edges": [
+                    packet_edge(("s015", "s009"), "s015", "s009", margin=4.0),
+                    packet_edge(("s003", "s009"), "s003", "s009", margin=3.0),
+                ],
+                "ambiguous_edges": [
+                    packet_edge(("s003", "s013"), "s003", "tie", confidence="low", margin=0.2, ambiguous=True),
+                ],
+            },
+        ],
+    }
+
+
+def group_packet_calibration_fixtures():
+    return [
+        {
+            "neighborhood_id": "evidence_group_packet_001",
+            "ordered_student_ids": ["s009", "s013", "s015", "s003"],
+            "confidence": "high",
+            "rationale": "Packet 1 ranks the local order by interpretation.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "Jack beats Logan on interpretation.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+                {
+                    "pair_key": "s003::s009",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "Jack beats Easton on interpretation.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                },
+            ],
+        },
+        {
+            "neighborhood_id": "evidence_group_packet_002",
+            "ordered_student_ids": ["s022", "s019"],
+            "confidence": "high",
+            "rationale": "Packet 2 confirms Sienna over Naomi.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s019::s022",
+                    "winner": "s022",
+                    "confidence": "high",
+                    "rationale": "Sienna is more grounded.",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        },
+    ]
+
+
+def test_phase3d_build_group_neighborhood_from_unresolved_results():
+    candidates = _build_ghost_candidates()
+    neighborhoods = cer.build_group_calibration_neighborhoods(
+        selected=candidates,
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        max_groups=1,
+        max_students=12,
+    )
+    assert len(neighborhoods) == 1
+    neighborhood = neighborhoods[0]
+    assert set(neighborhood["pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert set(neighborhood["student_ids"]) == {
+        "s003", "s004", "s008", "s009", "s013", "s015", "s019", "s022"
+    }
+    assert neighborhood["read_result_statuses"]["s009::s015"] == "committee_read_c_confirms_prior"
+
+
+def test_packet_sourced_group_neighborhoods_sort_by_priority_and_attach_context():
+    neighborhoods = cer.build_group_calibration_neighborhoods_from_packets(
+        packet_payload=group_packet_payload_fixture(),
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        max_groups=2,
+        max_students=5,
+    )
+
+    assert [neighborhood["neighborhood_id"] for neighborhood in neighborhoods] == [
+        "evidence_group_packet_001",
+        "evidence_group_packet_002",
+    ]
+    assert neighborhoods[0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert neighborhoods[0]["evidence_packet"]["evidence_order"] == ["s009", "s013", "s015", "s003"]
+    assert set(neighborhoods[0]["pair_keys"]) == {"s009::s015", "s003::s009", "s003::s013"}
+    assert neighborhoods[0]["trigger_details"][0]["read_status"] == "evidence_group_packet_selected"
+
+
+def test_packet_sourced_group_calibration_reads_priority_order_and_caps():
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        read_results=[],
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=group_packet_calibration_fixtures(),
+        max_groups=1,
+        max_students=5,
+        existing_decision_keys=set(),
+        evidence_group_packets=group_packet_payload_fixture(),
+    )
+
+    assert summary["neighborhood_source"] == "evidence_group_packets"
+    assert summary["packet_neighborhood_count"] == 1
+    assert summary["read_count"] == 1
+    assert results[0]["neighborhood_id"] == "evidence_group_packet_001"
+    assert results[0]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+    assert set(results[0]["override_pair_keys"]) >= {"s009::s015", "s003::s009"}
+    assert {decision["pair_key"]: decision["winner"] for decision in decisions}["s009::s015"] == "s009"
+    assert any(
+        decision["committee_edge_trace"]["evidence_packet"]["packet_id"] == "evidence_group_packet_001"
+        for decision in decisions
+    )
+
+
+def test_group_calibration_prompt_uses_score_free_roster_context():
+    rows = {row["student_id"]: row for row in ghost_residual_rows()[:2]}
+    prompt = cer.group_calibration_prompt(
+        neighborhood={
+            "neighborhood_id": "group_1",
+            "student_ids": ["s015", "s003"],
+            "pair_keys": ["s003::s015"],
+            "trigger_details": [],
+        },
+        rows_by_id=rows,
+        texts={"s015": "Essay fifteen.", "s003": "Essay three."},
+        rubric="Rubric",
+        outline="Outline",
+        metadata={"assignment_genre": "literary_analysis"},
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+
+    assert "Cohort roster:" in prompt
+    assert "s015" in prompt
+    assert "s003" in prompt
+    assert "seed_rank=" not in prompt
+    assert "composite=" not in prompt
+    assert "borda=" not in prompt
+    assert "support=" not in prompt
+    assert "edge ledger fields" in prompt
+    assert "caution_not_decisive_reason" in prompt
+
+
+def test_group_edge_response_schema_requires_ledger_fields():
+    edge_schema = cer.GROUP_CALIBRATION_RESPONSE_FORMAT["schema"]["properties"]["edge_decisions"]["items"]
+    required = set(edge_schema["required"])
+    assert {
+        "interpretive_claim_winner",
+        "proof_quality_winner",
+        "textual_specificity_winner",
+        "surface_control_winner",
+        "completion_coherence_winner",
+        "decisive_axis",
+        "routed_cautions",
+        "caution_honored",
+        "caution_not_decisive_reason",
+        "winner_text_moments",
+        "loser_text_moments",
+        "mechanics_blocked_student",
+        "mechanics_blocker_evidence",
+        "mechanics_blocker_reason",
+    } <= required
+
+
+def group_edge_ledger(
+    *,
+    winner,
+    loser,
+    decisive_axis="interpretive_claim",
+    caution_honored=True,
+    reason="",
+    routed_cautions=None,
+    interpretive_claim_winner=None,
+    proof_quality_winner=None,
+    textual_specificity_winner=None,
+    surface_control_winner=None,
+    completion_coherence_winner=None,
+    winner_moments=None,
+    loser_moments=None,
+    mechanics_blocked_student="none",
+    mechanics_blocker_evidence=None,
+    mechanics_blocker_reason="",
+):
+    return {
+        "interpretive_claim_winner": interpretive_claim_winner or winner,
+        "proof_quality_winner": proof_quality_winner or winner,
+        "textual_specificity_winner": textual_specificity_winner or winner,
+        "surface_control_winner": surface_control_winner or loser,
+        "completion_coherence_winner": completion_coherence_winner or "tie",
+        "decisive_axis": decisive_axis,
+        "routed_cautions": routed_cautions or ["formulaic_but_thin"],
+        "caution_honored": caution_honored,
+        "caution_not_decisive_reason": reason,
+        "winner_text_moments": winner_moments or ["winner moment one", "winner moment two"],
+        "loser_text_moments": loser_moments or ["loser moment one"],
+        "mechanics_blocked_student": mechanics_blocked_student,
+        "mechanics_blocker_evidence": mechanics_blocker_evidence or [],
+        "mechanics_blocker_reason": mechanics_blocker_reason,
+    }
+
+
+def test_group_edge_ledger_allows_valid_override():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "medium",
+            "rationale": "Overall order is medium confidence.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "The hard pair itself is high confidence.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                    **group_edge_ledger(winner="s009", loser="s015"),
+                }
+            ],
+        },
+    )
+    decision = cer.decision_from_group_edge_decision(
+        candidate,
+        calibration["edge_decisions"][0],
+        calibration,
+    )
+    assert decision is not None
+    assert decision["winner"] == "s009"
+    assert decision["committee_edge_trace"]["edge_decision"]["edge_ledger_status"]["accepted"] is True
+
+
+def test_group_edge_ledger_rejects_surface_control_decisive_caution_edge():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s009",
+        "confidence": "high",
+        "rationale": "Surface control should not decide this routed caution edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(winner="s009", loser="s015", decisive_axis="surface_control"),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "surface_control_decisive_without_blocker"
+
+
+def test_group_edge_ledger_rejects_prior_preservation_without_accounting():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "This mirrors the weak mini validation failure.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, cer.normalize_group_calibration(
+        {"student_ids": ["s015", "s009"], "pair_keys": ["s009::s015"]},
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "high",
+            "rationale": "",
+            "placement_notes": [],
+            "edge_decisions": [edge],
+        },
+    )["edge_decisions"][0])
+
+    assert status["accepted"] is False
+    assert status["reason"] == "missing_caution_not_decisive_reason"
+
+
+def test_group_edge_ledger_rejects_generic_caution_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner has more proof.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="More concrete evidence and clearer consequences.",
+            interpretive_claim_winner="tie",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "caution_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_reason_missing_caution_reference():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The prior winner has a better central claim.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            reason="Its claim is more developed and easier to apply across the essay.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "caution_reason_missing_caution_reference"
+
+
+def test_group_edge_ledger_rejects_formulaic_prior_preservation_on_proof_only():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "This mirrors the packet-context mini failure.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason="Although s015 is formulaic, that is not decisive because its proof names more events.",
+            interpretive_claim_winner="s009",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "formulaic_thin_not_substantively_defeated"
+
+
+def test_group_edge_ledger_allows_formulaic_prior_preservation_when_substantive():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s015",
+        "confidence": "high",
+        "rationale": "The proof is not merely formulaic.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s015",
+            loser="s009",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            reason=(
+                "s015 is formulaic and repetitive, but the thinness concern is not decisive because "
+                "its interpretation is at least tied and its proof explains consequences across events."
+            ),
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s015",
+            textual_specificity_winner="s015",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
+
+
+def test_group_edge_ledger_rejects_polished_shallow_without_interpretation_win():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s013")
+    edge = {
+        "pair_key": "s003::s013",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "The polished side has more examples.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s013",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            routed_cautions=["polished_but_shallow"],
+            reason="The polished and shallow risk is not decisive because s003 has more proof.",
+            interpretive_claim_winner="tie",
+            proof_quality_winner="s003",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "polished_shallow_not_substantively_defeated"
+
+
+def test_group_edge_ledger_rejects_rougher_stronger_when_prior_only_wins_proof():
+    candidate = _get_candidate(_build_ghost_candidates(), "s019::s022")
+    edge = {
+        "pair_key": "s019::s022",
+        "winner": "s019",
+        "confidence": "high",
+        "rationale": "The prior winner cites more evidence.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s019",
+            loser="s022",
+            decisive_axis="proof_quality",
+            caution_honored=False,
+            routed_cautions=["rougher_but_stronger_content"],
+            reason="The rougher-but-stronger content concern is not decisive because s019 has more proof.",
+            interpretive_claim_winner="s022",
+            proof_quality_winner="s019",
+            textual_specificity_winner="s019",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "rougher_stronger_not_substantively_defeated"
+
+
+def test_group_edge_ledger_allows_rougher_stronger_when_prior_wins_interpretation():
+    candidate = _get_candidate(_build_ghost_candidates(), "s019::s022")
+    edge = {
+        "pair_key": "s019::s022",
+        "winner": "s019",
+        "confidence": "high",
+        "rationale": "The prior winner wins meaning, not just proof volume.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s019",
+            loser="s022",
+            decisive_axis="interpretive_claim",
+            caution_honored=False,
+            routed_cautions=["rougher_but_stronger_content"],
+            reason=(
+                "The rougher side is not actually stronger in content because s019 develops "
+                "a clearer interpretation of Ghost's accountability."
+            ),
+            interpretive_claim_winner="s019",
+            proof_quality_winner="s019",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
+
+
+def test_group_edge_ledger_rejects_mechanics_without_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics decide this edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning"],
+            reason="The mechanics errors are not decisive enough to block meaning.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_decisive_without_blocker"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_missing_side():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocker_evidence=["fragment one", "fragment two"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_missing_side"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_wrong_side():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue blocks meaning.",
+            mechanics_blocked_student="s004",
+            mechanics_blocker_evidence=["fragment one", "fragment two"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_wrong_side"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_missing_evidence():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue blocks meaning.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["fragment one"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_missing_evidence"
+
+
+def test_group_edge_ledger_rejects_generic_mechanics_blocker_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "This mirrors the shallow s004::s008 live blocker.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics and rougher-content concerns are not decisive because s008 has errors.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["sentence error one", "sentence error two"],
+            mechanics_blocker_reason="Grammar errors, vague claims, and awkward wording make s008 harder to follow.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_hard_to_recover_mechanics_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "This mirrors the live mini mechanics loophole.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics and rougher-content concerns are not decisive because s008 is unstable.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=[
+                "Those out Ghost life Coach let him june the defense.",
+                "In the novel meat coach who becomes one of the most important leaders.",
+            ],
+            mechanics_blocker_reason=(
+                "Frequent word-choice and sentence-level breakdowns make the argument hard to recover reliably."
+            ),
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_not_meaning_blocking():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["wording issue one", "wording issue two"],
+            mechanics_blocker_reason="The essay is weaker and less fluent than the other response.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_not_meaning_blocking"
+
+
+def test_group_edge_ledger_rejects_bare_meaning_mechanics_blocker_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["wording issue one", "wording issue two"],
+            mechanics_blocker_reason="The student's meaning is weaker and unstable.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_not_meaning_blocking"
+
+
+def test_group_edge_ledger_allows_substantive_mechanics_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics genuinely block the other side's meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason=(
+                "The mechanics concern is decisive because s008's rougher content cannot be recovered "
+                "through the sentence breakdowns."
+            ),
+            interpretive_claim_winner="s008",
+            proof_quality_winner="s004",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=[
+                "The central claim breaks off before identifying what Ghost learns.",
+                "The evidence sentence splices two unrelated moments so the meaning is unrecoverable.",
+            ],
+            mechanics_blocker_reason=(
+                "These sentence breakdowns block meaning; the interpretation is not reliably recoverable "
+                "even after rereading."
+            ),
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
+
+
+def test_group_edge_ledger_rejects_completion_without_floor():
+    candidate = _get_candidate(_build_ghost_candidates(), "s003::s009")
+    edge = {
+        "pair_key": "s003::s009",
+        "winner": "s003",
+        "confidence": "high",
+        "rationale": "Completion decides this edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s003",
+            loser="s009",
+            decisive_axis="completion_coherence",
+            caution_honored=False,
+            routed_cautions=["incomplete_or_scaffold"],
+            reason="The incomplete scaffold concern is not decisive because s003 is more complete.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "completion_decisive_without_floor"
+
+
+def test_group_edge_ledger_blocks_group_order_bypass_after_rejected_edge():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    packet_payload = {
+        "enabled": True,
+        "packets": [
+            {
+                "packet_id": "packet_reject",
+                "student_ids": ["s015", "s009"],
+                "seed_order": ["s015", "s009"],
+                "triggering_edges": [
+                    {
+                        "pair": ["s015", "s009"],
+                        "pair_key": "s009::s015",
+                        "recommended_winner": "s009",
+                        "active_winner": "s015",
+                        "confidence": "high",
+                        "margin": 4.0,
+                        "ambiguous": False,
+                        "reasons": ["fixture"],
+                    }
+                ],
+                "ambiguous_edges": [],
+                "recommended_read_type": "local_order_calibration",
+                "priority_score": 10,
+                "selection_status": "selected",
+            }
+        ],
+    }
+    fixtures = [
+        {
+            "neighborhood_id": "packet_reject",
+            "ordered_student_ids": ["s009", "s015"],
+            "confidence": "high",
+            "rationale": "The broad order would otherwise flip the pair.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s015",
+                    "confidence": "high",
+                    "rationale": "Weak prior-preserving edge with no ledger.",
+                    "polish_trap": False,
+                    "rougher_but_stronger_latent": False,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        }
+    ]
+
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=[candidate],
+        rows=ghost_residual_rows(),
+        read_results=[],
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=fixtures,
+        max_groups=1,
+        max_students=5,
+        existing_decision_keys=set(),
+        evidence_group_packets=packet_payload,
+    )
+
+    assert decisions == []
+    assert summary["override_count"] == 0
+    assert results[0]["edge_ledger_statuses"][0]["accepted"] is False
+    assert results[0]["edge_ledger_statuses"][0]["reason"] == "missing_caution_not_decisive_reason"
+    assert results[0]["skipped_explicit_edge_decision_keys"] == ["s009::s015"]
+
+
+def test_group_edge_ledger_non_caution_edge_stays_backward_compatible():
+    rows_by_id = {str(row.get("student_id")): row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    candidate = cer.candidate_from_group_pair("s015", "s009", rows_by_id, {"neighborhood_id": "group_1"})
+    edge = {
+        "pair_key": "s009::s015",
+        "winner": "s009",
+        "confidence": "high",
+        "rationale": "No routed caution exists on this synthetic support edge.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": False,
+        "completion_floor_applied": False,
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "edge_ledger_not_required"
+
+
+def test_disabled_packet_report_falls_back_to_unresolved_read_results():
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=_build_ghost_candidates(),
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=cer.load_group_calibration_fixture(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+        max_groups=1,
+        max_students=12,
+        existing_decision_keys=set(),
+        evidence_group_packets={"enabled": False, "packets": []},
+    )
+
+    assert summary["neighborhood_source"] == "unresolved_read_results"
+    assert summary["packet_neighborhood_count"] == 0
+    assert results[0]["neighborhood_id"] == "group_1"
+    assert decisions
+
+
+def _cycle_decision(pair, winner, *, confidence="high", committee_confidence="group_high", read="group-neighborhood-calibration"):
+    loser = pair[1] if pair[0] == winner else pair[0]
+    return {
+        "pair": list(pair),
+        "pair_key": cer.pair_key_from_item({"pair": list(pair)}),
+        "winner": winner,
+        "loser": loser,
+        "confidence": confidence,
+        "committee_confidence": committee_confidence,
+        "model_metadata": {"committee_read": read, "adjudication_source": "committee_edge"},
+    }
+
+
+def test_committee_override_cycle_resolution_suppresses_weakest_edge():
+    decisions = [
+        _cycle_decision(("s001", "s002"), "s001", confidence="high"),
+        _cycle_decision(("s002", "s003"), "s002", confidence="low"),
+        _cycle_decision(("s001", "s003"), "s003", confidence="high"),
+    ]
+
+    kept, report = cer.resolve_committee_override_cycles(decisions)
+
+    assert len(kept) == 2
+    assert report["suppressed_count"] == 1
+    assert report["suppressed"][0]["pair_key"] == "s002::s003"
+    assert report["suppressed"][0]["reason"] == "committee_override_cycle"
+    assert cer.find_committee_override_cycle(kept) == []
+
+
+def test_phase3d_group_calibration_emits_pair_overrides():
+    candidates = _build_ghost_candidates()
+    fixtures = cer.load_group_calibration_fixture(FIXTURE_DIR / "ghost_residual_group_calibration.json")
+    decisions, results, summary = cer.run_group_calibration_path(
+        selected=candidates,
+        rows=ghost_residual_rows(),
+        read_results=_prior_group_read_results(),
+        texts_by_id=ghost_residual_texts(),
+        rubric="",
+        outline="",
+        metadata={"assignment_genre": "literary_analysis"},
+        model="fixture",
+        routing="fixture",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+        live=False,
+        live_group=False,
+        fixtures=fixtures,
+        max_groups=1,
+        max_students=12,
+        existing_decision_keys=set(),
+    )
+    winners = {decision["pair_key"]: decision["winner"] for decision in decisions}
+    expected_winners = {
+        "s003::s009": "s009",
+        "s003::s013": "s013",
+        "s004::s008": "s008",
+        "s009::s015": "s009",
+        "s019::s022": "s022",
+    }
+    assert expected_winners.items() <= winners.items()
+    assert summary["read_count"] == 1
+    assert summary["override_count"] > 5
+    assert set(results[0]["override_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    assert results[0]["support_pair_keys"]
+    for decision in decisions:
+        assert decision["model_metadata"]["committee_read"] == "group-neighborhood-calibration"
+        assert decision["model_metadata"]["phase"] == "3d"
+        assert decision["committee_confidence"] in {"group_high", "group_edge_high"}
+
+
+def test_phase3d_group_calibration_skips_low_confidence():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s009", "s015"],
+            "confidence": "medium",
+            "rationale": "Medium confidence is not enough for group override.",
+            "placement_notes": [],
+        },
+    )
+    assert cer.decision_from_group_calibration(candidate, calibration) is None
+
+
+def test_phase3d_group_edge_decision_can_override_medium_group_order():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+    }
+    calibration = cer.normalize_group_calibration(
+        neighborhood,
+        {
+            "ordered_student_ids": ["s015", "s009"],
+            "confidence": "medium",
+            "rationale": "Overall order is medium confidence.",
+            "placement_notes": [],
+            "edge_decisions": [
+                {
+                    "pair_key": "s009::s015",
+                    "winner": "s009",
+                    "confidence": "high",
+                    "rationale": "The hard pair itself is high confidence.",
+                    "polish_trap": True,
+                    "rougher_but_stronger_latent": True,
+                    "mechanics_block_meaning": False,
+                    "completion_floor_applied": False,
+                }
+            ],
+        },
+    )
+    decision = cer.decision_from_group_edge_decision(
+        candidate,
+        calibration["edge_decisions"][0],
+        calibration,
+    )
+    assert decision is not None
+    assert decision["winner"] == "s009"
+    assert decision["committee_confidence"] == "group_edge_high"
+    assert decision["model_metadata"]["committee_override_reason"] == "committee_group_edge_decision_override"
+
+
+def test_phase3d_live_group_calibration_repairs_invalid_json(monkeypatch):
+    rows = {row["student_id"]: row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+        "trigger_details": [],
+    }
+    calls = []
+
+    def fake_responses_create(*, model, messages, temperature, reasoning, routing_path, text_format, max_output_tokens):
+        calls.append({"messages": messages, "reasoning": reasoning})
+        if len(calls) == 1:
+            return {"output": [{"type": "output_text", "text": "not json"}]}
+        return {
+            "output": [
+                {
+                    "type": "output_text",
+                    "text": json.dumps(
+                        {
+                            "ordered_student_ids": ["s009", "s015"],
+                            "confidence": "high",
+                            "rationale": "Repair returned valid group order.",
+                            "placement_notes": [],
+                            "edge_decisions": [
+                                {
+                                    "pair_key": "s009::s015",
+                                    "winner": "s009",
+                                    "confidence": "high",
+                                    "rationale": "Pair edge repaired.",
+                                    "polish_trap": True,
+                                    "rougher_but_stronger_latent": True,
+                                    "mechanics_block_meaning": False,
+                                    "completion_floor_applied": False,
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(cer, "responses_create", fake_responses_create)
+    calibration = cer.run_group_calibration(
+        neighborhood,
+        rows,
+        ghost_residual_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis"},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+    assert calibration["ordered_student_ids"] == ["s009", "s015"]
+    assert calibration["confidence"] == "high"
+    assert len(calls) == 2
+    assert calls[1]["reasoning"] == "low"
+    assert "Previous invalid output" in calls[1]["messages"][0]["content"]
+
+
+def test_phase3d_live_group_calibration_repairs_missing_edge_decisions(monkeypatch):
+    rows = {row["student_id"]: row for row in cer.vc.prepare_rows(ghost_residual_rows())}
+    neighborhood = {
+        "neighborhood_id": "group_1",
+        "student_ids": ["s015", "s009"],
+        "pair_keys": ["s009::s015"],
+        "trigger_details": [],
+    }
+    calls = []
+
+    def fake_responses_create(*, model, messages, temperature, reasoning, routing_path, text_format, max_output_tokens):
+        calls.append(messages[0]["content"])
+        if len(calls) == 1:
+            return {
+                "output": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {
+                                "ordered_student_ids": ["s015", "s009"],
+                                "confidence": "medium",
+                                "rationale": "Missing edge decisions.",
+                                "placement_notes": [],
+                                "edge_decisions": [],
+                            }
+                        ),
+                    }
+                ]
+            }
+        return {
+            "output": [
+                {
+                    "type": "output_text",
+                    "text": json.dumps(
+                        {
+                            "ordered_student_ids": ["s009", "s015"],
+                            "confidence": "high",
+                            "rationale": "Semantic repair returned required edge decisions.",
+                            "placement_notes": [],
+                            "edge_decisions": [
+                                {
+                                    "pair_key": "s009::s015",
+                                    "winner": "s009",
+                                    "confidence": "high",
+                                    "rationale": "Required pair was repaired.",
+                                    "polish_trap": True,
+                                    "rougher_but_stronger_latent": True,
+                                    "mechanics_block_meaning": False,
+                                    "completion_floor_applied": False,
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(cer, "responses_create", fake_responses_create)
+    calibration = cer.run_group_calibration(
+        neighborhood,
+        rows,
+        ghost_residual_texts(),
+        "rubric",
+        "outline",
+        {"assignment_genre": "literary_analysis"},
+        model="model",
+        routing="routing.json",
+        reasoning="high",
+        max_output_tokens=1000,
+        committee_anchor=FIXTURE_DIR / "missing.json",
+    )
+    assert calibration["edge_decisions"][0]["pair_key"] == "s009::s015"
+    assert len(calls) == 2
+    assert "edge_decisions omitted required pair_keys" in calls[1]
+
+
+def test_phase3d_fixture_group_flips_residuals_after_abc_concurrence(tmp_path, monkeypatch):
+    """End-to-end: if A/B/C all keep the prior wrong residual winners, the
+    group-neighborhood calibration can still emit the five gold override edges.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-b-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--read-c-fixture",
+            str(FIXTURE_DIR / "ghost_residual_prior_reads.json"),
+            "--group-calibration-fixture",
+            str(FIXTURE_DIR / "ghost_residual_group_calibration.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    committee_items = [
+        item for item in merged["checks"]
+        if item.get("model_metadata", {}).get("adjudication_source") == "committee_edge"
+    ]
+    committee_keys = {item["pair_key"] for item in committee_items}
+    assert len(committee_items) > 5
+    assert set(GHOST_RESIDUAL_PAIR_KEYS) <= committee_keys
+    assert set(GHOST_RESIDUAL_PAIR_KEYS) <= set(merged["committee_edge"]["superseded_pair_keys"])
+    assert decisions["read_a"]["override_count"] == 0
+    assert decisions["group_calibration"]["read_count"] == 1
+    assert decisions["group_calibration"]["override_count"] > 5
+    assert set(decisions["group_calibration_results"][0]["override_pair_keys"]) == set(GHOST_RESIDUAL_PAIR_KEYS)
+    for item in committee_items:
+        assert item["model_metadata"]["committee_read"] == "group-neighborhood-calibration"
+        assert item["model_metadata"]["phase"] == "3d"
+        assert item["committee_edge_trace"]["neighborhood_id"] == "group_1"
+
+
+def test_phase3a_passthrough_preserved_without_fixtures_or_live(tmp_path, monkeypatch):
+    """Default (no --live, no fixtures) still yields byte-identical passthrough."""
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    payload = ghost_residual_payload()
+    escalated.write_text(json.dumps(payload), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+
+    assert cer.main() == 0
+    merged = json.loads((outputs / "consistency_checks.committee_edge.json").read_text(encoding="utf-8"))
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert decisions["read_a"]["enabled"] is False
+    assert decisions["read_a"]["read_b_fixture"] is False
+    assert decisions["decisions"] == []
+
+
+def test_phase3a_a_only_fixture_without_b_still_overrides_via_phase2b(tmp_path, monkeypatch):
+    """With only --blind-read-fixture (no --read-b-fixture), Phase 2b A-only
+    behavior stands. Confirms Phase 3a does not disrupt Phase 2b runs and that
+    `read_b_count` is 0.
+    """
+    outputs = tmp_path / "outputs"
+    inputs = tmp_path / "inputs"
+    processing = tmp_path / "processing" / "normalized_text"
+    outputs.mkdir()
+    inputs.mkdir()
+    processing.mkdir(parents=True)
+    escalated = outputs / "consistency_checks.escalated.json"
+    escalated.write_text(json.dumps(ghost_residual_payload()), encoding="utf-8")
+    scores = outputs / "consensus_scores.csv"
+    write_csv(scores, ghost_residual_rows())
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"assignment_genre": "literary_analysis"}), encoding="utf-8"
+    )
+    for student_id, text in ghost_residual_texts().items():
+        (processing / f"{student_id}.txt").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cer",
+            "--escalated",
+            str(escalated),
+            "--scores",
+            str(scores),
+            "--class-metadata",
+            str(inputs / "class_metadata.json"),
+            "--texts",
+            str(processing),
+            "--blind-read-fixture",
+            str(FIXTURE_DIR / "ghost_residual_blind_reads.json"),
+            "--max-reads",
+            "12",
+            "--candidates-output",
+            str(outputs / "committee_edge_candidates.json"),
+            "--decisions-output",
+            str(outputs / "committee_edge_decisions.json"),
+            "--report-output",
+            str(outputs / "committee_edge_report.json"),
+            "--merged-output",
+            str(outputs / "consistency_checks.committee_edge.json"),
+        ],
+    )
+    assert cer.main() == 0
+    decisions = json.loads((outputs / "committee_edge_decisions.json").read_text(encoding="utf-8"))
+    assert decisions["read_a"]["read_b_fixture"] is False
+    assert decisions["read_a"]["read_b_count"] == 0
+    # Phase 2b A-only still emits 5 overrides on the Ghost residual fixture.
+    assert decisions["read_a"]["override_count"] == 5

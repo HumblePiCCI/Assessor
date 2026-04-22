@@ -112,7 +112,10 @@ def _retryable_http_status(code: int) -> bool:
 def _post_openai_with_compat(url: str, api_key: str, payload: dict) -> dict:
     request_payload = dict(payload)
     attempts = _retry_attempts()
-    for attempt in range(1, attempts + 1):
+    attempt = 1
+    compatibility_adjustments = 0
+    max_compatibility_adjustments = 4
+    while attempt <= attempts:
         try:
             return _post_json(url, api_key, request_payload)
         except urllib.error.HTTPError as exc:
@@ -120,16 +123,25 @@ def _post_openai_with_compat(url: str, api_key: str, payload: dict) -> dict:
             unsupported = _unsupported_parameter(body)
             if exc.code == 400 and unsupported in {"temperature", "reasoning"} and unsupported in request_payload:
                 request_payload.pop(unsupported, None)
+                compatibility_adjustments += 1
+                if compatibility_adjustments > max_compatibility_adjustments:
+                    raise RuntimeError(f"OpenAI API compatibility retry loop exceeded: {body[:500]}") from exc
+                # Compatibility stripping is not a transient retry; do not
+                # consume the user's retry budget. This matters when
+                # OPENAI_MAX_RETRIES=1 is used for bounded live validation.
                 continue
             if _retryable_http_status(exc.code) and attempt < attempts:
                 time.sleep(_retry_backoff_seconds(attempt))
+                attempt += 1
                 continue
             raise RuntimeError(f"OpenAI API error {exc.code}: {body[:500]}") from exc
         except urllib.error.URLError as exc:
             if attempt < attempts:
                 time.sleep(_retry_backoff_seconds(attempt))
+                attempt += 1
                 continue
             raise RuntimeError(f"OpenAI API network error: {exc}") from exc
+        attempt += 1
     raise RuntimeError("OpenAI API request failed after retry/compatibility attempts.")
 
 

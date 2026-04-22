@@ -20,6 +20,18 @@
       "temperature": 0.0,
       "max_output_tokens": 500
     },
+    "pairwise_escalator": {
+      "model": "gpt-5.4",
+      "reasoning": "medium",
+      "temperature": 0.0,
+      "max_output_tokens": 1600
+    },
+    "literary_committee": {
+      "model": "gpt-5.4-mini",
+      "reasoning": "high",
+      "temperature": 0.0,
+      "max_output_tokens": 2000
+    },
     "feedback_drafter": {
       "model": "gpt-5.4-nano",
       "reasoning": "medium",

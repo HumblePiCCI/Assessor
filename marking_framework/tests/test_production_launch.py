@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 import scripts.release_rollback as rollback
 import scripts.validate_production_launch as vpl
@@ -55,6 +56,7 @@ def _seed_contract(root):
 
 
 def _seed_outputs(root):
+    generated_at = datetime.now(timezone.utc).isoformat()
     _write_json(
         root / "outputs/publish_gate.json",
         {
@@ -78,7 +80,7 @@ def _seed_outputs(root):
     _write_json(
         root / "outputs/calibration_manifest.json",
         {
-            "generated_at": "2026-03-29T00:00:00+00:00",
+            "generated_at": generated_at,
             "synthetic": False,
             "scope_coverage": [{"key": "grade_8_10|argumentative"}],
             "model_version": "gpt-5.4",
@@ -93,7 +95,7 @@ def _seed_outputs(root):
             "last_retention_report": {"dry_run": True},
         },
     )
-    _write_json(root / "pipeline_manifest.json", {"manifest_hash": "manifest-1", "generated_at": "2026-03-29T01:00:00+00:00", "git": {"sha": "abc123"}})
+    _write_json(root / "pipeline_manifest.json", {"manifest_hash": "manifest-1", "generated_at": generated_at, "git": {"sha": "abc123"}})
     incident_doc = root / "docs/INCIDENT_RESPONSE.md"
     incident_doc.parent.mkdir(parents=True, exist_ok=True)
     incident_doc.write_text("# Incident Response\n", encoding="utf-8")

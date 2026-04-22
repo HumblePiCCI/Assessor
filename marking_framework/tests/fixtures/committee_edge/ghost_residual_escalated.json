@@ -1,0 +1,74 @@
+{
+  "generated_at": "2026-04-17T00:00:00+00:00",
+  "checks": [
+    {
+      "pair": ["s015", "s009"],
+      "seed_order": {"higher": "s015", "lower": "s009", "higher_rank": 1, "lower_rank": 9},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "winner": "s015",
+      "loser": "s009",
+      "confidence": "medium",
+      "decision_basis": "evidence_development",
+      "cautions_applied": ["formulaic_but_thin"],
+      "rationale": "Escalated judge kept the more complete essay despite flagging it as formulaic; loser has the deeper trauma/healing read.",
+      "model_metadata": {"adjudication_source": "escalated_adjudication"}
+    },
+    {
+      "pair": ["s003", "s009"],
+      "seed_order": {"higher": "s003", "lower": "s009", "higher_rank": 4, "lower_rank": 9},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "winner": "s003",
+      "loser": "s009",
+      "confidence": "high",
+      "decision_basis": "balanced",
+      "cautions_applied": ["incomplete_or_scaffold"],
+      "rationale": "Escalated judge kept cleaner but shallower winner; loser reads as scaffolded but interprets more deeply.",
+      "model_metadata": {"adjudication_source": "escalated_adjudication"}
+    },
+    {
+      "pair": ["s003", "s013"],
+      "seed_order": {"higher": "s003", "lower": "s013", "higher_rank": 4, "lower_rank": 14},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "winner": "s003",
+      "loser": "s013",
+      "confidence": "high",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["polished_but_shallow"],
+      "rationale": "Cheap pairwise judge kept winner even after raising polished_but_shallow — classic polish-trap pattern.",
+      "model_metadata": {"adjudication_source": "cheap_pairwise"}
+    },
+    {
+      "pair": ["s022", "s019"],
+      "seed_order": {"higher": "s022", "lower": "s019", "higher_rank": 7, "lower_rank": 12},
+      "winner_side": "B",
+      "decision": "SWAP",
+      "winner": "s019",
+      "loser": "s022",
+      "confidence": "medium",
+      "decision_basis": "content_reasoning",
+      "cautions_applied": ["rougher_but_stronger_content"],
+      "rationale": "Orientation-audit swapped the seeded order but interpretive density suggests the swap went the wrong way.",
+      "model_metadata": {"adjudication_source": "orientation_audit"}
+    },
+    {
+      "pair": ["s004", "s008"],
+      "seed_order": {"higher": "s004", "lower": "s008", "higher_rank": 10, "lower_rank": 18},
+      "winner_side": "A",
+      "decision": "KEEP",
+      "winner": "s004",
+      "loser": "s008",
+      "confidence": "high",
+      "decision_basis": "balanced",
+      "cautions_applied": ["rougher_but_stronger_content", "mechanics_impede_meaning"],
+      "rationale": "Cheap pairwise kept cleaner essay even after flagging rougher-stronger + mechanics-impede-meaning on the loser.",
+      "model_metadata": {"adjudication_source": "cheap_pairwise"}
+    }
+  ],
+  "pairwise_escalation": {
+    "escalation_count": 2,
+    "escalated_pair_keys": ["s003::s009", "s009::s015"]
+  }
+}

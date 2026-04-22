@@ -129,9 +129,18 @@ def test_resolve_pass1_contract_for_summary_report_prioritizes_summary_quality()
     assert contract["reqs"]["rationale_min_words"] == 10
 
 
+def test_build_pass1_genre_guidance_prioritizes_literary_interpretation():
+    guidance = rla.build_pass1_genre_guidance("literary_analysis")
+    assert "Score literary interpretation before generic essay polish" in guidance
+    assert "Separate plot recall from analysis" in guidance
+    assert "five-paragraph formula" in guidance
+    assert "conventions and organization after task alignment" in guidance
+
+
 def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "Raw student response excerpt"},
         {"s1": "Raw student response excerpt"},
         {
             "s1": {
@@ -162,6 +171,7 @@ def test_build_pass2_student_summaries_uses_summary_specific_assessment_signal()
 def test_build_pass2_student_summaries_uses_consensus_summary_signal_and_ignores_fallback_only_note():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "Raw student response excerpt"},
         {"s1": "Raw student response excerpt"},
         {
             "A": {
@@ -276,6 +286,69 @@ def test_build_argumentative_seed_order_prefers_claim_and_evidence_quality():
     assert order == ["s1", "s2", "s3", "s4"]
 
 
+def test_build_literary_analysis_seed_order_penalizes_incomplete_scaffold_drafts():
+    order = rla.build_literary_analysis_seed_order(
+        ["s1", "s2"],
+        {
+            "s1": "Explanation 1: unfinished analysis\nCite/Detail 2:\nReflect on the Theme:\n",
+            "s2": "A complete literary paragraph with a clear thesis, evidence, and analysis of Ghost's choices.",
+        },
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 82.0,
+                    "criteria_points": {"LA1": 82, "LA2": 80, "LA3": 78, "C1": 78, "C3": 74},
+                    "notes": "Relevant theme, but incomplete structure and placeholder text remain.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "rubric_total_points": 74.0,
+                    "criteria_points": {"LA1": 80, "LA2": 78, "LA3": 82, "C1": 78, "C3": 76},
+                    "notes": "Clear thematic thesis, specific textual evidence, and developed literary analysis.",
+                },
+            }
+        },
+    )
+    assert order == ["s2", "s1"]
+
+
+def test_build_literary_analysis_seed_order_prefers_completed_weak_essay_over_unfinished_scaffold_draft():
+    order = rla.build_literary_analysis_seed_order(
+        ["s1", "s2"],
+        {
+            "s1": (
+                "Ghost- Final Essay\n"
+                "Explanation 1: Though Coach forgives him he makes him\n"
+                "Cite/Detail 2:\n"
+                "Explanation 2:\n"
+                "Reflect on the Theme:\n"
+            ),
+            "s2": (
+                "People can change when they are given second chances. "
+                "This essay is summary-heavy, but it is complete and stays structurally coherent."
+            ),
+        },
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 78.0,
+                    "criteria_points": {"LA1": 78, "LA2": 76, "LA3": 74, "C1": 72, "C3": 70},
+                    "notes": "Relevant theme, but incomplete structure and placeholder text remain.",
+                },
+                "s2": {
+                    "student_id": "s2",
+                    "rubric_total_points": 58.0,
+                    "criteria_points": {"LA1": 58, "LA2": 54, "LA3": 50, "C1": 62, "C3": 60},
+                    "notes": "Mostly summary, but it is a complete essay with a clear beginning, middle, and end.",
+                },
+            }
+        },
+    )
+    assert order == ["s2", "s1"]
+
+
 def test_build_instructions_seed_order_prefers_complete_safe_usable_procedure():
     order = rla.build_instructions_seed_order(
         ["s1", "s2", "s3", "s4"],
@@ -315,6 +388,7 @@ def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
         {"s1": "Opening the Fridge: raw snippet"},
+        {"s1": "Opening the Fridge: raw snippet"},
         {
             "s1": {
                 "student_id": "s1",
@@ -341,6 +415,7 @@ def test_build_pass2_student_summaries_uses_portfolio_aggregate_signal():
 def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "A dramatic topic paragraph."},
         {"s1": "A dramatic topic paragraph."},
         {
             "A": {
@@ -376,6 +451,7 @@ def test_build_pass2_student_summaries_uses_argumentative_aggregate_signal():
 def test_build_pass2_student_summaries_uses_instructions_aggregate_signal():
     entries = rla.build_pass2_student_summaries(
         ["s1"],
+        {"s1": "Wear gloves and then add acid carefully."},
         {"s1": "Wear gloves and then add acid carefully."},
         {
             "A": {

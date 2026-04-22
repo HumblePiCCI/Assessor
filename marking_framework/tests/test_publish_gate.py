@@ -264,6 +264,68 @@ def _write_reproducibility_report(path, *, exact=True, within_tolerance=None, ma
     )
 
 
+def _write_evidence_artifacts(root, *, neighborhood_enabled=True, needs_group=True, packets_enabled=True, packets=None, max_students=5, max_packets=2):
+    outputs = root / "outputs"
+    outputs.mkdir(parents=True, exist_ok=True)
+    (outputs / "committee_edge_candidates.json").write_text(
+        json.dumps({"candidates": [{"pair_key": "s001::s002"}], "skipped": []}),
+        encoding="utf-8",
+    )
+    (outputs / "evidence_neighborhood_report.json").write_text(
+        json.dumps(
+            {
+                "enabled": neighborhood_enabled,
+                "neighborhoods": [
+                    {
+                        "neighborhood_id": "n1",
+                        "recommended_next_action": "needs_group_calibration" if needs_group else "pair_guard_only",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    if packets is None:
+        packets = [{"packet_id": "p1", "student_ids": ["s001", "s002"], "recommended_read_type": "local_order_calibration"}]
+    (outputs / "evidence_group_calibration_packets.json").write_text(
+        json.dumps(
+            {
+                "enabled": packets_enabled,
+                "config": {"max_packet_students": max_students, "max_packets": max_packets},
+                "counts": {
+                    "candidate_packets": len(packets),
+                    "selected_packets": len(packets),
+                    "skipped_packets": 0,
+                },
+                "read_type_counts": {"local_order_calibration": len(packets)},
+                "packets": packets,
+                "skipped": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _valid_publish_metrics():
+    return {
+        "irr_rank_kendalls_w": 1.0,
+        "irr_mean_rubric_sd": 0.0,
+        "model_coverage": 1.0,
+        "boundary_count": 0,
+        "anchors_total": 0,
+        "cal_missing_assessors": [],
+        "calibration_scope_samples": 0,
+        "calibration_scope_observations": 0,
+        "cal_level_hit_rate": 1.0,
+        "cal_mae": 0.0,
+        "cal_pairwise_order": 1.0,
+        "cal_repeat_consistency": 1.0,
+        "cal_abs_bias": 0.0,
+        "benchmark_report_present": False,
+        "pairwise_eval_present": False,
+    }
+
+
 def test_publish_gate_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_inputs(tmp_path)
@@ -391,6 +453,195 @@ def test_publish_gate_helper_branches(tmp_path):
     assert corpus_bench["failed_dataset_count"] == 1
     assert corpus_bench["dataset_count"] == 3
     assert corpus_bench["exact_level_hit_rate"] == 0.84
+    missing_pairwise_eval = pg.pairwise_eval_metrics(tmp_path / "missing-pairwise-eval.json")
+    assert missing_pairwise_eval["present"] is False
+    assert missing_pairwise_eval["escalated_path"] is False
+    (tmp_path / "pairwise_eval.json").write_text(
+        json.dumps(
+            {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.json"},
+                "summary": {
+                    "pair_count": 4,
+                    "evaluated_count": 3,
+                    "accuracy": 0.67,
+                    "coverage": 0.75,
+                    "critical_accuracy": 0.5,
+                    "failures": ["accuracy_below_threshold"],
+                },
+                "polish_bias_risks": [{"id": "p1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pairwise_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval.json")
+    assert pairwise_eval["present"] is True
+    assert pairwise_eval["mode"] == "existing_judgments"
+    assert pairwise_eval["escalated_path"] is False
+    assert pairwise_eval["polish_bias_risk_count"] == 1
+    assert pairwise_eval["failures"] == ["accuracy_below_threshold"]
+    (tmp_path / "pairwise_eval_escalated.json").write_text(
+        json.dumps(
+            {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.escalated.json"},
+                "summary": {"pair_count": 1, "evaluated_count": 1, "accuracy": 1.0, "coverage": 1.0, "critical_accuracy": 1.0},
+                "pairs": [
+                    {
+                        "outcome": {
+                            "judgments": [
+                                {
+                                    "winner": "b",
+                                    "model_metadata": {"adjudication_source": "escalated_adjudication"},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    escalated_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_escalated.json")
+    assert escalated_eval["escalated_path"] is True
+    (tmp_path / "pairwise_eval_committee.json").write_text(
+        json.dumps(
+            {
+                "mode": "existing_judgments",
+                "inputs": {"judgments": "outputs/consistency_checks.committee_edge.json"},
+                "summary": {"pair_count": 1, "evaluated_count": 1, "accuracy": 1.0, "coverage": 1.0, "critical_accuracy": 1.0},
+                "pairs": [
+                    {
+                        "outcome": {
+                            "judgments": [
+                                {
+                                    "winner": "b",
+                                    "model_metadata": {"adjudication_source": "committee_edge"},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    committee_eval = pg.pairwise_eval_metrics(tmp_path / "pairwise_eval_committee.json")
+    assert committee_eval["escalated_path"] is True
+
+
+def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
+    release_thresholds = {
+        "release_mode": "candidate",
+        "calibration_require_manifest": False,
+        "calibration_require_manifest_integrity": False,
+        "calibration_require_scope_match": False,
+        "calibration_require_production_profile": False,
+    }
+    _write_evidence_artifacts(tmp_path)
+    valid = pg.evidence_packet_metrics(
+        tmp_path / "outputs/committee_edge_candidates.json",
+        tmp_path / "outputs/evidence_neighborhood_report.json",
+        tmp_path / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert valid["evidence_group_packets_ready"] is True
+    assert valid["evidence_needs_group_calibration_count"] == 1
+    assert valid["evidence_group_packets_selected_count"] == 1
+    assert pg.evaluate({**_valid_publish_metrics(), **valid}, {}) == []
+    assert pg.evaluate({**_valid_publish_metrics(), **valid}, release_thresholds) == []
+
+    missing_neighborhood_dir = tmp_path / "missing_neighborhood"
+    (missing_neighborhood_dir / "outputs").mkdir(parents=True)
+    (missing_neighborhood_dir / "outputs/committee_edge_candidates.json").write_text(
+        json.dumps({"candidates": [{"pair_key": "s001::s002"}]}),
+        encoding="utf-8",
+    )
+    missing_neighborhood = pg.evidence_packet_metrics(
+        missing_neighborhood_dir / "outputs/committee_edge_candidates.json",
+        missing_neighborhood_dir / "outputs/evidence_neighborhood_report.json",
+        missing_neighborhood_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **missing_neighborhood}, {}) == []
+    assert "evidence_neighborhood_report_missing" in pg.evaluate(
+        {**_valid_publish_metrics(), **missing_neighborhood}, release_thresholds
+    )
+
+    disabled_dir = tmp_path / "disabled"
+    _write_evidence_artifacts(disabled_dir, neighborhood_enabled=False)
+    disabled = pg.evidence_packet_metrics(
+        disabled_dir / "outputs/committee_edge_candidates.json",
+        disabled_dir / "outputs/evidence_neighborhood_report.json",
+        disabled_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **disabled}, {}) == []
+    assert "evidence_neighborhood_report_disabled" in pg.evaluate({**_valid_publish_metrics(), **disabled}, release_thresholds)
+
+    missing_packets_dir = tmp_path / "missing_packets"
+    _write_evidence_artifacts(missing_packets_dir)
+    (missing_packets_dir / "outputs/evidence_group_calibration_packets.json").unlink()
+    missing_packets = pg.evidence_packet_metrics(
+        missing_packets_dir / "outputs/committee_edge_candidates.json",
+        missing_packets_dir / "outputs/evidence_neighborhood_report.json",
+        missing_packets_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **missing_packets}, {}) == []
+    missing_packet_failures = pg.evaluate({**_valid_publish_metrics(), **missing_packets}, release_thresholds)
+    assert "evidence_group_packets_missing" in missing_packet_failures
+    assert "evidence_group_packets_empty" in missing_packet_failures
+
+    disabled_packets_dir = tmp_path / "disabled_packets"
+    _write_evidence_artifacts(disabled_packets_dir, packets_enabled=False)
+    disabled_packets = pg.evidence_packet_metrics(
+        disabled_packets_dir / "outputs/committee_edge_candidates.json",
+        disabled_packets_dir / "outputs/evidence_neighborhood_report.json",
+        disabled_packets_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **disabled_packets}, {}) == []
+    assert "evidence_group_packets_disabled" in pg.evaluate(
+        {**_valid_publish_metrics(), **disabled_packets}, release_thresholds
+    )
+
+    empty_dir = tmp_path / "empty"
+    _write_evidence_artifacts(empty_dir, packets=[])
+    empty = pg.evidence_packet_metrics(
+        empty_dir / "outputs/committee_edge_candidates.json",
+        empty_dir / "outputs/evidence_neighborhood_report.json",
+        empty_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **empty}, {}) == []
+    assert "evidence_group_packets_empty" in pg.evaluate({**_valid_publish_metrics(), **empty}, release_thresholds)
+
+    oversized_dir = tmp_path / "oversized"
+    _write_evidence_artifacts(
+        oversized_dir,
+        packets=[{"packet_id": "p1", "student_ids": ["s1", "s2", "s3"], "recommended_read_type": "local_order_calibration"}],
+        max_students=2,
+    )
+    oversized = pg.evidence_packet_metrics(
+        oversized_dir / "outputs/committee_edge_candidates.json",
+        oversized_dir / "outputs/evidence_neighborhood_report.json",
+        oversized_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **oversized}, {}) == []
+    assert "evidence_group_packet_size_above_limit" in pg.evaluate({**_valid_publish_metrics(), **oversized}, release_thresholds)
+
+    too_many_dir = tmp_path / "too_many"
+    _write_evidence_artifacts(
+        too_many_dir,
+        packets=[
+            {"packet_id": "p1", "student_ids": ["s1", "s2"]},
+            {"packet_id": "p2", "student_ids": ["s2", "s3"]},
+            {"packet_id": "p3", "student_ids": ["s3", "s4"]},
+        ],
+        max_packets=2,
+    )
+    too_many = pg.evidence_packet_metrics(
+        too_many_dir / "outputs/committee_edge_candidates.json",
+        too_many_dir / "outputs/evidence_neighborhood_report.json",
+        too_many_dir / "outputs/evidence_group_calibration_packets.json",
+    )
+    assert pg.evaluate({**_valid_publish_metrics(), **too_many}, {}) == []
+    assert "evidence_group_packet_count_above_limit" in pg.evaluate({**_valid_publish_metrics(), **too_many}, release_thresholds)
 
 
 def test_publish_gate_evaluate_covers_all_failure_codes():
@@ -426,6 +677,13 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_mean_student_level_sd": 4.0,
         "benchmark_mean_student_rank_sd": 4.0,
         "benchmark_mean_student_score_sd": 4.0,
+        "pairwise_eval_present": True,
+        "pairwise_eval_accuracy": 0.5,
+        "pairwise_eval_critical_accuracy": 0.5,
+        "pairwise_eval_coverage": 0.5,
+        "pairwise_eval_polish_bias_risk_count": 2,
+        "pairwise_eval_failures": ["accuracy_below_threshold"],
+        "pairwise_eval_escalated_path": False,
     }
     thresholds = {
         "min_rank_kendall_w": 0.7,
@@ -457,6 +715,13 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
         "benchmark_max_mean_student_level_sd": 0.5,
         "benchmark_max_mean_student_rank_sd": 0.5,
         "benchmark_max_mean_student_score_sd": 1.0,
+        "require_pairwise_eval_report": True,
+        "pairwise_eval_min_accuracy": 0.9,
+        "pairwise_eval_min_critical_accuracy": 1.0,
+        "pairwise_eval_min_coverage": 1.0,
+        "pairwise_eval_max_polish_bias_risks": 0,
+        "pairwise_eval_fail_on_report_failures": True,
+        "pairwise_eval_require_escalated_path": True,
     }
     failures = pg.evaluate(metrics, thresholds)
     assert "kendall_w_below_threshold" in failures
@@ -488,6 +753,34 @@ def test_publish_gate_evaluate_covers_all_failure_codes():
     assert "benchmark_student_level_sd_above_threshold" in failures
     assert "benchmark_student_rank_sd_above_threshold" in failures
     assert "benchmark_student_score_sd_above_threshold" in failures
+    assert "pairwise_eval_accuracy_below_threshold" in failures
+    assert "pairwise_eval_critical_accuracy_below_threshold" in failures
+    assert "pairwise_eval_coverage_below_threshold" in failures
+    assert "pairwise_eval_polish_bias_risks_above_threshold" in failures
+    assert "pairwise_eval_report_failures_present" in failures
+    assert "pairwise_eval_escalated_path_missing" in failures
+
+
+def test_publish_gate_evaluate_requires_pairwise_eval_report():
+    metrics = {
+        "irr_rank_kendalls_w": 1.0,
+        "irr_mean_rubric_sd": 0.0,
+        "model_coverage": 1.0,
+        "boundary_count": 0,
+        "anchors_total": 0,
+        "cal_missing_assessors": [],
+        "calibration_scope_samples": 0,
+        "calibration_scope_observations": 0,
+        "cal_level_hit_rate": 1.0,
+        "cal_mae": 0.0,
+        "cal_pairwise_order": 1.0,
+        "cal_repeat_consistency": 1.0,
+        "cal_abs_bias": 0.0,
+        "benchmark_report_present": False,
+        "pairwise_eval_present": False,
+    }
+    failures = pg.evaluate(metrics, {"require_pairwise_eval_report": True})
+    assert "pairwise_eval_report_missing" in failures
 
 
 def test_publish_gate_main_with_non_list_metadata(tmp_path, monkeypatch):

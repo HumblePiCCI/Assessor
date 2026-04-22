@@ -1,0 +1,22 @@
+{
+  "genre": "generic",
+  "anchors": [
+    {
+      "title": "Task-specific substance beats polish",
+      "decision_rule": "Prefer the paper that more fully answers the assignment with developed ideas and required support, even when the other paper is smoother."
+    },
+    {
+      "title": "Polish matters when substance is close",
+      "decision_rule": "Use organization, style, and conventions as tie-breakers once task fulfillment, idea quality, and support are comparable."
+    },
+    {
+      "title": "Completion can be decisive",
+      "decision_rule": "A complete but weak response usually outranks an unfinished scaffold or fragment unless the fragment contains substantially stronger required work."
+    }
+  ],
+  "caution_checks": [
+    "Is one paper winning only because it is longer, cleaner, or more formulaic?",
+    "Does either paper fail the core genre purpose even if the prose sounds fluent?",
+    "Do surface errors actually block meaning, or are they secondary to stronger content?"
+  ]
+}

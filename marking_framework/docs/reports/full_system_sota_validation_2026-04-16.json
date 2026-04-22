@@ -1,0 +1,140 @@
+{
+  "generated_at": "2026-04-16T07:00:33.047565+00:00",
+  "branch": "codex/fix-live-literary-ranking",
+  "validation_scope": {
+    "external_benchmark_datasets": 32,
+    "external_benchmark_students": 133,
+    "external_benchmark_runs_per_mode": 3,
+    "live_ghost_cohort_students": 23
+  },
+  "external_corpus": {
+    "artifact_json": "docs/reports/gpt54_split_full_corpus_with_ghost_fixes_release_runs3_2026-04-16.json",
+    "artifact_markdown": "docs/reports/gpt54_split_full_corpus_with_ghost_fixes_release_runs3_2026-04-16.md",
+    "candidate_label": "gpt54_split",
+    "baseline_label": "gpt52_legacy",
+    "failed_datasets": 0,
+    "candidate": {
+      "exact_level_hit_rate": 0.954887,
+      "within_one_level_hit_rate": 0.992481,
+      "score_band_mae": 1.13594,
+      "mean_rank_displacement": 0.075188,
+      "kendall_tau": 0.961905,
+      "pairwise_order_agreement": 0.980952,
+      "cost_usd": 0.081254,
+      "latency_seconds": 25.6633
+    },
+    "candidate_vs_baseline_delta": {
+      "exact_level_hit_rate": 0.383458,
+      "within_one_level_hit_rate": 0.045113,
+      "score_band_mae": -1.958571,
+      "mean_rank_displacement": -0.255639,
+      "kendall_tau": 0.185464,
+      "pairwise_order_agreement": 0.092732
+    },
+    "candidate_vs_previous_ontario_release_delta": {
+      "exact_level_hit_rate": 0.022556,
+      "within_one_level_hit_rate": 0.0,
+      "score_band_mae": -0.033534,
+      "mean_rank_displacement": -0.06015,
+      "kendall_tau": 0.042105,
+      "pairwise_order_agreement": 0.021052,
+      "cost_usd": -0.001793,
+      "latency_seconds": 25.332388
+    },
+    "largest_candidate_misses": [
+      {
+        "dataset": "thoughtful_assessment_grade2_book_review",
+        "student_id": "s003",
+        "gold": "2",
+        "predicted": "1",
+        "score_band_error": 26.36,
+        "rank_displacement": 0
+      },
+      {
+        "dataset": "thoughtful_assessment_grade6_8_persuasive_letter",
+        "student_id": "s003",
+        "gold": "2",
+        "predicted": "1",
+        "score_band_error": 22.27,
+        "rank_displacement": 0
+      },
+      {
+        "dataset": "ontario_1999_grade1_descriptive_my_favourite_toy_example2",
+        "student_id": "s002",
+        "gold": "3",
+        "predicted": "1",
+        "score_band_error": 14.26,
+        "rank_displacement": 1
+      },
+      {
+        "dataset": "naep_1998_g8_informative_tv_show",
+        "student_id": "s002",
+        "gold": "Skillful (canon 4)",
+        "predicted": "3",
+        "score_band_error": 10.0,
+        "rank_displacement": 0
+      },
+      {
+        "dataset": "thoughtful_assessment_grade11_12_speech",
+        "student_id": "s004",
+        "gold": "1",
+        "predicted": "2",
+        "score_band_error": 7.92,
+        "rank_displacement": 1
+      },
+      {
+        "dataset": "thoughtful_assessment_grade9_10_argument",
+        "student_id": "s002",
+        "gold": "3",
+        "predicted": "4",
+        "score_band_error": 1.0,
+        "rank_displacement": 0
+      }
+    ]
+  },
+  "sota_gate": {
+    "artifact_json": "docs/reports/gpt54_split_sota_gate_with_ghost_fixes_release_2026-04-16.json",
+    "artifact_markdown": "docs/reports/gpt54_split_sota_gate_with_ghost_fixes_release_2026-04-16.md",
+    "ok": true,
+    "highest_attained_profile": "release",
+    "decision_state": "release_ready"
+  },
+  "live_ghost_cohort": {
+    "workspace": "server/data/tenant_workspaces/1ab418ede009c1af/81a14df23c0ed483/workspace",
+    "artifact_markdown": "docs/reports/ghost_live_cohort_audit_2026-04-15.md",
+    "adjudicated_order": [
+      "s015",
+      "s011",
+      "s009",
+      "s002",
+      "s003",
+      "s013",
+      "s019",
+      "s010",
+      "s022",
+      "s006",
+      "s012",
+      "s014",
+      "s016",
+      "s018",
+      "s001",
+      "s017",
+      "s007",
+      "s021",
+      "s005",
+      "s004",
+      "s008",
+      "s023",
+      "s020"
+    ],
+    "final_order_matches_adjudication": true,
+    "pairwise_agreement_with_final_order": 0.941057,
+    "swap_rate": 0.316176,
+    "low_confidence_rate": 0.014706,
+    "mean_abs_displacement": 2.782609,
+    "pairwise_conflict_density": 0.0,
+    "boundary_disagreement_concentration": 0.0,
+    "production_publish_note": "The live project remains a bootstrap/synthetic-calibration cohort until teacher anchors are supplied; that is a production confidence-gate state, not an ordering-accuracy failure."
+  },
+  "status": "sota_release_metrics_green_with_documented_boundary_misses"
+}

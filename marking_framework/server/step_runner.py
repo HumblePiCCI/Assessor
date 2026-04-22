@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -19,8 +20,13 @@ FULL_PIPELINE_STEP_IDS = (
     "aggregate_1",
     "boundary",
     "aggregate_2",
+    "band_seam",
     "consistency",
+    "pairwise_escalation",
+    "evidence_map",
+    "committee_edge_resolver",
     "rerank",
+    "pairwise_eval",
     "quality_gate",
     "sota_gate",
     "cohort_confidence",
@@ -33,8 +39,13 @@ ANCHOR_RESUME_STEP_IDS = (
     "aggregate_1",
     "boundary",
     "aggregate_2",
+    "band_seam",
     "consistency",
+    "pairwise_escalation",
+    "evidence_map",
+    "committee_edge_resolver",
     "rerank",
+    "pairwise_eval",
     "quality_gate",
     "sota_gate",
     "cohort_confidence",
@@ -97,8 +108,35 @@ def pipeline_steps() -> list[dict]:
         {"id": "aggregate_1", "label": "Building consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
         {"id": "boundary", "label": "Rechecking boundary essays", "cmd": ["python3", "scripts/boundary_recheck.py"]},
         {"id": "aggregate_2", "label": "Rebuilding consensus ranking", "cmd": ["python3", "scripts/aggregate_assessments.py", "--config", "config/marking_config.json"]},
+        {"id": "band_seam", "label": "Adjudicating band seams", "cmd": ["python3", "scripts/band_seam_adjudication.py"]},
         {"id": "consistency", "label": "Collecting pairwise consistency evidence", "cmd": ["python3", "scripts/verify_consistency.py"]},
-        {"id": "rerank", "label": "Applying global reranker", "cmd": ["python3", "scripts/global_rerank.py"]},
+        {"id": "pairwise_escalation", "label": "Escalating unstable pairwise evidence", "cmd": ["python3", "scripts/escalate_pairwise_adjudications.py"]},
+        {
+            "id": "evidence_map",
+            "label": "Mapping claim/evidence/commentary signals",
+            "cmd": ["python3", "scripts/evidence_map.py"],
+            "required": False,
+        },
+        {
+            "id": "committee_edge_resolver",
+            "label": "Resolving committee-edge overrides",
+            "cmd": ["python3", "scripts/committee_edge_resolver.py"],
+            "required": False,
+        },
+        {"id": "rerank", "label": "Applying global reranker", "cmd": ["python3", "scripts/global_rerank.py", "--judgments", "outputs/consistency_checks.committee_edge.json"]},
+        {
+            "id": "pairwise_eval",
+            "label": "Evaluating routed hard-pair adjudication",
+            "cmd": [
+                "python3",
+                "scripts/evaluate_pairwise_adjudicator.py",
+                "--judgments",
+                "outputs/consistency_checks.committee_edge.json",
+                "--output",
+                "outputs/pairwise_adjudicator_eval.json",
+            ],
+            "required": False,
+        },
         {
             "id": "quality_gate",
             "label": "Running publish quality gate",
@@ -142,7 +180,11 @@ def anchor_resume_steps() -> list[dict]:
 
 def pipeline_step_command(step_id: str) -> list[str]:
     step = pipeline_step_map()[step_id]
-    return list(step["cmd"])
+    cmd = list(step["cmd"])
+    if step_id == "committee_edge_resolver" and os.environ.get("COMMITTEE_EDGE_LIVE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        if "--live" not in cmd:
+            cmd.append("--live")
+    return cmd
 
 
 def pipeline_step_graph_hash() -> str:

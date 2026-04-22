@@ -202,7 +202,122 @@ def test_hero_path_calibrate_and_consistency(tmp_path, monkeypatch):
     assert hp.main() == 0
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
+    assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
+    assert any("evidence_map.py" in str(part) for call in calls for part in call)
+    assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_runs_committee_edge_resolver_between_escalation_and_rerank(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+        ],
+    )
+    assert hp.main() == 0
+    rendered = [" ".join(str(part) for part in call) for call in calls]
+    escalation_idx = next(idx for idx, call in enumerate(rendered) if "escalate_pairwise_adjudications.py" in call)
+    evidence_map_idx = next(idx for idx, call in enumerate(rendered) if "evidence_map.py" in call)
+    committee_idx = next(idx for idx, call in enumerate(rendered) if "committee_edge_resolver.py" in call)
+    rerank_idx = next(idx for idx, call in enumerate(rendered) if "global_rerank.py" in call)
+    assert escalation_idx < evidence_map_idx < committee_idx < rerank_idx
+
+
+def test_hero_path_runs_pairwise_eval_before_publish_gate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+            "--publish-gate",
+        ],
+    )
+    assert hp.main() == 0
+    rendered = [" ".join(str(part) for part in call) for call in calls]
+    rerank_idx = next(idx for idx, call in enumerate(rendered) if "global_rerank.py" in call)
+    eval_idx = next(idx for idx, call in enumerate(rendered) if "evaluate_pairwise_adjudicator.py" in call)
+    gate_idx = next(idx for idx, call in enumerate(rendered) if "publish_gate.py" in call)
+    assert rerank_idx < eval_idx < gate_idx
+    assert "outputs/consistency_checks.committee_edge.json" in rendered[eval_idx]
+
+
+def test_hero_path_committee_edge_live_flag_appends_live(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+            "--apply-consistency",
+            "--committee-edge-live",
+        ],
+    )
+    assert hp.main() == 0
+    committee_cmd = next(call for call in calls if any("committee_edge_resolver.py" in str(part) for part in call))
+    assert "--live" in committee_cmd
+
+
+def test_hero_path_skips_committee_edge_resolver_without_apply_consistency(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hp",
+            "--skip-extract",
+            "--skip-conventions",
+            "--skip-aggregate",
+            "--verify-consistency",
+        ],
+    )
+    assert hp.main() == 0
+    assert not any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
 
 
 def test_hero_path_calibrate_fail(tmp_path, monkeypatch):
@@ -283,8 +398,12 @@ def test_hero_path_accuracy_consistency_mode(tmp_path, monkeypatch):
     assert any("calibrate_assessors.py" in str(part) for call in calls for part in call)
     assert any("run_llm_assessors.py" in str(part) for call in calls for part in call)
     assert any("boundary_recheck.py" in str(part) for call in calls for part in call)
+    assert any("band_seam_adjudication.py" in str(part) for call in calls for part in call)
     assert any("verify_consistency.py" in str(part) for call in calls for part in call)
+    assert any("escalate_pairwise_adjudications.py" in str(part) for call in calls for part in call)
+    assert any("committee_edge_resolver.py" in str(part) for call in calls for part in call)
     assert any("global_rerank.py" in str(part) for call in calls for part in call)
+    assert any("evaluate_pairwise_adjudicator.py" in str(part) for call in calls for part in call)
     assert any("publish_gate.py" in str(part) for call in calls for part in call)
     assert any("sota_gate.py" in str(part) for call in calls for part in call)
     assert any("review_and_grade.py" in str(part) for call in calls for part in call)
@@ -336,6 +455,48 @@ def test_hero_path_boundary_recheck_flow(tmp_path, monkeypatch):
     assert "--margin" in flat and "1.5" in flat
     assert "--replicates" in flat and "4" in flat
     assert "--max-students" in flat and "3" in flat
+    assert not any("band_seam_adjudication.py" in str(part) for call in calls for part in call)
+
+
+def test_hero_path_band_seam_adjudication_flow(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--band-seam-adjudication",
+    ])
+    assert hp.main() == 0
+    aggregate_idx = next(idx for idx, call in enumerate(calls) if any("aggregate_assessments.py" in str(part) for part in call))
+    seam_idx = next(idx for idx, call in enumerate(calls) if any("band_seam_adjudication.py" in str(part) for part in call))
+    assert aggregate_idx < seam_idx
+
+
+def test_hero_path_band_seam_adjudication_fail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    setup_assessor_dirs(tmp_path)
+
+    def fake_run(cmd):
+        if any("band_seam_adjudication.py" in str(part) for part in cmd):
+            return 1
+        return 0
+
+    monkeypatch.setattr(hp, "run", fake_run)
+    monkeypatch.setattr("sys.argv", [
+        "hp",
+        "--skip-extract",
+        "--skip-conventions",
+        "--band-seam-adjudication",
+    ])
+    assert hp.main() == 1
 
 
 def test_hero_path_boundary_recheck_fail(tmp_path, monkeypatch):

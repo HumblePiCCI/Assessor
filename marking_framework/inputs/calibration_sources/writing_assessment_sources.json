@@ -1,0 +1,566 @@
+{
+  "version": 1,
+  "generated_from_research_date": "2026-04-19",
+  "purpose": "Copyright-safe registry of public, teacher-scored or examiner-scored writing exemplars used to calibrate routed adjudication prompts. This file stores links, score-scale metadata, and distilled decision rules only; it does not store full student responses.",
+  "copyright_policy": {
+    "storage_rule": "Do not store or embed full student responses from linked sources in this repository unless a separate license review explicitly permits ingestion.",
+    "prompt_rule": "Use distilled calibration rules and source metadata as teacher-grade anchor guidance. Do not ask models to quote, reconstruct, or rely on memorized source essays.",
+    "runtime_rule": "Student work being assessed must come from the active classroom workspace or from permissioned local calibration fixtures, not from copied external exemplar text."
+  },
+  "global_anchor_rules": [
+    {
+      "id": "source_rules_are_not_local_rubric",
+      "rule": "External source rules calibrate judgment; the active classroom rubric and assignment remain authoritative for the final decision."
+    },
+    {
+      "id": "grade_band_transfer",
+      "rule": "When the source grade differs from the active cohort, transfer the decision axis, not the absolute sophistication level."
+    },
+    {
+      "id": "commentary_over_form",
+      "rule": "Teacher and examiner comments consistently distinguish substance from form: organization, length, and fluency matter only when they develop the assigned meaning or purpose."
+    },
+    {
+      "id": "score_ladder_over_single_anchor",
+      "rule": "Prefer sources with multiple score points or bands for boundary decisions; single positive samples are useful as meets/exceeds anchors but weak for lower-boundary separation."
+    },
+    {
+      "id": "copyright_guard",
+      "rule": "Do not copy exemplar wording into prompts. Use source-derived rules, score descriptors, and links only."
+    }
+  ],
+  "sources": [
+    {
+      "id": "new_meridian_parcc_g7_lat_4127",
+      "name": "Grade 7 Literary Analysis Task: Point of View Comparison, Sample Student Responses with Annotations",
+      "provider": "New Meridian / CCSSO",
+      "url": "https://resources.newmeridiancorp.org/wp-content/uploads/2019/07/Gr7_LAT_4127_Released_Set_12016.pdf",
+      "source_family": "new_meridian_parcc",
+      "utility": "core",
+      "grades": [7],
+      "grade_band": "middle_school",
+      "genres": ["literary_analysis"],
+      "writing_types": ["text_based_response", "comparative_literary_analysis"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "PARCC LAT trait score points",
+        "type": "trait_score_points",
+        "traits": [
+          {"id": "reading", "range": "0-4"},
+          {"id": "written_expression", "range": "0-4"}
+        ]
+      },
+      "rights_note": "Copyright CCSSO/New Meridian. Use as public linked reference and distilled calibration guidance only.",
+      "best_use": [
+        "middle-grade literary analysis score ladder",
+        "reading comprehension vs written-expression separation",
+        "plot-summary ceiling and evidence-explanation calibration"
+      ],
+      "calibration_rules": [
+        {
+          "id": "rdg_we_split",
+          "applies_to": ["literary_analysis", "text_based_response"],
+          "priority": "high",
+          "rule": "Separate literary understanding from written-expression control: a paper can be organized yet still lose if it does not accurately explain how textual details support the interpretation."
+        },
+        {
+          "id": "score4_requires_insight_and_evidence",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Top-band literary analysis needs accurate, insightful interpretation plus carefully selected textual moments that are explained, not just named."
+        },
+        {
+          "id": "progression_is_substance_dependent",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "Logical progression and transitions support a high score only when the ideas themselves are developed and appropriate to the task."
+        },
+        {
+          "id": "event_listing_ceiling",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "A response that lists events or quotations without explaining how they reveal point of view, character, theme, or authorial choice should stay below essays that explain why evidence matters."
+        }
+      ]
+    },
+    {
+      "id": "new_meridian_parcc_g3_lat_vf651235",
+      "name": "Grade 3 Literary Analysis Task: How Illustrations Help, Sample Student Responses",
+      "provider": "New Meridian / CCSSO",
+      "url": "https://resources.newmeridiancorp.org/wp-content/uploads/2019/07/E03_LAT_VF651235_Released_Set_12016_0.pdf",
+      "source_family": "new_meridian_parcc",
+      "utility": "supplemental",
+      "grades": [3],
+      "grade_band": "elementary",
+      "genres": ["literary_analysis"],
+      "writing_types": ["text_based_response", "visual_text_analysis"],
+      "teacher_commentary": false,
+      "student_samples": true,
+      "scale": {
+        "label": "PARCC LAT score points",
+        "type": "trait_score_points"
+      },
+      "rights_note": "Copyright CCSSO/New Meridian. Use as linked scale reference only; no response ingestion.",
+      "best_use": [
+        "elementary literary-response expectations",
+        "early evidence-to-claim calibration"
+      ],
+      "calibration_rules": [
+        {
+          "id": "elementary_specificity",
+          "applies_to": ["literary_analysis", "text_based_response"],
+          "priority": "medium",
+          "rule": "For younger grades, reward specific, accurate links between a textual or visual detail and the student's claim before expecting mature essay structure."
+        },
+        {
+          "id": "early_complete_response",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "At elementary levels, a concise complete response with accurate evidence can outrank a longer response that drifts or repeats."
+        }
+      ]
+    },
+    {
+      "id": "new_meridian_parcc_g8_lat_5632",
+      "name": "Grade 8 Literary Analysis Task: How Dialogue Functions, Sample Student Responses",
+      "provider": "New Meridian / CCSSO",
+      "url": "https://resources.newmeridiancorp.org/wp-content/uploads/2019/07/E08_LAT_5632_Released_Set_Jan_2016.pdf",
+      "source_family": "new_meridian_parcc",
+      "utility": "supplemental",
+      "grades": [8],
+      "grade_band": "middle_school",
+      "genres": ["literary_analysis"],
+      "writing_types": ["text_based_response"],
+      "teacher_commentary": false,
+      "student_samples": true,
+      "scale": {
+        "label": "PARCC LAT score points",
+        "type": "trait_score_points"
+      },
+      "rights_note": "Copyright CCSSO/New Meridian. Use as linked score-scale reference only; no response ingestion.",
+      "best_use": [
+        "nearby-grade middle-school literary-analysis scale",
+        "dialogue/function analysis calibration"
+      ],
+      "calibration_rules": [
+        {
+          "id": "function_not_feature_naming",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Analysis of dialogue, point of view, structure, or language should explain function and effect, not merely identify the feature."
+        },
+        {
+          "id": "grade8_beyond_surface",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "By upper middle grades, stronger papers connect textual craft to character development, conflict, or theme rather than summarizing what characters say."
+        }
+      ]
+    },
+    {
+      "id": "new_meridian_parcc_g10_lat_vf650237",
+      "name": "Grade 10 Literary Analysis Task: Compare and Contrast Relationships, Sample Student Responses",
+      "provider": "New Meridian / CCSSO",
+      "url": "https://resources.newmeridiancorp.org/wp-content/uploads/2019/07/E10_LAT_VF650237_Released_Set_Jan_2016.pdf",
+      "source_family": "new_meridian_parcc",
+      "utility": "supplemental",
+      "grades": [10],
+      "grade_band": "high_school",
+      "genres": ["literary_analysis"],
+      "writing_types": ["comparative_literary_analysis", "text_based_response"],
+      "teacher_commentary": false,
+      "student_samples": true,
+      "scale": {
+        "label": "PARCC LAT score points",
+        "type": "trait_score_points"
+      },
+      "rights_note": "Copyright CCSSO/New Meridian. Use as linked score-scale reference only; no response ingestion.",
+      "best_use": [
+        "high-school comparative literary analysis",
+        "relationship/theme comparison calibration"
+      ],
+      "calibration_rules": [
+        {
+          "id": "comparison_must_be_integrated",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "In comparative literary analysis, a stronger response integrates similarities and differences around a meaningful claim rather than writing two disconnected summaries."
+        },
+        {
+          "id": "relationship_analysis",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "Relationship analysis should show how interactions reveal character, conflict, or theme; naming relationships alone is insufficient."
+        }
+      ]
+    },
+    {
+      "id": "massachusetts_wsa_g7_monsters_c712",
+      "name": "Writing Standards in Action Grade 7: The Monsters Are Due on Maple Street",
+      "provider": "Massachusetts Department of Elementary and Secondary Education",
+      "url": "https://www.doe.mass.edu/frameworks/ela/wsa/grade7/c712.pdf",
+      "source_family": "massachusetts_wsa",
+      "utility": "strong",
+      "grades": [7],
+      "grade_band": "middle_school",
+      "genres": ["literary_analysis", "informational_report"],
+      "writing_types": ["text_based_response", "explanatory"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "standards-based commentary / exceeds grade-level standards",
+        "type": "standards_commentary"
+      },
+      "rights_note": "Public state education resource. Store only links and distilled rules unless local licensing policy permits more.",
+      "best_use": [
+        "meets/exceeds grade-level positive anchor",
+        "theme explanation with specific evidence",
+        "standards-based commentary model"
+      ],
+      "calibration_rules": [
+        {
+          "id": "theme_through_action",
+          "applies_to": ["literary_analysis", "text_based_response"],
+          "priority": "high",
+          "rule": "A strong text-based literary response states a clear theme or interpretation and uses well-chosen action/details from the text to explain how that theme is developed."
+        },
+        {
+          "id": "concise_can_be_strong",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "Concise, efficient writing can be top-band when it directly answers the prompt and explains evidence; length is not a proxy for quality."
+        },
+        {
+          "id": "commentary_as_mechanism",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Evidence becomes strong only when the student explains the mechanism: how the detail, event, character action, or pattern supports the theme."
+        },
+        {
+          "id": "conventions_are_not_perfection",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "Published standards samples may still include imperfections; judge whether language choices support meaning before penalizing surface accuracy."
+        }
+      ]
+    },
+    {
+      "id": "massachusetts_wsa_g8_literary_interpretation_b85",
+      "name": "Writing Standards in Action Grade 8: Literary Interpretation Essay",
+      "provider": "Massachusetts Department of Elementary and Secondary Education",
+      "url": "https://www.doe.mass.edu/frameworks/ela/wsa/grade8/b85.pdf",
+      "source_family": "massachusetts_wsa",
+      "utility": "strong",
+      "grades": [8],
+      "grade_band": "middle_school",
+      "genres": ["literary_analysis", "argumentative", "narrative"],
+      "writing_types": ["literary_interpretation", "opinion_argument"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "standards-based commentary / grade-level literary interpretation",
+        "type": "standards_commentary"
+      },
+      "rights_note": "Public state education resource. Store only links and distilled rules unless local licensing policy permits more.",
+      "best_use": [
+        "stretch anchor for grade 7-8 literary interpretation",
+        "argument/narrative blend in literary response",
+        "standards-based top-band commentary"
+      ],
+      "calibration_rules": [
+        {
+          "id": "interpretation_has_claim",
+          "applies_to": ["literary_analysis", "argumentative"],
+          "priority": "high",
+          "rule": "Literary interpretation should advance a defensible claim about meaning, not just recount the story or describe a character."
+        },
+        {
+          "id": "narrative_evidence_can_support_argument",
+          "applies_to": ["literary_analysis", "narrative"],
+          "priority": "medium",
+          "rule": "Narrative or contextual detail can strengthen literary interpretation when it is explicitly used to support the interpretive claim."
+        },
+        {
+          "id": "grade8_stretch_anchor",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "A stretch/top-band middle-school response explains patterns across the text and keeps the interpretation coherent across the whole piece."
+        }
+      ]
+    },
+    {
+      "id": "understanding_proficiency_sbac_ela",
+      "name": "Understanding Proficiency ELA Student Work",
+      "provider": "WestEd / SCALE",
+      "url": "https://understandingproficiency.wested.org/ela/",
+      "source_family": "smarter_balanced_understanding_proficiency",
+      "utility": "strong",
+      "grades": [3, 4, 5, 6, 7, 8, 11],
+      "grade_band": "cross_grade",
+      "genres": ["informational_report", "argumentative", "narrative", "summary_report", "text_based_response"],
+      "writing_types": ["explanatory", "opinion_argument", "narrative", "constructed_response"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "Smarter Balanced trait score points",
+        "type": "trait_score_points",
+        "traits": [
+          {"id": "organization_and_purpose"},
+          {"id": "evidence_and_elaboration"},
+          {"id": "conventions"}
+        ]
+      },
+      "rights_note": "Use as public linked teacher-scored reference. Do not copy sample responses into repository prompts.",
+      "best_use": [
+        "cross-grade score-point ladder",
+        "trait calibration for evidence/elaboration, organization, and conventions",
+        "case-study commentary and next-step patterns"
+      ],
+      "calibration_rules": [
+        {
+          "id": "evidence_elaboration_trait",
+          "applies_to": ["all_writing"],
+          "priority": "high",
+          "rule": "Separate evidence/elaboration from organization: a response with tidy structure but weak evidence or thin explanation should not beat a response with stronger developed content."
+        },
+        {
+          "id": "constructed_response_specificity",
+          "applies_to": ["summary_report", "informational_report", "text_based_response"],
+          "priority": "medium",
+          "rule": "For source-based writing, reward relevant selection and explanation of source information over broad recall or copied detail."
+        },
+        {
+          "id": "case_study_next_steps",
+          "applies_to": ["all_writing"],
+          "priority": "low",
+          "rule": "Teacher commentary can distinguish current score from next instructional move; do not convert every fixable weakness into a ranking defeat when the core task response is stronger."
+        }
+      ]
+    },
+    {
+      "id": "smarter_annotated_response_tool",
+      "name": "Smarter Annotated Response Tool",
+      "provider": "Smarter Balanced",
+      "url": "https://smart.smarterbalanced.org/examples",
+      "source_family": "smarter_balanced_smart",
+      "utility": "strong",
+      "grades": [3, 4, 5, 6, 7, 8, 11],
+      "grade_band": "cross_grade",
+      "genres": ["informational_report", "argumentative", "narrative", "summary_report", "text_based_response"],
+      "writing_types": ["full_write", "constructed_response"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "Smarter Balanced annotated score points",
+        "type": "trait_score_points"
+      },
+      "rights_note": "Use as public linked annotated-response reference. Do not copy sample responses into local artifacts.",
+      "best_use": [
+        "score-point expectations by trait and grade",
+        "source-based explanatory/argumentative/narrative calibration",
+        "teacher-visible annotation style"
+      ],
+      "calibration_rules": [
+        {
+          "id": "trait_specific_score",
+          "applies_to": ["all_writing"],
+          "priority": "high",
+          "rule": "Score and compare by the trait actually at issue; organization can be strong while evidence/elaboration remains weak, and vice versa."
+        },
+        {
+          "id": "annotation_justifies_score",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "A teacher-grade decision should identify the exact writing behavior that justifies the score point, not merely label the essay strong or weak."
+        }
+      ]
+    },
+    {
+      "id": "bc_performance_standards_writing",
+      "name": "B.C. Performance Standards for Writing and Additional Student Samples",
+      "provider": "Province of British Columbia",
+      "url": "https://www2.gov.bc.ca/gov/content/education-training/k-12/teach/resources-for-teachers/curriculum/bc-performance-standards",
+      "source_family": "bc_performance_standards",
+      "utility": "supplemental",
+      "grades": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "grade_band": "cross_grade",
+      "genres": ["narrative", "informational_report", "argumentative", "literary_analysis", "all_writing"],
+      "writing_types": ["personal_writing", "literary_writing", "writing_to_communicate"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "four performance levels",
+        "type": "performance_levels",
+        "levels": ["Not Yet Within Expectations", "Meets Expectations (Minimal)", "Fully Meets Expectations", "Exceeds Expectations"]
+      },
+      "rights_note": "Public provincial education resource. Use links and distilled performance-level rules only.",
+      "best_use": [
+        "four-level performance-band language",
+        "teacher observation patterns",
+        "cross-grade writing development"
+      ],
+      "calibration_rules": [
+        {
+          "id": "four_level_boundary_language",
+          "applies_to": ["all_writing"],
+          "priority": "medium",
+          "rule": "Use four-level band language as boundary support: minimal meets, fully meets, and exceeds should differ by development, control, specificity, and effect, not by a single surface feature."
+        },
+        {
+          "id": "teacher_observation_style",
+          "applies_to": ["all_writing"],
+          "priority": "low",
+          "rule": "Teacher comments should cite observable writing behaviors such as originality, supporting detail, audience awareness, control, and risk-taking."
+        },
+        {
+          "id": "literary_writing_transfer",
+          "applies_to": ["literary_analysis", "narrative"],
+          "priority": "low",
+          "rule": "For literary or creative tasks, originality and risk-taking matter only when supported by control and enough development for the reader to understand the intended effect."
+        }
+      ]
+    },
+    {
+      "id": "massachusetts_mcas_student_work",
+      "name": "MCAS Released Student Work and Annotations",
+      "provider": "Massachusetts Department of Elementary and Secondary Education",
+      "url": "https://www.doe.mass.edu/mcas/student/",
+      "source_family": "massachusetts_mcas",
+      "utility": "supplemental",
+      "grades": [3, 4, 5, 6, 7, 8, 10],
+      "grade_band": "cross_grade",
+      "genres": ["argumentative", "informational_report", "text_based_response", "summary_report"],
+      "writing_types": ["essay", "constructed_response"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "MCAS idea development and conventions score points",
+        "type": "trait_score_points",
+        "traits": [
+          {"id": "idea_development", "range": "0-5"},
+          {"id": "standard_english_conventions", "range": "0-3"}
+        ]
+      },
+      "rights_note": "Public state assessment resource. Use links and distilled score-ladder rules only.",
+      "best_use": [
+        "idea development vs conventions separation",
+        "cross-grade state assessment score ladders",
+        "short constructed-response calibration"
+      ],
+      "calibration_rules": [
+        {
+          "id": "idea_development_before_conventions",
+          "applies_to": ["all_writing"],
+          "priority": "high",
+          "rule": "Treat idea development and conventions as separable: stronger content should not be buried by conventions unless errors block meaning."
+        },
+        {
+          "id": "state_assessment_score_ladder",
+          "applies_to": ["argumentative", "informational_report", "text_based_response"],
+          "priority": "medium",
+          "rule": "Use state score ladders to distinguish adequate development from sustained development; one accurate point is not the same as a fully developed response."
+        }
+      ]
+    },
+    {
+      "id": "college_board_ap_literature_samples",
+      "name": "AP English Literature Free-Response Samples and Scoring Commentary",
+      "provider": "College Board",
+      "url": "https://apcentral.collegeboard.org/courses/ap-english-literature-and-composition/exam/past-exam-questions",
+      "source_family": "college_board_ap_literature",
+      "utility": "stretch",
+      "grades": [11, 12],
+      "grade_band": "upper_high_school",
+      "genres": ["literary_analysis", "argumentative"],
+      "writing_types": ["poetry_analysis", "prose_analysis", "literary_argument"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "AP Literature 6-point free-response rubric",
+        "type": "analytic_rubric",
+        "traits": [
+          {"id": "thesis", "range": "0-1"},
+          {"id": "evidence_and_commentary", "range": "0-4"},
+          {"id": "sophistication", "range": "0-1"}
+        ]
+      },
+      "rights_note": "College Board resource. Use public links and distilled rubric logic only; do not ingest student sample text.",
+      "best_use": [
+        "advanced literary-analysis upper-bound",
+        "evidence/commentary vs thesis distinction",
+        "sophistication guardrail"
+      ],
+      "calibration_rules": [
+        {
+          "id": "commentary_not_evidence_volume",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Advanced literary analysis is driven by commentary: evidence volume does not compensate for weak explanation of how the evidence supports the interpretation."
+        },
+        {
+          "id": "thesis_is_floor_not_ceiling",
+          "applies_to": ["literary_analysis", "argumentative"],
+          "priority": "medium",
+          "rule": "A defensible thesis or claim is necessary but not sufficient; the ranking turns on the sustained evidence and commentary that follows."
+        },
+        {
+          "id": "sophistication_requires_development",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "Sophisticated-sounding insight should not win unless it is developed through the text; complexity without proof remains thin."
+        }
+      ]
+    },
+    {
+      "id": "cambridge_igcse_literature_ecr",
+      "name": "Cambridge IGCSE Literature in English Example Candidate Responses",
+      "provider": "Cambridge International Education",
+      "url": "https://learning.cambridgeinternational.org/classroom/pluginfile.php/151555/mod_resource/content/4/ECR_Literature_0475_Paper1_Prose_v2.pdf",
+      "source_family": "cambridge_igcse_literature",
+      "utility": "stretch",
+      "grades": [9, 10],
+      "grade_band": "high_school",
+      "genres": ["literary_analysis"],
+      "writing_types": ["prose_literature_response", "unseen_literary_analysis"],
+      "teacher_commentary": true,
+      "student_samples": true,
+      "scale": {
+        "label": "Cambridge literature assessment objectives",
+        "type": "assessment_objectives",
+        "traits": [
+          {"id": "AO1", "description": "textual knowledge and reference"},
+          {"id": "AO2", "description": "meanings beyond surface"},
+          {"id": "AO3", "description": "language, structure, form"},
+          {"id": "AO4", "description": "informed personal response"}
+        ]
+      },
+      "rights_note": "Cambridge resource. Use public links and distilled assessment-objective rules only; do not ingest candidate scripts.",
+      "best_use": [
+        "upper-secondary literature analysis",
+        "author craft/function calibration",
+        "surface meaning vs deeper meaning distinction"
+      ],
+      "calibration_rules": [
+        {
+          "id": "root_claims_in_text",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Claims about surface or figurative meaning must be rooted in textual reference plus explanation; unsupported interpretive leaps should not outrank text-grounded analysis."
+        },
+        {
+          "id": "language_structure_effect",
+          "applies_to": ["literary_analysis"],
+          "priority": "high",
+          "rule": "Analysis of language, structure, and form should explain the effect on meaning, atmosphere, character, relationship, or reader response."
+        },
+        {
+          "id": "personal_response_informed",
+          "applies_to": ["literary_analysis"],
+          "priority": "medium",
+          "rule": "A personal or original reading is valuable only when it remains informed by the text and its context."
+        }
+      ]
+    }
+  ]
+}
