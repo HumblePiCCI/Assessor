@@ -254,6 +254,9 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "caution_not_decisive_reason": {"type": "string"},
                         "winner_text_moments": {"type": "array", "items": {"type": "string"}},
                         "loser_text_moments": {"type": "array", "items": {"type": "string"}},
+                        "mechanics_blocked_student": {"type": "string"},
+                        "mechanics_blocker_evidence": {"type": "array", "items": {"type": "string"}},
+                        "mechanics_blocker_reason": {"type": "string"},
                     },
                     "required": [
                         "pair_key",
@@ -275,6 +278,9 @@ GROUP_CALIBRATION_RESPONSE_FORMAT = {
                         "caution_not_decisive_reason",
                         "winner_text_moments",
                         "loser_text_moments",
+                        "mechanics_blocked_student",
+                        "mechanics_blocker_evidence",
+                        "mechanics_blocker_reason",
                     ],
                     "additionalProperties": False,
                 },
@@ -341,6 +347,50 @@ GENERIC_CAUTION_REASON_PHRASES = frozenset(
         "clearer consequences",
         "better support",
         "more specific events",
+    }
+)
+MECHANICS_BLOCKING_KEYWORDS = frozenset(
+    {
+        "meaning",
+        "unrecoverable",
+        "cannot recover",
+        "can't recover",
+        "cannot follow",
+        "can't follow",
+        "not understandable",
+        "incomprehensible",
+        "unreadable",
+        "blocks",
+        "blocked",
+        "prevents",
+        "precluded",
+        "collapses",
+    }
+)
+MECHANICS_SURFACE_ONLY_PHRASES = frozenset(
+    {
+        "grammar errors",
+        "grammatical errors",
+        "word-choice",
+        "word choice",
+        "sentence errors",
+        "sentence-level breakdown",
+        "sentence level breakdown",
+        "sentence breakdown",
+        "breakdowns",
+        "spelling errors",
+        "punctuation errors",
+        "rough mechanics",
+        "mechanically rough",
+        "harder to follow",
+        "hard to follow",
+        "hard to recover",
+        "hard to recover reliably",
+        "vague claims",
+        "vagueness",
+        "awkward wording",
+        "run-on",
+        "fragments",
     }
 )
 NON_ESCALATED_SOURCES = frozenset({"cheap_pairwise", "orientation_audit"})
@@ -2384,6 +2434,11 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
         routed_cautions = edge.get("routed_cautions") if isinstance(edge.get("routed_cautions"), list) else []
         winner_moments = edge.get("winner_text_moments") if isinstance(edge.get("winner_text_moments"), list) else []
         loser_moments = edge.get("loser_text_moments") if isinstance(edge.get("loser_text_moments"), list) else []
+        blocker_evidence = (
+            edge.get("mechanics_blocker_evidence")
+            if isinstance(edge.get("mechanics_blocker_evidence"), list)
+            else []
+        )
         edge_decisions.append(
             {
                 "pair_key": pair_key,
@@ -2405,6 +2460,11 @@ def normalize_group_calibration(neighborhood: dict, payload: dict) -> dict:
                 "caution_not_decisive_reason": str(edge.get("caution_not_decisive_reason") or "").strip(),
                 "winner_text_moments": [str(moment).strip() for moment in winner_moments if str(moment).strip()],
                 "loser_text_moments": [str(moment).strip() for moment in loser_moments if str(moment).strip()],
+                "mechanics_blocked_student": str(edge.get("mechanics_blocked_student") or "none").strip() or "none",
+                "mechanics_blocker_evidence": [
+                    str(moment).strip() for moment in blocker_evidence if str(moment).strip()
+                ],
+                "mechanics_blocker_reason": str(edge.get("mechanics_blocker_reason") or "").strip(),
             }
         )
     return {
@@ -2511,6 +2571,12 @@ def group_calibration_prompt(
             (
                 "Do not use surface_control as decisive on a routed caution edge unless mechanics_block_meaning or completion_floor_applied is true. "
                 "If a complete/formulaic essay wins, explain the textual interpretation and proof quality that make it win, not just its organization."
+            ),
+            (
+                "If mechanics_block_meaning=true, fill mechanics_blocked_student with the student_id whose meaning is blocked, "
+                "mechanics_blocker_evidence with at least two concrete unreadable or meaning-breaking moments, and mechanics_blocker_reason with why "
+                "the meaning is not reliably recoverable. Do not set mechanics_block_meaning=true for ordinary roughness, grammar errors, vague wording, "
+                "or weaker polish when the interpretation can still be followed."
             ),
             "An edge_decisions winner may disagree with the broad ordered_student_ids only if the local pair is genuinely ambiguous; explain that tension in the edge rationale.",
             f"Class context: {class_context}",
@@ -2816,9 +2882,76 @@ def caution_reason_addresses_caution(edge: dict, cautions: list[str] | set[str])
     return False
 
 
+def mechanics_blocker_student(edge: dict) -> str:
+    value = str(edge.get("mechanics_blocked_student") or "none").strip()
+    return value or "none"
+
+
+def mechanics_blocker_evidence(edge: dict) -> list[str]:
+    raw = edge.get("mechanics_blocker_evidence") if isinstance(edge.get("mechanics_blocker_evidence"), list) else []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def mechanics_blocker_reason(edge: dict) -> str:
+    return str(edge.get("mechanics_blocker_reason") or "").strip().lower()
+
+
+def mechanics_reason_is_substantive(edge: dict) -> bool:
+    reason = mechanics_blocker_reason(edge)
+    if not reason:
+        return False
+    has_meaning_block = any(keyword in reason for keyword in MECHANICS_BLOCKING_KEYWORDS)
+    surface_only = any(phrase in reason for phrase in MECHANICS_SURFACE_ONLY_PHRASES)
+    if not has_meaning_block:
+        return False
+    # A reason can mention surface errors, but it must also explicitly connect
+    # them to unrecoverable meaning, not just weaker polish or fluency.
+    if surface_only and not any(
+        phrase in reason
+        for phrase in (
+            "blocks meaning",
+            "block meaning",
+            "meaning is not recoverable",
+            "meaning is unrecoverable",
+            "cannot recover",
+            "can't recover",
+            "cannot follow the interpretation",
+            "can't follow the interpretation",
+            "not reliably recoverable",
+            "unreadable",
+            "incomprehensible",
+        )
+    ):
+        return False
+    return True
+
+
 def reject_ledger(status: dict, reason: str) -> dict:
     status.update({"accepted": False, "reason": reason})
     return status
+
+
+def mechanics_blocker_validation(candidate: dict, edge: dict, status: dict) -> dict | None:
+    seed_order = candidate.get("seed_order") if isinstance(candidate.get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    winner = str(edge.get("winner") or "").strip()
+    loser = lower if winner == higher else higher if winner == lower else ""
+    blocked_student = mechanics_blocker_student(edge)
+    if blocked_student in {"", "none", "tie", "tie_or_ambiguous"}:
+        return reject_ledger(status, "mechanics_blocker_missing_side")
+    if loser and blocked_student != loser:
+        return reject_ledger(status, "mechanics_blocker_wrong_side")
+    if len(mechanics_blocker_evidence(edge)) < 2:
+        return reject_ledger(status, "mechanics_blocker_missing_evidence")
+    if not mechanics_blocker_reason(edge):
+        return reject_ledger(status, "mechanics_blocker_reason_too_generic")
+    if not mechanics_reason_is_substantive(edge):
+        reason = mechanics_blocker_reason(edge)
+        if any(phrase in reason for phrase in MECHANICS_SURFACE_ONLY_PHRASES):
+            return reject_ledger(status, "mechanics_blocker_reason_too_generic")
+        return reject_ledger(status, "mechanics_blocker_not_meaning_blocking")
+    return None
 
 
 def prior_preservation_caution_validation(
@@ -2842,6 +2975,10 @@ def prior_preservation_caution_validation(
     if "mechanics_impede_meaning" in cautions:
         if decisive_axis == "mechanics" and not mechanics_block:
             return reject_ledger(status, "mechanics_decisive_without_blocker")
+        if decisive_axis == "mechanics" or mechanics_block:
+            blocker_failure = mechanics_blocker_validation(candidate, edge, status)
+            if blocker_failure:
+                return blocker_failure
         if mechanics_block and not caution_reason_addresses_caution(edge, {"mechanics_impede_meaning"}):
             return reject_ledger(status, "caution_reason_missing_caution_reference")
 
@@ -2906,6 +3043,10 @@ def validate_group_edge_ledger(candidate: dict, edge: dict) -> dict:
         return reject_ledger(status, "mechanics_decisive_without_blocker")
     if decisive_axis == "completion_floor" and not truthy(edge.get("completion_floor_applied")):
         return reject_ledger(status, "completion_decisive_without_floor")
+    if decisive_axis == "mechanics" or truthy(edge.get("mechanics_block_meaning")):
+        blocker_failure = mechanics_blocker_validation(candidate, edge, status)
+        if blocker_failure:
+            return blocker_failure
     if (
         "incomplete_or_scaffold" in set(routed_cautions)
         and decisive_axis == "completion_coherence"

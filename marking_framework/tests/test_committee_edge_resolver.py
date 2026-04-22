@@ -3245,6 +3245,9 @@ def test_group_edge_response_schema_requires_ledger_fields():
         "caution_not_decisive_reason",
         "winner_text_moments",
         "loser_text_moments",
+        "mechanics_blocked_student",
+        "mechanics_blocker_evidence",
+        "mechanics_blocker_reason",
     } <= required
 
 
@@ -3263,6 +3266,9 @@ def group_edge_ledger(
     completion_coherence_winner=None,
     winner_moments=None,
     loser_moments=None,
+    mechanics_blocked_student="none",
+    mechanics_blocker_evidence=None,
+    mechanics_blocker_reason="",
 ):
     return {
         "interpretive_claim_winner": interpretive_claim_winner or winner,
@@ -3276,6 +3282,9 @@ def group_edge_ledger(
         "caution_not_decisive_reason": reason,
         "winner_text_moments": winner_moments or ["winner moment one", "winner moment two"],
         "loser_text_moments": loser_moments or ["loser moment one"],
+        "mechanics_blocked_student": mechanics_blocked_student,
+        "mechanics_blocker_evidence": mechanics_blocker_evidence or [],
+        "mechanics_blocker_reason": mechanics_blocker_reason,
     }
 
 
@@ -3596,6 +3605,231 @@ def test_group_edge_ledger_rejects_mechanics_without_blocker():
 
     assert status["accepted"] is False
     assert status["reason"] == "mechanics_decisive_without_blocker"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_missing_side():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocker_evidence=["fragment one", "fragment two"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_missing_side"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_wrong_side():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue blocks meaning.",
+            mechanics_blocked_student="s004",
+            mechanics_blocker_evidence=["fragment one", "fragment two"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_wrong_side"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_missing_evidence():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue blocks meaning.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["fragment one"],
+            mechanics_blocker_reason="The errors block meaning enough that the interpretation cannot be recovered.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_missing_evidence"
+
+
+def test_group_edge_ledger_rejects_generic_mechanics_blocker_reason():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "This mirrors the shallow s004::s008 live blocker.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics and rougher-content concerns are not decisive because s008 has errors.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["sentence error one", "sentence error two"],
+            mechanics_blocker_reason="Grammar errors, vague claims, and awkward wording make s008 harder to follow.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_hard_to_recover_mechanics_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "This mirrors the live mini mechanics loophole.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics and rougher-content concerns are not decisive because s008 is unstable.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=[
+                "Those out Ghost life Coach let him june the defense.",
+                "In the novel meat coach who becomes one of the most important leaders.",
+            ],
+            mechanics_blocker_reason=(
+                "Frequent word-choice and sentence-level breakdowns make the argument hard to recover reliably."
+            ),
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_reason_too_generic"
+
+
+def test_group_edge_ledger_rejects_mechanics_blocker_not_meaning_blocking():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics allegedly block meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason="The mechanics issue is not decisive unless meaning is blocked.",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=["wording issue one", "wording issue two"],
+            mechanics_blocker_reason="The essay is weaker and less fluent than the other response.",
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is False
+    assert status["reason"] == "mechanics_blocker_not_meaning_blocking"
+
+
+def test_group_edge_ledger_allows_substantive_mechanics_blocker():
+    candidate = _get_candidate(_build_ghost_candidates(), "s004::s008")
+    edge = {
+        "pair_key": "s004::s008",
+        "winner": "s004",
+        "confidence": "high",
+        "rationale": "Mechanics genuinely block the other side's meaning.",
+        "polish_trap": False,
+        "rougher_but_stronger_latent": False,
+        "mechanics_block_meaning": True,
+        "completion_floor_applied": False,
+        **group_edge_ledger(
+            winner="s004",
+            loser="s008",
+            decisive_axis="mechanics",
+            caution_honored=False,
+            routed_cautions=["mechanics_impede_meaning", "rougher_but_stronger_content"],
+            reason=(
+                "The mechanics concern is decisive because s008's rougher content cannot be recovered "
+                "through the sentence breakdowns."
+            ),
+            interpretive_claim_winner="s008",
+            proof_quality_winner="s004",
+            mechanics_blocked_student="s008",
+            mechanics_blocker_evidence=[
+                "The central claim breaks off before identifying what Ghost learns.",
+                "The evidence sentence splices two unrelated moments so the meaning is unrecoverable.",
+            ],
+            mechanics_blocker_reason=(
+                "These sentence breakdowns block meaning; the interpretation is not reliably recoverable "
+                "even after rereading."
+            ),
+        ),
+    }
+
+    status = cer.validate_group_edge_ledger(candidate, edge)
+
+    assert status["accepted"] is True
+    assert status["reason"] == "prior_preservation_ledger_accepted"
 
 
 def test_group_edge_ledger_rejects_completion_without_floor():
