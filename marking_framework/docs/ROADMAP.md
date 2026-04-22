@@ -1,8 +1,8 @@
 # Live Cohort Roadmap
 
 Status
-- State: draft for review
-- Last updated: 2026-04-14
+- State: active runtime roadmap
+- Last updated: 2026-04-22
 - Intended use: technical roadmap for moving from benchmark-green to live-cohort-stable
 
 ## Purpose
@@ -122,7 +122,7 @@ It should not invent a wholly separate gate style.
 
 ## Roadmap Overview
 
-The roadmap is split into six workstreams:
+The original live-cohort roadmap was split into six workstreams:
 
 1. Runtime provisional/cohort-confidence gate
 2. Cold-start anchor calibration
@@ -130,6 +130,21 @@ The roadmap is split into six workstreams:
 4. Committee consensus for novel scopes
 5. Retrieval-backed scope grounding
 6. Governed post-release calibration learning
+
+As of the current `main`, these foundations have landed in the runtime path:
+- deterministic scope grounding and `outputs/scope_grounding.json`
+- runtime cohort confidence and `outputs/cohort_confidence.json`
+- anchor calibration pause/resume
+- rerank stability metrics and damping under disagreement
+- committee consensus reporting from the multi-assessor panel
+- governed review-learning retention
+- routed pairwise escalation, evidence maps, evidence group packets, committee-edge resolution, and hard-pair eval before publish/SOTA gates
+
+The active remaining live-cohort quality problem is no longer "can the runtime
+route hard edges?" The hard edges now reach the routed committee path. The
+active failure is narrower: live `gpt-5.4-mini` group reads can still preserve a
+wrong prior winner by saying the prior has stronger proof quality, even when the
+routed caution is about interpretation/content depth.
 
 Each workstream is designed to integrate with the current repo, not replace it.
 
@@ -987,9 +1002,12 @@ These are important, but they are not the first build items.
 
 If work starts now, the right next implementation order is:
 
-1. conditional pipeline state machine
-2. runtime cohort-confidence gate in shadow mode
-3. cold-start anchor calibration flow
-4. rerank damping under high assessor SD
+1. challenge proof-quality prior preservation against interpretation/content cautions in `committee_edge_resolver.py`
+2. rerun the Ghost single-packet live validation and routed hard-pair eval on `gpt-5.4-mini`
+3. only after that, broaden validation back to the external corpus and source families
+4. then return to non-literary/early-grade calibration density, boundary calibration, portfolio mode, or exemplar-bank expansion based on the remaining miss profile
 
-Those four together are the shortest path from the current benchmark-strong system to a live teacher product that fails safely and improves quickly.
+That order keeps the current failure mode concrete. The pipeline already
+selects the right Ghost hard pairs and routes them into the right committee
+packet; the next durable gain is to stop accepting proof-volume rationales when
+the unresolved question is interpretive depth or rougher-but-stronger content.

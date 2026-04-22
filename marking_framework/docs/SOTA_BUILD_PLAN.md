@@ -2,7 +2,7 @@
 
 Status
 - State: active working plan
-- Last updated: 2026-03-31
+- Last updated: 2026-04-22
 - Intended use: canonical continuation document for architecture, sequencing, and acceptance criteria across future sessions
 
 ## Purpose
@@ -66,6 +66,7 @@ The remaining in-repo work is now accuracy refinement and corpus-driven evaluati
 - reduce over-anchoring when exemplar scope is weak or cross-band
 - add boundary calibration so strong relative ordering produces stronger exact-level hit
 - extend benchmark and gate visibility by source family, grade band, and form
+- harden routed committee adjudication for live literary-analysis cohorts where proof volume, polish, or mechanics can mask stronger interpretation
 
 ## Working Definition Of SOTA For This Repo
 
@@ -942,40 +943,44 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Phase 11: scope-native scoring and boundary calibration
-2. Live rollout rehearsal against the production contract
+1. Continue the live literary committee-edge seam by challenging proof-quality prior preservation against interpretation/content cautions.
+2. Re-run the routed Ghost hard-pair and broader external corpus validations.
+3. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
+4. Rehearse live rollout against the production contract.
 
 Why this order:
-- Phase 11 addresses the highest-value accuracy gap surfaced by the expanded explicit-gold corpus
+- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, but mini can still preserve wrong prior winners through proof-quality language
+- Phase 11 still addresses the broader accuracy gap surfaced by the expanded explicit-gold corpus
 - live rollout rehearsal closes the environment-specific deployment gap after the scoring path is stronger
 
 ## Immediate Next Sprint
 
-The next sprint should start the highest-leverage slice of Phase 11.
+The next sprint should start the highest-leverage slice of the routed literary committee seam.
 
 ### Sprint Goal
 
-Improve exact leveling on the expanded external corpus by fixing scope routing, threading genre into criteria, and reducing over-anchoring when exemplar scope is weak.
+Prevent prior-preserving committee group reads from accepting proof-quality explanations when the routed caution is really about interpretation/content strength.
 
 ### Sprint Scope
 
-1. Expand grade-band routing to include early grades and nearest-band fallback
-2. Add more real-world genre normalization and form-specific criteria
-3. Pass resolved genre into criterion prompting
-4. Make pass-1 guard scope-sensitive so weak exemplar matches do not dominate scoring
+1. Add interpretation/content claim-refutation fields to group edge ledgers.
+2. Require prior-preserving caution edges to name and directly refute the loser-side interpretive claim.
+3. Reject generic "more evidence", "more concrete events", and "more text-grounded proof" explanations when they do not defeat the routed caution.
+4. Replay the `gpt-5.4-mini` single-packet Ghost validation and verify `s003::s009`, `s009::s015`, and `s019::s022` are rejected unless the model provides genuine interpretive refutation.
 
 ### Sprint Deliverables
 
-- expanded scope-routing helpers and tests
-- genre-aware criteria prompts and form-specific criterion definitions
-- scope-sensitive pass-1 guard behavior
-- updated benchmark-ready architecture notes in this plan
+- schema, normalization, prompt, and validator updates in `scripts/committee_edge_resolver.py`
+- fixture tests for proof-quality preservation against formulaic/thin, incomplete/scaffold, and rougher-stronger cautions
+- updated workflow docs
+- live mini validation artifact under `outputs/live_validation/` (not committed)
 
 ### Sprint Exit Criteria
 
-- early-grade and non-traditional forms no longer fall through to obviously poor scope matches
-- pass-1 no longer blends aggressively toward fallback anchors on cross-band scope
-- the scorer is ready for the next slice: explicit boundary calibration
+- proof-quality prior preservation is rejected unless the loser interpretive claim is directly refuted
+- model-free passthrough remains exact
+- full suite remains green
+- the remaining Ghost hard-pair misses move from "accepted wrong committee evidence" to "rejected/no committee evidence" or to correct overrides
 
 ## Engineering Rules While Executing This Plan
 
@@ -1038,6 +1043,7 @@ Use this section as the running status checkpoint.
 - production runtime now enforces strict identity-aware auth in staging/production, isolates projects and teacher workspaces, emits queue ops and retention reports, validates launch readiness, and generates rollback plans
 - rubric ingestion now supports multi-format extraction, normalized rubric manifests, verification artifacts, paused low-confidence confirmation, teacher edits, and runtime consumption of the verified rubric contract
 - Phase 11 has started with broader grade/genre routing, genre-aware criterion prompting, and scope-sensitive pass-1 guard behavior to reduce benchmark compression from weak exemplar matches
+- the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, and side-aware mechanics blocker validation
 
 ### Outstanding Architectural Risks
 
@@ -1045,7 +1051,8 @@ Use this section as the running status checkpoint.
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
 - exemplar coverage is still thinner than the benchmark corpus for early grades, portfolios, and some specialized forms, so routing improvements will need to be followed by richer exemplar and calibration banks
 - exact-level calibration still lags ordering quality on parts of the public corpus, especially top-band cases
+- `gpt-5.4-mini` group reads can still preserve wrong literary-analysis prior winners through proof-quality language even after mechanics-blocker validation; the next validator slice must challenge proof-quality preservation against interpretation/content cautions
 
 ### Next Decision Point
 
-Run the external corpus again after the Phase 11 slice lands, inspect remaining misses by source family and form, then decide whether the next implementation slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
+After the proof-quality preservation guard lands, rerun the Ghost single-packet validation and the routed hard-pair eval. If the wrong prior-preserving edges are rejected or corrected without passthrough regressions, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
