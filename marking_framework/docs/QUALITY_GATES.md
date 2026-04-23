@@ -46,6 +46,8 @@ Important current checks:
 - reproducibility report requirements for candidate/release profiles
 - routed hard-pair evaluation via `outputs/pairwise_adjudicator_eval.json`
 - pairwise eval must use the escalated/committee-edge path when required
+- final-order diagnostics should show zero unsuppressed `committee_edge`
+  direct-edge violations after rerank protection has run
 - evidence-neighborhood and evidence-group-packet readiness for candidate/release profiles when committee candidates exist
 
 Development profiles report missing evidence packets as diagnostics. Candidate

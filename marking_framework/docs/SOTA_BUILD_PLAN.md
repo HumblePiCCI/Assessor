@@ -943,13 +943,14 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Continue the live literary committee-edge seam by challenging proof-quality prior preservation against interpretation/content cautions.
-2. Re-run the routed Ghost hard-pair and broader external corpus validations.
-3. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
-4. Rehearse live rollout against the production contract.
+1. Add protected committee-edge audit and suppression before protected edges reach rerank.
+2. Re-run the routed Ghost hard-pair validation on `gpt-5.4-mini`.
+3. Re-run the broader external corpus once the protected-edge miss profile is clean.
+4. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
+5. Rehearse live rollout against the production contract.
 
 Why this order:
-- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, but mini can still preserve wrong prior winners through proof-quality language
+- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, proof-quality claim-refutation is enforced, and surviving committee decisions are now protected by rerank; the next risk is allowing a wrong or transport-compromised committee decision to become protected evidence
 - Phase 11 still addresses the broader accuracy gap surfaced by the expanded explicit-gold corpus
 - live rollout rehearsal closes the environment-specific deployment gap after the scoring path is stronger
 
@@ -959,28 +960,30 @@ The next sprint should start the highest-leverage slice of the routed literary c
 
 ### Sprint Goal
 
-Prevent prior-preserving committee group reads from accepting proof-quality explanations when the routed caution is really about interpretation/content strength.
+Prevent unsafe committee decisions from becoming protected rerank constraints.
 
 ### Sprint Scope
 
-1. Add interpretation/content claim-refutation fields to group edge ledgers.
-2. Require prior-preserving caution edges to name and directly refute the loser-side interpretive claim.
-3. Reject generic "more evidence", "more concrete events", and "more text-grounded proof" explanations when they do not defeat the routed caution.
-4. Replay the `gpt-5.4-mini` single-packet Ghost validation and verify `s003::s009`, `s009::s015`, and `s019::s022` are rejected unless the model provides genuine interpretive refutation.
+1. Add a protection-readiness pass in `scripts/committee_edge_resolver.py` before writing `outputs/consistency_checks.committee_edge.json`.
+2. Classify emitted committee decisions as `protect`, `suppress_ambiguous`, `needs_retry`, or `needs_group_read`.
+3. Suppress protected status when a pair has unresolved transport errors, unresolved A/B/C disagreement, accepted prior-preservation that conflicts with evidence/source calibration, or strong aggregate/evidence-map contradiction that the read does not explicitly defeat.
+4. Keep valid fixes protected: the Ghost replay should preserve `s003::s009`, `s004::s008`, and `s019::s022`.
+5. Prevent wrong protected evidence: fixture and replay coverage should catch cases like `s002::s011`, `s003::s013`, and transport-compromised `s009::s015`.
 
 ### Sprint Deliverables
 
-- schema, normalization, prompt, and validator updates in `scripts/committee_edge_resolver.py`
-- fixture tests for proof-quality preservation against formulaic/thin, incomplete/scaffold, and rougher-stronger cautions
+- protection-readiness schema and merge filtering in `scripts/committee_edge_resolver.py`
+- fixture tests for valid protected edges, suppressed ambiguous edges, retry-needed transport cases, and evidence/source contradiction cases
 - updated workflow docs
-- live mini validation artifact under `outputs/live_validation/` (not committed)
+- offline Ghost replay artifact under `/tmp` and optional live mini validation artifact under `outputs/live_validation/` (not committed)
 
 ### Sprint Exit Criteria
 
-- proof-quality prior preservation is rejected unless the loser interpretive claim is directly refuted
+- no committee decision becomes protected unless it passes protection-readiness checks
+- suppressed/ambiguous decisions remain visible in trace/report artifacts but do not appear in the canonical merged judgment file as protected `committee_edge` evidence
 - model-free passthrough remains exact
 - full suite remains green
-- the remaining Ghost hard-pair misses move from "accepted wrong committee evidence" to "rejected/no committee evidence" or to correct overrides
+- Ghost replay keeps the currently fixed committee edges protected and moves remaining bad edges to explicit retry/suppress states or correct overrides
 
 ## Engineering Rules While Executing This Plan
 
@@ -1043,7 +1046,7 @@ Use this section as the running status checkpoint.
 - production runtime now enforces strict identity-aware auth in staging/production, isolates projects and teacher workspaces, emits queue ops and retention reports, validates launch readiness, and generates rollback plans
 - rubric ingestion now supports multi-format extraction, normalized rubric manifests, verification artifacts, paused low-confidence confirmation, teacher edits, and runtime consumption of the verified rubric contract
 - Phase 11 has started with broader grade/genre routing, genre-aware criterion prompting, and scope-sensitive pass-1 guard behavior to reduce benchmark compression from weak exemplar matches
-- the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, and side-aware mechanics blocker validation
+- the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, side-aware mechanics blocker validation, proof-quality claim-refutation fields, and protected committee-direct rerank constraints
 
 ### Outstanding Architectural Risks
 
@@ -1051,8 +1054,8 @@ Use this section as the running status checkpoint.
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
 - exemplar coverage is still thinner than the benchmark corpus for early grades, portfolios, and some specialized forms, so routing improvements will need to be followed by richer exemplar and calibration banks
 - exact-level calibration still lags ordering quality on parts of the public corpus, especially top-band cases
-- `gpt-5.4-mini` group reads can still preserve wrong literary-analysis prior winners through proof-quality language even after mechanics-blocker validation; the next validator slice must challenge proof-quality preservation against interpretation/content cautions
+- because committee-edge winners are now protected by rerank, a wrong or ambiguous live committee decision can have larger placement impact; the next validator slice must audit protection-readiness before emitting canonical protected committee evidence
 
 ### Next Decision Point
 
-After the proof-quality preservation guard lands, rerun the Ghost single-packet validation and the routed hard-pair eval. If the wrong prior-preserving edges are rejected or corrected without passthrough regressions, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
+After protected committee-edge audit lands, rerun the Ghost routed hard-pair validation on `gpt-5.4-mini`. If valid fixes remain protected while unsafe edges are suppressed, retried, or corrected, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.

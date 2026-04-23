@@ -42,6 +42,7 @@ Quick Start
    - `python3 scripts/global_rerank.py --judgments outputs/consistency_checks.committee_edge.json`
    - Or via Hero Path: `python3 scripts/hero_path.py --band-seam-adjudication --verify-consistency --apply-consistency`
    - The default resolver path is deterministic and model-free unless `--committee-edge-live` or `COMMITTEE_EDGE_LIVE=1` explicitly enables live committee reads.
+   - Direct `adjudication_source="committee_edge"` winners that survive merge become protected rerank graph constraints; rerank may suppress them only for explicit graph safety/cycle reasons.
    - The consistency pass expands post-seam coverage by default: it fully compares the top pack, checks band-seam/aggregate movers against that pack, and writes an audit report.
    - Pairwise judgments include genre-aware criterion notes so reviewers can see whether the model preferred meaning, evidence, genre requirements, organization, or language control.
    - Hard-pair adjudicator evals should be run on the merged committee-edge file:
@@ -74,7 +75,7 @@ Key Outputs
 - `outputs/irr_metrics.json` (inter-rater reliability: ICC, Kendall's W)
 - `outputs/grade_curve.csv` (level-aware bell-curve grades based on the resolved order)
 - `outputs/pairwise_matrix.json` (normalized pairwise evidence and support/opposition weights)
-- `outputs/consistency_report.json` (rerank diagnostics, movements, and uncertainty details)
+- `outputs/consistency_report.json` (rerank diagnostics, movements, committee direct-edge protection, and uncertainty details)
 - `outputs/band_seam_report.json` (evidence-aware level-boundary adjudication)
 - `outputs/pairwise_escalation_candidates.json` / `outputs/pairwise_escalations.json` (high-leverage routed pairwise escalation)
 - `outputs/consistency_checks.escalated.json` (cheap/orientation/escalated merged pairwise checks)

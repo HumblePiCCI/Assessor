@@ -141,10 +141,11 @@ As of the current `main`, these foundations have landed in the runtime path:
 - routed pairwise escalation, evidence maps, evidence group packets, committee-edge resolution, and hard-pair eval before publish/SOTA gates
 
 The active remaining live-cohort quality problem is no longer "can the runtime
-route hard edges?" The hard edges now reach the routed committee path. The
-active failure is narrower: live `gpt-5.4-mini` group reads can still preserve a
-wrong prior winner by saying the prior has stronger proof quality, even when the
-routed caution is about interpretation/content depth.
+route hard edges?" The hard edges now reach the routed committee path, and
+surviving direct committee-edge decisions are protected by rerank. The active
+failure is narrower: before a live `gpt-5.4-mini` committee decision becomes
+protected evidence, the resolver must decide whether that edge is safe to
+protect, ambiguous enough to suppress, or transport-compromised enough to retry.
 
 Each workstream is designed to integrate with the current repo, not replace it.
 
@@ -1002,12 +1003,13 @@ These are important, but they are not the first build items.
 
 If work starts now, the right next implementation order is:
 
-1. challenge proof-quality prior preservation against interpretation/content cautions in `committee_edge_resolver.py`
-2. rerun the Ghost single-packet live validation and routed hard-pair eval on `gpt-5.4-mini`
-3. only after that, broaden validation back to the external corpus and source families
+1. add protected committee-edge audit and suppression in `committee_edge_resolver.py`
+2. rerun the Ghost routed hard-pair validation on `gpt-5.4-mini`
+3. only after unsafe protected edges are either suppressed, retried, or corrected, broaden validation back to the external corpus and source families
 4. then return to non-literary/early-grade calibration density, boundary calibration, portfolio mode, or exemplar-bank expansion based on the remaining miss profile
 
 That order keeps the current failure mode concrete. The pipeline already
-selects the right Ghost hard pairs and routes them into the right committee
-packet; the next durable gain is to stop accepting proof-volume rationales when
-the unresolved question is interpretive depth or rougher-but-stronger content.
+selects the right Ghost hard pairs, routes them into the right committee packet,
+and protects surviving committee winners in rerank. The next durable gain is to
+stop unsafe committee decisions from entering the canonical protected evidence
+set at all.

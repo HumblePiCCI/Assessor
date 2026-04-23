@@ -44,7 +44,7 @@
 - `outputs/committee_edge_live_trace.json`
   - live/fixture read trace when committee reads are enabled
 - `outputs/consistency_checks.committee_edge.json`
-  - canonical merged judgment file consumed by `global_rerank.py`
+  - canonical merged judgment file consumed by `global_rerank.py`; surviving direct `adjudication_source="committee_edge"` judgments are eligible for protected `committee_direct_edge` rerank constraints
 
 8) Evidence Map And Group Packets
 - `outputs/evidence_map.json`
@@ -60,6 +60,7 @@
 
 10) Final Order (`outputs/final_order.csv`)
 - Consensus rows with `final_rank` after deterministic global rerank.
+- Related diagnostics live in `outputs/consistency_report.json`, including `committee_direct_edge_*` counts when committee-edge decisions are protected, satisfied, violated, or dropped for graph safety.
 
 11) Dashboard Data (`outputs/dashboard_data.json`)
 - UI payload with student text and round summaries.
