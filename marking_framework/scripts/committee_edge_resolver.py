@@ -503,6 +503,17 @@ UNRESOLVED_GROUP_STATUSES = frozenset(
         "committee_read_c_not_needed",
     }
 )
+PROTECTION_STATUSES = frozenset({"protect", "suppress_ambiguous", "needs_retry", "needs_group_read"})
+PROTECTION_RETRY_STATUSES = frozenset({"read_a_error", "read_b_error", "read_c_error", "group_calibration_error"})
+PROTECTION_UNRESOLVED_READ_STATUSES = frozenset(
+    {
+        "committee_read_ab_split_b_confirms_prior",
+        "committee_read_ab_split_no_trap",
+        "committee_read_ab_weak_agreement",
+        "committee_read_c_not_high_confidence",
+        "committee_read_c_no_substantive_basis",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -3944,6 +3955,382 @@ def decision_from_committee_read(
     return item
 
 
+def protection_readiness_payload(
+    status: str,
+    reason: str,
+    blocking_reasons: list[str] | None = None,
+    *,
+    signals: dict | None = None,
+) -> dict:
+    normalized_status = str(status or "").strip()
+    if normalized_status not in PROTECTION_STATUSES:
+        normalized_status = "suppress_ambiguous"
+    default_signals = {
+        "transport_complete": True,
+        "read_conflict_resolved": True,
+        "source_calibration_conflict": False,
+        "evidence_map_conflict": False,
+        "prior_preservation_guard_passed": True,
+        "cycle_suppressed": False,
+        "mechanics_or_completion_consistent": True,
+    }
+    if isinstance(signals, dict):
+        default_signals.update(signals)
+    return {
+        "status": normalized_status,
+        "reason": str(reason or "").strip() or "committee_decision_safe_to_protect",
+        "blocking_reasons": sorted(
+            {
+                str(blocker).strip()
+                for blocker in (blocking_reasons or [])
+                if str(blocker).strip()
+            }
+        ),
+        "signals": default_signals,
+    }
+
+
+def normalize_protection_readiness(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    status = str(value.get("status") or "").strip()
+    if status not in PROTECTION_STATUSES:
+        return None
+    return protection_readiness_payload(
+        status,
+        str(value.get("reason") or ""),
+        list(value.get("blocking_reasons") or []),
+        signals=value.get("signals") if isinstance(value.get("signals"), dict) else {},
+    )
+
+
+def decision_readiness_trace(decision: dict) -> dict:
+    trace = decision.get("committee_edge_trace") if isinstance(decision.get("committee_edge_trace"), dict) else {}
+    return trace
+
+
+def committee_decision_has_transport_blocker(
+    decision: dict,
+    read_record: dict | None = None,
+    group_record: dict | None = None,
+) -> list[str]:
+    blockers: list[str] = []
+    trace = decision_readiness_trace(decision)
+    if truthy(trace.get("transport_error")) or truthy(decision.get("transport_error")):
+        blockers.append("transport_error")
+    if isinstance(read_record, dict):
+        if str(read_record.get("status") or "") in PROTECTION_RETRY_STATUSES:
+            blockers.append(str(read_record.get("status")))
+        for field in ("read_b_status", "read_c_status"):
+            status = str(read_record.get(field) or "")
+            if status in PROTECTION_RETRY_STATUSES:
+                blockers.append(status)
+        for field in ("error", "read_b_error", "read_c_error"):
+            if str(read_record.get(field) or "").strip():
+                blockers.append(field)
+    if isinstance(group_record, dict):
+        if str(group_record.get("status") or "") in PROTECTION_RETRY_STATUSES:
+            blockers.append(str(group_record.get("status")))
+        if str(group_record.get("error") or "").strip():
+            blockers.append("group_calibration_error")
+    return sorted(set(blockers))
+
+
+def committee_decision_has_unresolved_read_disagreement(
+    decision: dict,
+    read_record: dict | None = None,
+) -> list[str]:
+    blockers: list[str] = []
+    trace = decision_readiness_trace(decision)
+    if truthy(trace.get("unresolved_read_disagreement")):
+        blockers.append("unresolved_read_disagreement")
+    metadata = decision.get("model_metadata") if isinstance(decision.get("model_metadata"), dict) else {}
+    committee_read = str(metadata.get("committee_read") or trace.get("read") or "").strip()
+    if committee_read == "group-neighborhood-calibration":
+        return sorted(set(blockers))
+    status = str(read_record.get("status") or "") if isinstance(read_record, dict) else ""
+    if status in PROTECTION_UNRESOLVED_READ_STATUSES:
+        blockers.append(status)
+
+    winner = str(decision.get("winner") or "").strip()
+    chosen_read = str(trace.get("read") or "").strip()
+    if chosen_read == "A+B+C" and str(trace.get("read_c", {}).get("winner") or "").strip() == winner:
+        return sorted(set(blockers))
+    if chosen_read == "A+B" and str(trace.get("read_b", {}).get("winner") or "").strip() == winner:
+        return sorted(set(blockers))
+    if chosen_read == "A-blind" and str(trace.get("read_a", {}).get("winner") or "").strip() == winner:
+        return sorted(set(blockers))
+    read_winners = [
+        str(trace.get(read_key, {}).get("winner") or "").strip()
+        for read_key in ("read_a", "read_b", "read_c")
+        if isinstance(trace.get(read_key), dict)
+    ]
+    read_winners = [item for item in read_winners if item]
+    if len(read_winners) >= 2:
+        winner_support = sum(1 for item in read_winners if item == winner)
+        strongest_support = max((read_winners.count(item) for item in set(read_winners)), default=0)
+        if winner_support < strongest_support:
+            blockers.append("direct_read_winner_conflict")
+        elif winner_support == 1 and len(set(read_winners)) == len(read_winners):
+            blockers.append("direct_read_winner_conflict")
+    return sorted(set(blockers))
+
+
+def committee_decision_conflicts_with_source_or_evidence(
+    decision: dict,
+    candidate: dict | None = None,
+) -> list[str]:
+    blockers: list[str] = []
+    trace = decision_readiness_trace(decision)
+    winner = str(decision.get("winner") or "").strip()
+    winner_side = normalize_winner_side(decision.get("winner_side"))
+    checks = normalize_committee_decision_checks(
+        decision.get("decision_checks") if isinstance(decision.get("decision_checks"), dict) else {}
+    )
+
+    source_checks = normalize_source_calibration_checks(checks.get("source_calibration_checks"))
+    source_winner = source_checks.get("source_calibrated_winner")
+    source_guard_defeated = bool(trace.get("source_calibration_guard")) or truthy(
+        trace.get("source_calibration_conflict_defeated")
+    )
+    if source_winner in {"A", "B"} and winner_side and source_winner != winner_side and not source_guard_defeated:
+        blockers.append("source_calibration_conflict_not_defeated")
+
+    signal = evidence_map_pair_signal(candidate or {})
+    evidence_guard_defeated = bool(trace.get("evidence_map_guard")) or truthy(trace.get("evidence_map_conflict_defeated"))
+    if signal:
+        recommended = str(signal.get("recommended_winner") or "").strip()
+        if (
+            recommended
+            and recommended != "tie"
+            and recommended != winner
+            and evidence_map_guard_signal_is_strong(signal)
+            and not evidence_map_recommended_winner_blocked(signal, recommended)
+            and not evidence_guard_defeated
+        ):
+            blockers.append("strong_evidence_map_conflict")
+    if truthy(trace.get("evidence_map_conflict")) and not evidence_guard_defeated:
+        blockers.append("strong_evidence_map_conflict")
+    return sorted(set(blockers))
+
+
+def committee_decision_is_prior_preservation_without_enough_support(
+    decision: dict,
+    candidate: dict | None = None,
+) -> list[str]:
+    escalated_summary = (candidate or {}).get("escalated_summary")
+    escalated_summary = escalated_summary if isinstance(escalated_summary, dict) else {}
+    prior_winner = str(escalated_summary.get("winner") or "").strip()
+    trace = decision_readiness_trace(decision)
+    if not prior_winner:
+        prior_winner = str(trace.get("prior_winner") or "").strip()
+    winner = str(decision.get("winner") or "").strip()
+    if not prior_winner or winner != prior_winner:
+        return []
+    edge_context = {}
+    edge_decision = trace.get("edge_decision") if isinstance(trace.get("edge_decision"), dict) else {}
+    if edge_decision:
+        edge_context.update(edge_decision)
+    caution_ignored = candidate_is_caution_ignored_edge(candidate or {}, edge_context)
+    if not caution_ignored:
+        return []
+    ledger_status = edge_decision.get("edge_ledger_status") if isinstance(edge_decision.get("edge_ledger_status"), dict) else {}
+    if ledger_status.get("accepted") and ledger_status.get("reason") not in {
+        "prior_preservation_ledger_accepted",
+        "edge_ledger_not_required",
+    }:
+        return []
+    return ["prior_preservation_not_decisive"]
+
+
+def committee_decision_mechanics_completion_blockers(decision: dict) -> list[str]:
+    checks = normalize_committee_decision_checks(
+        decision.get("decision_checks") if isinstance(decision.get("decision_checks"), dict) else {}
+    )
+    blockers: list[str] = []
+    if checks.get("mechanics_block_meaning"):
+        blockers.append("mechanics_blocker_inconsistent")
+    if checks.get("completion_floor_applied"):
+        blockers.append("completion_floor_inconsistent")
+    return blockers
+
+
+def committee_protection_status(
+    decision: dict,
+    candidate: dict | None = None,
+    *,
+    read_record: dict | None = None,
+    group_record: dict | None = None,
+    cycle_suppressed: dict | None = None,
+) -> dict:
+    explicit = normalize_protection_readiness(decision.get("protection_readiness"))
+    if explicit is not None and explicit.get("status") != "protect":
+        return explicit
+
+    signals = {
+        "transport_complete": True,
+        "read_conflict_resolved": True,
+        "source_calibration_conflict": False,
+        "evidence_map_conflict": False,
+        "prior_preservation_guard_passed": True,
+        "cycle_suppressed": False,
+        "mechanics_or_completion_consistent": True,
+    }
+
+    if cycle_suppressed:
+        signals["cycle_suppressed"] = True
+        return protection_readiness_payload(
+            "suppress_ambiguous",
+            "committee_override_cycle_suppressed",
+            ["committee_override_cycle"],
+            signals=signals,
+        )
+
+    transport_blockers = committee_decision_has_transport_blocker(decision, read_record, group_record)
+    if transport_blockers:
+        signals["transport_complete"] = False
+        return protection_readiness_payload(
+            "needs_retry",
+            "transport_blocker_unresolved",
+            transport_blockers,
+            signals=signals,
+        )
+
+    read_blockers = committee_decision_has_unresolved_read_disagreement(decision, read_record)
+    if read_blockers:
+        signals["read_conflict_resolved"] = False
+        return protection_readiness_payload(
+            "needs_group_read",
+            "read_disagreement_unresolved",
+            read_blockers,
+            signals=signals,
+        )
+
+    mechanics_blockers = committee_decision_mechanics_completion_blockers(decision)
+    if mechanics_blockers:
+        signals["mechanics_or_completion_consistent"] = False
+        return protection_readiness_payload(
+            "suppress_ambiguous",
+            "mechanics_or_completion_blocker_inconsistent",
+            mechanics_blockers,
+            signals=signals,
+        )
+
+    evidence_blockers = committee_decision_conflicts_with_source_or_evidence(decision, candidate)
+    if evidence_blockers:
+        signals["source_calibration_conflict"] = "source_calibration_conflict_not_defeated" in evidence_blockers
+        signals["evidence_map_conflict"] = "strong_evidence_map_conflict" in evidence_blockers
+        return protection_readiness_payload(
+            "suppress_ambiguous",
+            "evidence_source_conflict_not_defeated",
+            evidence_blockers,
+            signals=signals,
+        )
+
+    prior_blockers = committee_decision_is_prior_preservation_without_enough_support(decision, candidate)
+    if prior_blockers:
+        signals["prior_preservation_guard_passed"] = False
+        return protection_readiness_payload(
+            "suppress_ambiguous",
+            "prior_preservation_not_decisive",
+            prior_blockers,
+            signals=signals,
+        )
+
+    return protection_readiness_payload("protect", "committee_decision_safe_to_protect", [], signals=signals)
+
+
+def annotate_committee_decision_protection(
+    decision: dict,
+    candidate_by_key: dict[str, dict],
+    *,
+    read_context_by_key: dict[str, dict] | None = None,
+    group_context_by_key: dict[str, dict] | None = None,
+    cycle_suppressed_by_key: dict[str, dict] | None = None,
+) -> dict:
+    key = str(pair_key_from_item(decision) or decision.get("pair_key") or "").strip()
+    item = normalize_committee_decision(decision, candidate_by_key)
+    readiness = committee_protection_status(
+        item,
+        candidate_by_key.get(key),
+        read_record=(read_context_by_key or {}).get(key),
+        group_record=(group_context_by_key or {}).get(key),
+        cycle_suppressed=(cycle_suppressed_by_key or {}).get(key),
+    )
+    item["protection_readiness"] = readiness
+    trace = item.get("committee_edge_trace") if isinstance(item.get("committee_edge_trace"), dict) else {}
+    trace["protection_readiness"] = {
+        "status": readiness["status"],
+        "reason": readiness["reason"],
+        "blocking_reasons": readiness["blocking_reasons"],
+    }
+    if readiness["status"] != "protect":
+        trace.setdefault("suppressed", True)
+        metadata = dict(item.get("model_metadata") or {})
+        metadata["protection_readiness_status"] = readiness["status"]
+        if readiness["reason"] == "committee_override_cycle_suppressed":
+            metadata["cycle_suppressed"] = True
+            trace["cycle_resolution"] = {"suppressed": True, "reason": readiness["reason"]}
+        item["model_metadata"] = metadata
+    item["committee_edge_trace"] = trace
+    return item
+
+
+def read_context_by_pair(read_results: list[dict]) -> dict[str, dict]:
+    return {
+        str(record.get("pair_key") or ""): record
+        for record in read_results
+        if isinstance(record, dict) and str(record.get("pair_key") or "").strip()
+    }
+
+
+def group_context_by_pair(group_results: list[dict]) -> dict[str, dict]:
+    context: dict[str, dict] = {}
+    for result in group_results:
+        if not isinstance(result, dict):
+            continue
+        for key in list(result.get("override_pair_keys") or []) + list(result.get("support_pair_keys") or []):
+            key = str(key or "").strip()
+            if key:
+                context[key] = result
+    return context
+
+
+def cycle_suppressed_by_pair(cycle_resolution: dict) -> dict[str, dict]:
+    return {
+        str(item.get("pair_key") or ""): item
+        for item in cycle_resolution.get("suppressed", [])
+        if isinstance(item, dict) and str(item.get("pair_key") or "").strip()
+    }
+
+
+def protection_readiness_counts(decisions: list[dict]) -> dict:
+    counts = Counter(
+        str((decision.get("protection_readiness") or {}).get("status") or "missing")
+        for decision in decisions
+        if isinstance(decision, dict)
+    )
+    return dict(sorted(counts.items()))
+
+
+def protection_readiness_by_pair(decisions: list[dict]) -> list[dict]:
+    rows = []
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        readiness = decision.get("protection_readiness") if isinstance(decision.get("protection_readiness"), dict) else {}
+        rows.append(
+            {
+                "pair_key": str(decision.get("pair_key") or pair_key_from_item(decision) or ""),
+                "winner": str(decision.get("winner") or ""),
+                "status": str(readiness.get("status") or "missing"),
+                "reason": str(readiness.get("reason") or ""),
+                "blocking_reasons": list(readiness.get("blocking_reasons") or []),
+            }
+        )
+    return sorted(rows, key=lambda row: (row["pair_key"], row["winner"], row["status"]))
+
+
 def run_read_a_path(
     *,
     selected: list[dict],
@@ -4457,8 +4844,13 @@ def merged_checks_payload(
     generated_at = now_iso()
     candidate_by_key = {str(candidate.get("pair_key")): candidate for candidate in candidates}
     normalized_decisions = [normalize_committee_decision(decision, candidate_by_key) for decision in decisions]
-    decision_keys = {pair_key_from_item(decision) for decision in normalized_decisions if pair_key_from_item(decision)}
-    passthrough = not normalized_decisions
+    protected_decisions = [
+        decision
+        for decision in normalized_decisions
+        if (decision.get("protection_readiness") or {}).get("status", "protect") == "protect"
+    ]
+    decision_keys = {pair_key_from_item(decision) for decision in protected_decisions if pair_key_from_item(decision)}
+    passthrough = not protected_decisions
     payload = copy.deepcopy(escalated_payload)
     payload["generated_at"] = generated_at
     if passthrough:
@@ -4466,14 +4858,16 @@ def merged_checks_payload(
         superseded_keys: list[str] = []
     else:
         marked = mark_superseded(escalated_checks, {key: "committee_edge" for key in decision_keys})
-        payload["checks"] = marked + normalized_decisions
+        payload["checks"] = marked + protected_decisions
         superseded_keys = sorted(decision_keys)
     payload["committee_edge"] = {
         "generated_at": generated_at,
         "phase": 1,
         "passthrough": passthrough,
         "candidate_count": len(candidates),
-        "decision_count": len(normalized_decisions),
+        "decision_count": len(protected_decisions),
+        "decision_count_total": len(normalized_decisions),
+        "protection_readiness_counts": protection_readiness_counts(normalized_decisions),
         "budget": budget,
         "superseded_pair_keys": superseded_keys,
         "source_checks_generated_at": escalated_payload.get("generated_at", ""),
@@ -4905,7 +5299,41 @@ def main() -> int:
             )
             return 1
     raw_decisions = manual_decisions + read_a_decisions + group_decisions
-    decisions, cycle_resolution = resolve_committee_override_cycles(raw_decisions)
+    candidate_by_key = {str(candidate.get("pair_key")): candidate for candidate in merged_candidates}
+    read_context = read_context_by_pair(read_a_results)
+    group_context = group_context_by_pair(group_results)
+    prelim_decisions = [
+        annotate_committee_decision_protection(
+            decision,
+            candidate_by_key,
+            read_context_by_key=read_context,
+            group_context_by_key=group_context,
+        )
+        for decision in raw_decisions
+        if isinstance(decision, dict)
+    ]
+    prelim_protected_decisions = [
+        decision
+        for decision in prelim_decisions
+        if (decision.get("protection_readiness") or {}).get("status") == "protect"
+    ]
+    _cycle_kept_decisions, cycle_resolution = resolve_committee_override_cycles(prelim_protected_decisions)
+    decisions = [
+        annotate_committee_decision_protection(
+            decision,
+            candidate_by_key,
+            read_context_by_key=read_context,
+            group_context_by_key=group_context,
+            cycle_suppressed_by_key=cycle_suppressed_by_pair(cycle_resolution),
+        )
+        for decision in raw_decisions
+        if isinstance(decision, dict)
+    ]
+    protected_decisions = [
+        decision
+        for decision in decisions
+        if (decision.get("protection_readiness") or {}).get("status") == "protect"
+    ]
     merged_payload = merged_checks_payload(
         escalated_payload=escalated_payload,
         escalated_checks=escalated_checks,
@@ -4914,6 +5342,7 @@ def main() -> int:
         budget=budget,
     )
     passthrough = not decisions
+    merged_passthrough = not protected_decisions
     candidate_payload = {
         "generated_at": generated_at,
         "phase": 1,
@@ -4929,16 +5358,21 @@ def main() -> int:
         "candidates": selected,
         "skipped": skipped,
     }
-    normalized_decisions = [
-        normalize_committee_decision(decision, {str(candidate.get("pair_key")): candidate for candidate in merged_candidates})
-        for decision in decisions
-    ]
+    normalized_decisions = decisions
+    protection_summary = {
+        "counts": protection_readiness_counts(normalized_decisions),
+        "protected_count": len(protected_decisions),
+        "withheld_count": len(normalized_decisions) - len(protected_decisions),
+        "by_pair": protection_readiness_by_pair(normalized_decisions),
+    }
     decisions_payload = {
         "generated_at": generated_at,
         "phase": 1,
         "passthrough": passthrough,
+        "canonical_passthrough": merged_passthrough,
         "source_paths": source_paths,
         "decisions": normalized_decisions,
+        "protection_readiness": protection_summary,
         "read_a": read_a_summary,
         "read_b": {
             "enabled": bool(read_a_summary.get("read_b_live") or read_a_summary.get("read_b_fixture")),
@@ -5005,6 +5439,8 @@ def main() -> int:
         "read_results": read_a_results,
         "group_calibration_results": group_results,
         "decision_pair_keys": [decision.get("pair_key", "") for decision in normalized_decisions],
+        "protected_decision_pair_keys": [decision.get("pair_key", "") for decision in protected_decisions],
+        "protection_readiness": protection_summary,
         "cycle_resolution": cycle_resolution,
     }
     trigger_counts = Counter()
@@ -5053,9 +5489,12 @@ def main() -> int:
         "caution_ignored_selected": caution_ignored_selected,
         "decisions": {
             "count": len(normalized_decisions),
+            "protected_count": len(protected_decisions),
+            "withheld_count": len(normalized_decisions) - len(protected_decisions),
+            "protection_readiness_counts": protection_summary["counts"],
             "overrides_escalated": sum(
                 1
-                for decision in normalized_decisions
+                for decision in protected_decisions
                 if any(
                     pair_key_from_item(check) == decision.get("pair_key")
                     and precedence_rank(normalize_source(check)) > precedence_rank("committee_edge")
@@ -5071,6 +5510,7 @@ def main() -> int:
         "ledger_guard": live_trace_payload["ledger_guard"],
         "source_calibration_guard": live_trace_payload["source_calibration_guard"],
         "evidence_map_guard": live_trace_payload["evidence_map_guard"],
+        "protection_readiness": protection_summary,
         "group_calibration": group_summary,
         "cycle_resolution": cycle_resolution,
         "phase2_ready": True,

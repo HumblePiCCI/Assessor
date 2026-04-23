@@ -4289,6 +4289,280 @@ def test_committee_override_cycle_resolution_suppresses_weakest_edge():
     assert cer.find_committee_override_cycle(kept) == []
 
 
+def _protection_candidate(
+    *,
+    higher="s002",
+    lower="s011",
+    prior_winner="s002",
+    prior_loser="s011",
+    cautions=None,
+):
+    pair = [higher, lower]
+    return {
+        "pair": pair,
+        "pair_key": cer.pair_key_from_item({"pair": pair}),
+        "bucket": "caution_ignored",
+        "triggers": ["caution_raised_but_winner_polish_like"],
+        "seed_order": {"higher": higher, "lower": lower, "higher_rank": 1, "lower_rank": 2},
+        "committee_score": 120,
+        "trigger_details": {
+            "escalated_cautions": list(cautions or ["polished_but_shallow"]),
+            "winner_source": "escalated_adjudication",
+        },
+        "escalated_summary": {
+            "winner": prior_winner,
+            "loser": prior_loser,
+            "confidence": "high",
+            "decision_basis": "content_reasoning",
+            "adjudication_source": "escalated_adjudication",
+        },
+    }
+
+
+def _committee_decision_for(candidate, *, winner, trace=None, checks=None):
+    read = _make_read(
+        candidate,
+        winner=winner,
+        confidence="high",
+        polish_trap=True,
+        rougher_but_stronger_latent=True,
+        **(checks or {}),
+    )
+    decision = cer.decision_from_committee_read(
+        candidate,
+        read,
+        "committee_read_a_override",
+        read_a=read,
+    )
+    if trace:
+        merged_trace = dict(decision.get("committee_edge_trace") or {})
+        merged_trace.update(trace)
+        decision["committee_edge_trace"] = merged_trace
+    return decision
+
+
+def test_protection_readiness_protects_valid_committee_fix():
+    candidate = _protection_candidate(prior_winner="s003", prior_loser="s009", higher="s003", lower="s009")
+    decision = _committee_decision_for(candidate, winner="s009")
+
+    annotated = cer.annotate_committee_decision_protection(
+        decision,
+        {candidate["pair_key"]: candidate},
+    )
+
+    assert annotated["protection_readiness"]["status"] == "protect"
+    assert annotated["protection_readiness"]["reason"] == "committee_decision_safe_to_protect"
+
+
+def test_protection_readiness_suppresses_transport_compromised_pair():
+    candidate = _protection_candidate()
+    decision = _committee_decision_for(candidate, winner="s011")
+
+    annotated = cer.annotate_committee_decision_protection(
+        decision,
+        {candidate["pair_key"]: candidate},
+        read_context_by_key={
+            candidate["pair_key"]: {
+                "pair_key": candidate["pair_key"],
+                "status": "read_a_error",
+                "error": "response stream disconnected",
+            }
+        },
+    )
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "needs_retry"
+    assert readiness["reason"] == "transport_blocker_unresolved"
+    assert "read_a_error" in readiness["blocking_reasons"]
+
+
+def test_protection_readiness_suppresses_unresolved_read_disagreement():
+    candidate = _protection_candidate()
+    decision = _committee_decision_for(
+        candidate,
+        winner="s011",
+        trace={
+            "read": "A+B",
+            "read_a": {"winner": "s011", "confidence": "high"},
+            "read_b": {"winner": "s002", "confidence": "high"},
+            "unresolved_read_disagreement": True,
+        },
+    )
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "needs_group_read"
+    assert readiness["reason"] == "read_disagreement_unresolved"
+    assert "unresolved_read_disagreement" in readiness["blocking_reasons"]
+
+
+def test_protection_readiness_suppresses_source_calibration_conflict_not_defeated():
+    candidate = _protection_candidate()
+    decision = _committee_decision_for(
+        candidate,
+        winner="s011",
+        checks={"source_calibration_checks": _source_checks(winner="A", evidence="A", commentary="A")},
+    )
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert readiness["reason"] == "evidence_source_conflict_not_defeated"
+    assert "source_calibration_conflict_not_defeated" in readiness["blocking_reasons"]
+
+
+def test_protection_readiness_suppresses_evidence_map_conflict_not_defeated():
+    candidate = _protection_candidate()
+    candidate = _with_evidence_map_signal(candidate, winner="s002", confidence="high", margin=3.0)
+    decision = _committee_decision_for(candidate, winner="s011")
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert readiness["reason"] == "evidence_source_conflict_not_defeated"
+    assert "strong_evidence_map_conflict" in readiness["blocking_reasons"]
+
+
+def test_suppressed_committee_decision_logged_but_not_merged_as_committee_edge():
+    payload = fixture_payload()
+    candidate = _protection_candidate(higher="s015", lower="s009", prior_winner="s015", prior_loser="s009")
+    decision = _committee_decision_for(candidate, winner="s009")
+    decision["protection_readiness"] = {
+        "status": "suppress_ambiguous",
+        "reason": "evidence_source_conflict_not_defeated",
+        "blocking_reasons": ["strong_evidence_map_conflict"],
+        "signals": {},
+    }
+
+    merged = cer.merged_checks_payload(
+        escalated_payload=payload,
+        escalated_checks=payload["checks"],
+        decisions=[decision],
+        candidates=[candidate],
+        budget={"selected": 1, "skipped": 0},
+    )
+
+    assert merged["checks"] == payload["checks"]
+    assert merged["committee_edge"]["passthrough"] is True
+    assert merged["committee_edge"]["decision_count"] == 0
+    assert merged["committee_edge"]["decision_count_total"] == 1
+    assert merged["committee_edge"]["protection_readiness_counts"]["suppress_ambiguous"] == 1
+
+
+def test_needs_retry_decision_not_in_canonical_checks():
+    payload = fixture_payload()
+    candidate = _protection_candidate(higher="s015", lower="s009", prior_winner="s015", prior_loser="s009")
+    decision = _committee_decision_for(candidate, winner="s009")
+    decision["protection_readiness"] = {
+        "status": "needs_retry",
+        "reason": "transport_blocker_unresolved",
+        "blocking_reasons": ["read_a_error"],
+        "signals": {},
+    }
+
+    merged = cer.merged_checks_payload(
+        escalated_payload=payload,
+        escalated_checks=payload["checks"],
+        decisions=[decision],
+        candidates=[candidate],
+        budget={"selected": 1, "skipped": 0},
+    )
+
+    assert all(
+        item.get("model_metadata", {}).get("adjudication_source") != "committee_edge"
+        for item in merged["checks"]
+    )
+    assert merged["committee_edge"]["protection_readiness_counts"]["needs_retry"] == 1
+
+
+def test_valid_ghost_fixes_remain_protected():
+    candidates = _build_ghost_candidates()
+    expected_winners = {
+        "s003::s009": "s009",
+        "s004::s008": "s008",
+        "s019::s022": "s022",
+    }
+
+    statuses = {}
+    for pair_key, winner in expected_winners.items():
+        candidate = _get_candidate(candidates, pair_key)
+        decision = _committee_decision_for(candidate, winner=winner)
+        annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+        statuses[pair_key] = annotated["protection_readiness"]["status"]
+
+    assert statuses == {pair_key: "protect" for pair_key in expected_winners}
+
+
+def test_s002_s011_wrong_protected_edge_shape_is_suppressed():
+    candidate = _protection_candidate(
+        higher="s002",
+        lower="s011",
+        prior_winner="s002",
+        prior_loser="s011",
+        cautions=["polished_but_shallow"],
+    )
+    decision = _committee_decision_for(candidate, winner="s002")
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert readiness["reason"] == "prior_preservation_not_decisive"
+
+
+def test_s009_s015_transport_compromised_shape_needs_retry():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    decision = _committee_decision_for(candidate, winner="s009")
+
+    annotated = cer.annotate_committee_decision_protection(
+        decision,
+        {candidate["pair_key"]: candidate},
+        read_context_by_key={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "status": "committee_read_a_override",
+                "read_b_status": "read_b_error",
+                "read_b_error": "transport closed before JSON completion",
+            }
+        },
+    )
+
+    readiness = annotated["protection_readiness"]
+    assert readiness["status"] == "needs_retry"
+    assert "read_b_error" in readiness["blocking_reasons"]
+
+
+def test_group_read_can_settle_unresolved_pair_as_protected():
+    candidate = _get_candidate(_build_ghost_candidates(), "s009::s015")
+    decision = cer.decision_from_group_calibration(
+        candidate,
+        {
+            "ordered_student_ids": ["s009", "s015"],
+            "confidence": "high",
+            "rationale": "Group read settles the unresolved edge by local order.",
+            "placement_notes": [],
+            "neighborhood_id": "group_1",
+        },
+    )
+    assert decision is not None
+
+    annotated = cer.annotate_committee_decision_protection(
+        decision,
+        {candidate["pair_key"]: candidate},
+        read_context_by_key={
+            "s009::s015": {
+                "pair_key": "s009::s015",
+                "status": "committee_read_ab_split_b_confirms_prior",
+            }
+        },
+    )
+
+    assert annotated["protection_readiness"]["status"] == "protect"
+
+
 def test_phase3d_group_calibration_emits_pair_overrides():
     candidates = _build_ghost_candidates()
     fixtures = cer.load_group_calibration_fixture(FIXTURE_DIR / "ghost_residual_group_calibration.json")
