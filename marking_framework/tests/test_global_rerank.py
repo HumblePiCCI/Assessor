@@ -236,6 +236,126 @@ def test_load_judgments_three_tier_precedence(tmp_path):
     assert comparison["source_counts"] == {"committee_edge": 1}
 
 
+def test_committee_edge_direct_winner_overrides_generic_level_lock(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "88", "composite_score": "0.90"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "2", "rubric_after_penalty_percent": "66", "composite_score": "0.62"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s2"],
+            "seed_order": {"higher": "s1", "lower": "s2"},
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "high",
+            "rationale": "Committee found s2 has the stronger direct literary interpretation.",
+            "model_metadata": {"adjudication_source": "committee_edge", "committee_read": "B-polish-trap-audit"},
+        }
+    ]
+    result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s2", "s1"]
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["summary"]["committee_direct_edges_added"] == 1
+    assert report_payload["summary"]["committee_direct_edge_violations"] == 0
+    assert any(item["kind"] == "level_lock" and item["reason"] == "cycle_avoided" for item in report_payload["constraints"]["dropped_edges"])
+    assert result["report"]["direct_edge_diagnostics"]["committee_direct_edge_satisfied_count"] == 1
+
+
+def test_committee_edge_direct_winner_overrides_displacement_cap(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "79", "composite_score": "0.79"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "78", "composite_score": "0.78"},
+        {"student_id": "s3", "seed_rank": "3", "consensus_rank": "3", "adjusted_level": "3", "rubric_after_penalty_percent": "77", "composite_score": "0.77"},
+        {"student_id": "s4", "seed_rank": "4", "consensus_rank": "4", "adjusted_level": "3", "rubric_after_penalty_percent": "76", "composite_score": "0.76"},
+        {"student_id": "s5", "seed_rank": "5", "consensus_rank": "5", "adjusted_level": "3", "rubric_after_penalty_percent": "75", "composite_score": "0.75"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s5"],
+            "seed_order": {"higher": "s1", "lower": "s5"},
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "medium",
+            "rationale": "Committee found s5 beats s1 on the direct edge.",
+            "model_metadata": {"adjudication_source": "committee_edge", "committee_read": "A-blind"},
+        }
+    ]
+    result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    rank = {row["student_id"]: int(row["final_rank"]) for row in csv.DictReader(final_order.open("r", encoding="utf-8"))}
+    assert rank["s5"] < rank["s1"]
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["summary"]["committee_direct_edges_added"] == 1
+    assert report_payload["summary"]["committee_direct_edge_violations"] == 0
+    assert any(item["kind"].startswith("displacement_cap") and item["reason"] == "cycle_avoided" for item in report_payload["constraints"]["dropped_edges"])
+    assert result["report"]["direct_edge_diagnostics"]["committee_direct_edge_added_count"] == 1
+
+
+def test_committee_edge_cycle_suppression_drops_weakest_protected_edge(tmp_path):
+    seed_rows = [
+        {"student_id": "a", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "3", "rubric_after_penalty_percent": "73", "composite_score": "0.73"},
+        {"student_id": "b", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "3", "rubric_after_penalty_percent": "72", "composite_score": "0.72"},
+        {"student_id": "c", "seed_rank": "3", "consensus_rank": "3", "adjusted_level": "3", "rubric_after_penalty_percent": "71", "composite_score": "0.71"},
+    ]
+    checks = [
+        {"pair": ["a", "b"], "decision": "KEEP", "confidence": "high", "model_metadata": {"adjudication_source": "committee_edge", "committee_read": "B-polish-trap-audit"}},
+        {"pair": ["b", "c"], "decision": "KEEP", "confidence": "high", "model_metadata": {"adjudication_source": "committee_edge", "committee_read": "B-polish-trap-audit"}},
+        {"pair": ["a", "c"], "decision": "SWAP", "confidence": "low", "model_metadata": {"adjudication_source": "committee_edge", "committee_read": "A-blind"}},
+    ]
+    result, _final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["summary"]["committee_direct_edges_added"] == 2
+    assert report_payload["direct_edge_diagnostics"]["committee_direct_edge_dropped_count"] == 1
+    assert any(
+        item["kind"] == "committee_direct_edge"
+        and item["src"] == "c"
+        and item["dst"] == "a"
+        and item["reason"] == "committee_direct_cycle_suppressed_by_rerank_safety"
+        for item in report_payload["constraints"]["dropped_edges"]
+    )
+    assert result["report"]["direct_edge_diagnostics"]["committee_direct_edge_violation_count"] == 1
+
+
+def test_suppressed_committee_edge_is_not_protected(tmp_path):
+    seed_rows = [
+        {"student_id": "s1", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "88", "composite_score": "0.90"},
+        {"student_id": "s2", "seed_rank": "2", "consensus_rank": "2", "adjusted_level": "2", "rubric_after_penalty_percent": "66", "composite_score": "0.62"},
+    ]
+    checks = [
+        {
+            "pair": ["s1", "s2"],
+            "seed_order": {"higher": "s1", "lower": "s2"},
+            "winner_side": "B",
+            "decision": "SWAP",
+            "confidence": "low",
+            "model_metadata": {"adjudication_source": "committee_edge", "cycle_suppressed": True},
+            "committee_edge_trace": {"cycle_resolution": {"suppressed": True}},
+        }
+    ]
+    result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
+    rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
+    assert [row["student_id"] for row in rows] == ["s1", "s2"]
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["summary"]["committee_direct_edges_added"] == 0
+    assert result["report"]["direct_edge_diagnostics"]["committee_direct_edge_added_count"] == 0
+    assert result["report"]["direct_edge_diagnostics"]["committee_direct_edge_violation_count"] == 1
+
+
+def test_superseded_committee_edge_is_not_protected():
+    judgments = [
+        {
+            "pair": ["s1", "s2"],
+            "pair_key": "s1::s2",
+            "winner": "s1",
+            "loser": "s2",
+            "confidence": "high",
+            "adjudication_source": "committee_edge",
+            "model_metadata": {"adjudication_source": "committee_edge", "superseded_by_next_resolver": True},
+        }
+    ]
+    assert gr.protected_committee_direct_edges(judgments) == []
+
+
 def test_global_rerank_is_deterministic_under_contradictory_evidence(tmp_path):
     seed_rows = [
         {"student_id": "a", "seed_rank": "1", "consensus_rank": "1", "adjusted_level": "4", "rubric_after_penalty_percent": "84", "composite_score": "0.84"},
