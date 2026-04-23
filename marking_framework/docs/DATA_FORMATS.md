@@ -38,13 +38,13 @@
 - `outputs/committee_edge_candidates.json`
   - residual unstable edges selected for committee routing
 - `outputs/committee_edge_decisions.json`
-  - emitted committee-edge decisions, if any
+  - emitted committee-edge decisions, if any, including `protection_readiness` for every decision; suppressed/retry/group-read-needed decisions remain here for audit even when they are withheld from canonical rerank input
 - `outputs/committee_edge_report.json`
-  - trigger, budget, guard, and passthrough summary
+  - trigger, budget, guard, protection-readiness, and passthrough summary
 - `outputs/committee_edge_live_trace.json`
-  - live/fixture read trace when committee reads are enabled
+  - live/fixture read trace when committee reads are enabled, including per-pair protection status and blocking reasons
 - `outputs/consistency_checks.committee_edge.json`
-  - canonical merged judgment file consumed by `global_rerank.py`; surviving direct `adjudication_source="committee_edge"` judgments are eligible for protected `committee_direct_edge` rerank constraints
+  - canonical merged judgment file consumed by `global_rerank.py`; only committee decisions with `protection_readiness.status == "protect"` are appended as direct `adjudication_source="committee_edge"` judgments eligible for protected `committee_direct_edge` rerank constraints
 
 8) Evidence Map And Group Packets
 - `outputs/evidence_map.json`

@@ -943,20 +943,19 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Add protected committee-edge audit and suppression before protected edges reach rerank.
-2. Re-run the routed Ghost hard-pair validation on `gpt-5.4-mini`.
-3. Re-run the broader external corpus once the protected-edge miss profile is clean.
-4. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
-5. Rehearse live rollout against the production contract.
+1. Re-run the routed Ghost hard-pair validation on `gpt-5.4-mini` with protection-readiness active.
+2. Re-run the broader external corpus once the protected-edge miss profile is clean.
+3. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
+4. Rehearse live rollout against the production contract.
 
 Why this order:
-- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, proof-quality claim-refutation is enforced, and surviving committee decisions are now protected by rerank; the next risk is allowing a wrong or transport-compromised committee decision to become protected evidence
+- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, proof-quality claim-refutation is enforced, surviving committee decisions are protected by rerank, and unsafe committee decisions are now withheld from canonical protected evidence by protection-readiness
 - Phase 11 still addresses the broader accuracy gap surfaced by the expanded explicit-gold corpus
 - live rollout rehearsal closes the environment-specific deployment gap after the scoring path is stronger
 
-## Immediate Next Sprint
+## Recently Landed Sprint
 
-The next sprint should start the highest-leverage slice of the routed literary committee seam.
+The protected committee-edge audit slice has landed in the routed literary committee seam.
 
 ### Sprint Goal
 
@@ -964,17 +963,17 @@ Prevent unsafe committee decisions from becoming protected rerank constraints.
 
 ### Sprint Scope
 
-1. Add a protection-readiness pass in `scripts/committee_edge_resolver.py` before writing `outputs/consistency_checks.committee_edge.json`.
-2. Classify emitted committee decisions as `protect`, `suppress_ambiguous`, `needs_retry`, or `needs_group_read`.
-3. Suppress protected status when a pair has unresolved transport errors, unresolved A/B/C disagreement, accepted prior-preservation that conflicts with evidence/source calibration, or strong aggregate/evidence-map contradiction that the read does not explicitly defeat.
-4. Keep valid fixes protected: the Ghost replay should preserve `s003::s009`, `s004::s008`, and `s019::s022`.
-5. Prevent wrong protected evidence: fixture and replay coverage should catch cases like `s002::s011`, `s003::s013`, and transport-compromised `s009::s015`.
+1. `scripts/committee_edge_resolver.py` applies a protection-readiness pass before writing `outputs/consistency_checks.committee_edge.json`.
+2. Emitted committee decisions are classified as `protect`, `suppress_ambiguous`, `needs_retry`, or `needs_group_read`.
+3. Protected status is withheld when a pair has unresolved transport errors, unresolved A/B/C disagreement, prior-preservation that remains unsafe, source-calibration conflict, or strong evidence-map contradiction that the decision does not explicitly defeat.
+4. Valid fixes remain protected in fixture coverage: `s003::s009`, `s004::s008`, and `s019::s022`.
+5. Unsafe shapes are covered by fixture tests: wrong prior-preserving `s002::s011`, unresolved `s003::s013`-style read disagreement, and transport-compromised `s009::s015`.
 
 ### Sprint Deliverables
 
 - protection-readiness schema and merge filtering in `scripts/committee_edge_resolver.py`
-- fixture tests for valid protected edges, suppressed ambiguous edges, retry-needed transport cases, and evidence/source contradiction cases
-- updated workflow docs
+- fixture tests for valid protected edges, suppressed ambiguous edges, retry-needed transport cases, group-read-needed cases, and evidence/source contradiction cases
+- updated workflow/data-format docs
 - offline Ghost replay artifact under `/tmp` and optional live mini validation artifact under `outputs/live_validation/` (not committed)
 
 ### Sprint Exit Criteria
@@ -1054,8 +1053,8 @@ Use this section as the running status checkpoint.
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
 - exemplar coverage is still thinner than the benchmark corpus for early grades, portfolios, and some specialized forms, so routing improvements will need to be followed by richer exemplar and calibration banks
 - exact-level calibration still lags ordering quality on parts of the public corpus, especially top-band cases
-- because committee-edge winners are now protected by rerank, a wrong or ambiguous live committee decision can have larger placement impact; the next validator slice must audit protection-readiness before emitting canonical protected committee evidence
+- because committee-edge winners are protected by rerank, the next validation risk is empirical: confirm `gpt-5.4-mini` live decisions land in `protect`, `suppress_ambiguous`, `needs_retry`, or `needs_group_read` as expected on the Ghost hard pairs before broadening to the external corpus
 
 ### Next Decision Point
 
-After protected committee-edge audit lands, rerun the Ghost routed hard-pair validation on `gpt-5.4-mini`. If valid fixes remain protected while unsafe edges are suppressed, retried, or corrected, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
+Rerun the Ghost routed hard-pair validation on `gpt-5.4-mini` with protection-readiness enabled. If valid fixes remain protected while unsafe edges are suppressed, retried, or corrected, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
