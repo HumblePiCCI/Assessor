@@ -183,6 +183,10 @@ Live behavior:
 Guardrails:
 - committee-edge decisions have source precedence over escalated and cheap
   pairwise judgments for the same pair
+- surviving direct committee-edge winners are protected as `committee_direct_edge`
+  constraints inside `scripts/global_rerank.py`; generic level locks,
+  displacement caps, and source-agnostic pairwise margins cannot invert them
+  unless adding the protected edge would create a rerank safety cycle
 - group calibration edge decisions must pass structured ledger validation before
   emitting overrides
 - routed caution edges require caution-specific substantive validation, including
