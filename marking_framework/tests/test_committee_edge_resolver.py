@@ -4576,6 +4576,17 @@ def test_suppressed_committee_decision_logged_but_not_merged_as_committee_edge()
     assert merged["committee_edge"]["decision_count"] == 0
     assert merged["committee_edge"]["decision_count_total"] == 1
     assert merged["committee_edge"]["protection_readiness_counts"]["suppress_ambiguous"] == 1
+    assert merged["committee_edge"]["withheld_pair_keys"] == [candidate["pair_key"]]
+    assert merged["committee_edge"]["protection_readiness"]["withheld_pair_keys"] == [candidate["pair_key"]]
+    assert merged["committee_edge"]["protection_readiness"]["by_pair"] == [
+        {
+            "pair_key": candidate["pair_key"],
+            "winner": "s009",
+            "status": "suppress_ambiguous",
+            "reason": "evidence_source_conflict_not_defeated",
+            "blocking_reasons": ["strong_evidence_map_conflict"],
+        }
+    ]
 
 
 def test_needs_retry_decision_not_in_canonical_checks():
@@ -4602,6 +4613,7 @@ def test_needs_retry_decision_not_in_canonical_checks():
         for item in merged["checks"]
     )
     assert merged["committee_edge"]["protection_readiness_counts"]["needs_retry"] == 1
+    assert merged["committee_edge"]["withheld_pair_keys"] == [candidate["pair_key"]]
 
 
 def test_valid_ghost_fixes_remain_protected():

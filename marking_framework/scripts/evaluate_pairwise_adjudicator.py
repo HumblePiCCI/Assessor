@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - Support running as script without pack
 DEFAULT_GOLD = Path(__file__).resolve().parents[1] / "evals" / "pairwise" / "ghost_literary_hard_pairs.json"
 DEFAULT_OUTPUT = "outputs/pairwise_adjudicator_eval.json"
 CONFIDENCE_WEIGHTS = {"low": 0.5, "medium": 1.0, "high": 2.0}
+COMMITTEE_WITHHELD_STATUSES = frozenset({"suppress_ambiguous", "needs_retry", "needs_group_read"})
 
 
 def now_iso() -> str:
@@ -114,6 +115,13 @@ def pair_key(left: str, right: str) -> str:
     return "::".join(sorted((str(left).strip(), str(right).strip())))
 
 
+def pair_from_key(key: str) -> list[str]:
+    left, sep, right = str(key or "").partition("::")
+    if not sep or not left.strip() or not right.strip():
+        return []
+    return sorted([left.strip(), right.strip()])
+
+
 def confidence_weight(confidence: str) -> float:
     return float(CONFIDENCE_WEIGHTS.get(vc.normalize_confidence(confidence), CONFIDENCE_WEIGHTS["low"]))
 
@@ -174,7 +182,46 @@ def outcomes_from_judgments(path: Path) -> dict[str, dict]:
     if not isinstance(raw_items, list):
         raw_items = []
 
-    return aggregate_judgment_outcomes(raw_items, source=str(path))
+    outcomes = aggregate_judgment_outcomes(raw_items, source=str(path))
+    outcomes.update(committee_withheld_outcomes(payload, source=str(path)))
+    return outcomes
+
+
+def committee_withheld_outcomes(payload: dict, *, source: str) -> dict[str, dict]:
+    committee = payload.get("committee_edge") if isinstance(payload.get("committee_edge"), dict) else {}
+    readiness = committee.get("protection_readiness") if isinstance(committee.get("protection_readiness"), dict) else {}
+    rows = readiness.get("by_pair") if isinstance(readiness.get("by_pair"), list) else []
+    outcomes: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").strip()
+        if status not in COMMITTEE_WITHHELD_STATUSES:
+            continue
+        key = str(row.get("pair_key") or "").strip()
+        pair = pair_from_key(key)
+        if not key or len(pair) != 2:
+            continue
+        outcomes[key] = {
+            "pair": pair,
+            "winner": "",
+            "ambiguous": True,
+            "committee_withheld": True,
+            "withheld": True,
+            "withheld_status": status,
+            "withheld_reason": str(row.get("reason") or ""),
+            "withheld_blocking_reasons": list(row.get("blocking_reasons") or []),
+            "winner_weights": {},
+            "judgment_count": 0,
+            "strongest_judgment": {
+                "adjudication_source": "committee_edge",
+                "committee_withheld": True,
+                "protection_readiness": row,
+            },
+            "judgments": [],
+            "source": source,
+        }
+    return outcomes
 
 
 def aggregate_judgment_outcomes(raw_items: list[dict], *, source: str) -> dict[str, dict]:
@@ -346,36 +393,43 @@ def likely_polish_bias(gold_pair: dict, outcome: dict | None) -> bool:
 
 def evaluate_outcomes(gold: dict, pairs: list[dict], outcomes: dict[str, dict]) -> dict:
     rows = []
-    by_tag = defaultdict(lambda: {"total": 0, "correct": 0, "missing": 0})
-    by_priority = defaultdict(lambda: {"total": 0, "correct": 0, "missing": 0})
+    by_tag = defaultdict(lambda: {"total": 0, "correct": 0, "missing": 0, "withheld": 0})
+    by_priority = defaultdict(lambda: {"total": 0, "correct": 0, "missing": 0, "withheld": 0})
     misses = []
     missing = []
+    withheld = []
     evaluated = 0
     correct = 0
     critical_total = 0
+    critical_evaluated = 0
     critical_correct = 0
     polish_bias_risks = []
     for gold_pair in pairs:
         key = gold_pair_key(gold_pair)
         outcome = outcomes.get(key)
-        predicted = outcome.get("winner") if isinstance(outcome, dict) else ""
-        is_missing = not predicted
+        is_withheld = bool(isinstance(outcome, dict) and outcome.get("committee_withheld"))
+        predicted = "" if is_withheld else outcome.get("winner") if isinstance(outcome, dict) else ""
+        is_missing = not predicted and not is_withheld
         is_correct = predicted == gold_pair["winner"]
-        if not is_missing:
+        if not is_missing and not is_withheld:
             evaluated += 1
             if is_correct:
                 correct += 1
         if gold_pair["priority"] == "critical":
             critical_total += 1
-            if is_correct:
+            if not is_missing and not is_withheld:
+                critical_evaluated += 1
+            if is_correct and not is_withheld:
                 critical_correct += 1
         for tag in gold_pair.get("tags", []):
             by_tag[tag]["total"] += 1
             by_tag[tag]["correct"] += int(is_correct)
             by_tag[tag]["missing"] += int(is_missing)
+            by_tag[tag]["withheld"] += int(is_withheld)
         by_priority[gold_pair["priority"]]["total"] += 1
         by_priority[gold_pair["priority"]]["correct"] += int(is_correct)
         by_priority[gold_pair["priority"]]["missing"] += int(is_missing)
+        by_priority[gold_pair["priority"]]["withheld"] += int(is_withheld)
         row = {
             "id": gold_pair["id"],
             "pair": gold_pair["pair"],
@@ -383,13 +437,19 @@ def evaluate_outcomes(gold: dict, pairs: list[dict], outcomes: dict[str, dict]) 
             "predicted_winner": predicted,
             "correct": bool(is_correct),
             "missing": bool(is_missing),
+            "withheld": bool(is_withheld),
+            "withheld_status": str(outcome.get("withheld_status") or "") if isinstance(outcome, dict) else "",
+            "withheld_reason": str(outcome.get("withheld_reason") or "") if isinstance(outcome, dict) else "",
+            "withheld_blocking_reasons": list(outcome.get("withheld_blocking_reasons") or []) if isinstance(outcome, dict) else [],
             "priority": gold_pair["priority"],
             "tags": gold_pair.get("tags", []),
             "gold_rationale": gold_pair.get("rationale", ""),
             "outcome": outcome or {},
         }
         rows.append(row)
-        if is_missing:
+        if is_withheld:
+            withheld.append(row)
+        elif is_missing:
             missing.append(row)
         elif not is_correct:
             misses.append(row)
@@ -397,8 +457,9 @@ def evaluate_outcomes(gold: dict, pairs: list[dict], outcomes: dict[str, dict]) 
                 polish_bias_risks.append(row)
     total = len(pairs)
     accuracy = (correct / evaluated) if evaluated else 0.0
-    coverage = (evaluated / total) if total else 1.0
-    critical_accuracy = (critical_correct / critical_total) if critical_total else 1.0
+    covered = total - len(missing)
+    coverage = (covered / total) if total else 1.0
+    critical_accuracy = (critical_correct / critical_evaluated) if critical_evaluated else 1.0
     thresholds = gold["thresholds"]
     failures = []
     if accuracy < thresholds["min_accuracy"]:
@@ -413,11 +474,14 @@ def evaluate_outcomes(gold: dict, pairs: list[dict], outcomes: dict[str, dict]) 
         "summary": {
             "pair_count": total,
             "evaluated_count": evaluated,
+            "covered_count": covered,
             "correct_count": correct,
             "missing_count": len(missing),
+            "withheld_count": len(withheld),
             "accuracy": round(accuracy, 6),
             "coverage": round(coverage, 6),
             "critical_pair_count": critical_total,
+            "critical_evaluated_count": critical_evaluated,
             "critical_correct_count": critical_correct,
             "critical_accuracy": round(critical_accuracy, 6),
             "failures": failures,
@@ -426,6 +490,7 @@ def evaluate_outcomes(gold: dict, pairs: list[dict], outcomes: dict[str, dict]) 
         "by_tag": summarize_buckets(by_tag),
         "misses": misses,
         "missing": missing,
+        "withheld": withheld,
         "polish_bias_risks": polish_bias_risks,
         "pairs": rows,
     }
@@ -437,12 +502,14 @@ def summarize_buckets(buckets: dict) -> dict:
         total = int(stats["total"])
         correct = int(stats["correct"])
         missing = int(stats["missing"])
-        evaluated = total - missing
+        withheld = int(stats.get("withheld", 0))
+        evaluated = total - missing - withheld
         summary[key] = {
             "total": total,
             "evaluated": evaluated,
             "correct": correct,
             "missing": missing,
+            "withheld": withheld,
             "accuracy": round((correct / evaluated) if evaluated else 0.0, 6),
         }
     return summary

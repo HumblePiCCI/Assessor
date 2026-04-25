@@ -4508,6 +4508,22 @@ def protection_readiness_by_pair(decisions: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (row["pair_key"], row["winner"], row["status"]))
 
 
+def protection_readiness_summary(decisions: list[dict], protected_decisions: list[dict]) -> dict:
+    by_pair = protection_readiness_by_pair(decisions)
+    withheld_pair_keys = [
+        row["pair_key"]
+        for row in by_pair
+        if row["pair_key"] and row["status"] in {"suppress_ambiguous", "needs_retry", "needs_group_read"}
+    ]
+    return {
+        "counts": protection_readiness_counts(decisions),
+        "protected_count": len(protected_decisions),
+        "withheld_count": len(decisions) - len(protected_decisions),
+        "withheld_pair_keys": sorted(set(withheld_pair_keys)),
+        "by_pair": by_pair,
+    }
+
+
 def run_read_a_path(
     *,
     selected: list[dict],
@@ -5026,6 +5042,7 @@ def merged_checks_payload(
         for decision in normalized_decisions
         if (decision.get("protection_readiness") or {}).get("status", "protect") == "protect"
     ]
+    protection_summary = protection_readiness_summary(normalized_decisions, protected_decisions)
     decision_keys = {pair_key_from_item(decision) for decision in protected_decisions if pair_key_from_item(decision)}
     passthrough = not protected_decisions
     payload = copy.deepcopy(escalated_payload)
@@ -5044,7 +5061,9 @@ def merged_checks_payload(
         "candidate_count": len(candidates),
         "decision_count": len(protected_decisions),
         "decision_count_total": len(normalized_decisions),
-        "protection_readiness_counts": protection_readiness_counts(normalized_decisions),
+        "protection_readiness_counts": protection_summary["counts"],
+        "protection_readiness": protection_summary,
+        "withheld_pair_keys": protection_summary["withheld_pair_keys"],
         "budget": budget,
         "superseded_pair_keys": superseded_keys,
         "source_checks_generated_at": escalated_payload.get("generated_at", ""),
@@ -5536,12 +5555,7 @@ def main() -> int:
         "skipped": skipped,
     }
     normalized_decisions = decisions
-    protection_summary = {
-        "counts": protection_readiness_counts(normalized_decisions),
-        "protected_count": len(protected_decisions),
-        "withheld_count": len(normalized_decisions) - len(protected_decisions),
-        "by_pair": protection_readiness_by_pair(normalized_decisions),
-    }
+    protection_summary = protection_readiness_summary(normalized_decisions, protected_decisions)
     decisions_payload = {
         "generated_at": generated_at,
         "phase": 1,
