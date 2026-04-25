@@ -4426,6 +4426,132 @@ def test_protection_readiness_suppresses_evidence_map_conflict_not_defeated():
     assert "strong_evidence_map_conflict" in readiness["blocking_reasons"]
 
 
+def test_proof_quality_challenge_defeats_source_conflict_for_guarded_ghost_fixes():
+    candidates = _build_ghost_candidates()
+    expected_winners = {
+        "s003::s009": "s009",
+        "s004::s008": "s008",
+        "s019::s022": "s022",
+    }
+    statuses = {}
+    challenge_statuses = {}
+    for pair_key, winner in expected_winners.items():
+        candidate = _with_evidence_map_signal(_get_candidate(candidates, pair_key), winner=winner)
+        prior_winner = candidate["escalated_summary"]["winner"]
+        winner_side = "A" if candidate["seed_order"]["higher"] == winner else "B"
+        source_side = "B" if winner_side == "A" else "A"
+        read = _make_read(
+            candidate,
+            winner=prior_winner,
+            source_calibration_checks=_source_checks(
+                winner=source_side,
+                evidence=source_side,
+                commentary=source_side,
+                mature_theme_without_proof=winner_side,
+            ),
+        )
+        guard_read, reason = cer.evidence_map_guard_decision(candidate, read)
+        assert guard_read is not None
+        decision = cer.decision_from_committee_read(candidate, guard_read, reason, read_a=read)
+
+        annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+        statuses[pair_key] = annotated["protection_readiness"]["status"]
+        challenge_statuses[pair_key] = annotated["committee_edge_trace"]["proof_quality_preservation_challenge"][
+            "reason"
+        ]
+
+    assert statuses == {pair_key: "protect" for pair_key in expected_winners}
+    assert challenge_statuses == {
+        pair_key: "evidence_map_proof_quality_preserved" for pair_key in expected_winners
+    }
+
+
+def test_proof_quality_challenge_does_not_protect_winner_polish_transport_pair():
+    candidate = _with_evidence_map_signal(_get_candidate(_build_ghost_candidates(), "s009::s015"), winner="s009")
+    read = _make_read(
+        candidate,
+        winner=candidate["escalated_summary"]["winner"],
+        source_calibration_checks=_source_checks(winner="A", evidence="A", commentary="A", mature_theme_without_proof="B"),
+    )
+    guard_read, reason = cer.evidence_map_guard_decision(candidate, read)
+    assert guard_read is not None
+    decision = cer.decision_from_committee_read(candidate, guard_read, reason, read_a=read)
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    challenge = annotated["committee_edge_trace"]["proof_quality_preservation_challenge"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert "source_calibration_conflict_not_defeated" in readiness["blocking_reasons"]
+    assert challenge["reason"] == "proof_quality_preservation_trigger_missing"
+
+
+def test_mature_theme_without_proof_winner_needs_recorded_proof_quality_challenge():
+    candidate = _protection_candidate(
+        higher="s011",
+        lower="s002",
+        prior_winner="s011",
+        prior_loser="s002",
+        cautions=["rougher_but_stronger_content"],
+    )
+    candidate["triggers"] = ["caution_raised_but_ignored_rougher_stronger"]
+    decision = _committee_decision_for(
+        candidate,
+        winner="s002",
+        checks={
+            "source_calibration_checks": _source_checks(
+                winner="B",
+                evidence="B",
+                commentary="B",
+                mature_theme_without_proof="B",
+            )
+        },
+    )
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    challenge = annotated["committee_edge_trace"]["proof_quality_preservation_challenge"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert readiness["reason"] == "proof_quality_preservation_not_defeated"
+    assert "mature_theme_without_proof_not_defeated" in readiness["blocking_reasons"]
+    assert challenge["reason"] == "proof_quality_preservation_guard_missing"
+
+
+def test_proof_quality_trigger_requires_accepted_challenge_before_protection():
+    candidate = _protection_candidate(
+        higher="s023",
+        lower="s004",
+        prior_winner="s023",
+        prior_loser="s004",
+        cautions=["rougher_but_stronger_content"],
+    )
+    candidate["triggers"] = ["caution_raised_but_ignored_rougher_stronger"]
+    candidate = _with_evidence_map_signal(candidate, winner="s004")
+    decision = _committee_decision_for(
+        candidate,
+        winner="s004",
+        checks={
+            "source_calibration_checks": _source_checks(
+                winner="B",
+                evidence="B",
+                commentary="B",
+                mature_theme_without_proof="none",
+            )
+        },
+    )
+
+    annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
+
+    readiness = annotated["protection_readiness"]
+    challenge = annotated["committee_edge_trace"]["proof_quality_preservation_challenge"]
+    assert readiness["status"] == "suppress_ambiguous"
+    assert readiness["reason"] == "proof_quality_preservation_not_defeated"
+    assert "proof_quality_preservation_not_accepted" in readiness["blocking_reasons"]
+    assert "evidence_map_guard_missing" in readiness["blocking_reasons"]
+    assert challenge["reason"] == "proof_quality_preservation_guard_missing"
+
+
 def test_suppressed_committee_decision_logged_but_not_merged_as_committee_edge():
     payload = fixture_payload()
     candidate = _protection_candidate(higher="s015", lower="s009", prior_winner="s015", prior_loser="s009")
@@ -4450,6 +4576,17 @@ def test_suppressed_committee_decision_logged_but_not_merged_as_committee_edge()
     assert merged["committee_edge"]["decision_count"] == 0
     assert merged["committee_edge"]["decision_count_total"] == 1
     assert merged["committee_edge"]["protection_readiness_counts"]["suppress_ambiguous"] == 1
+    assert merged["committee_edge"]["withheld_pair_keys"] == [candidate["pair_key"]]
+    assert merged["committee_edge"]["protection_readiness"]["withheld_pair_keys"] == [candidate["pair_key"]]
+    assert merged["committee_edge"]["protection_readiness"]["by_pair"] == [
+        {
+            "pair_key": candidate["pair_key"],
+            "winner": "s009",
+            "status": "suppress_ambiguous",
+            "reason": "evidence_source_conflict_not_defeated",
+            "blocking_reasons": ["strong_evidence_map_conflict"],
+        }
+    ]
 
 
 def test_needs_retry_decision_not_in_canonical_checks():
@@ -4476,6 +4613,7 @@ def test_needs_retry_decision_not_in_canonical_checks():
         for item in merged["checks"]
     )
     assert merged["committee_edge"]["protection_readiness_counts"]["needs_retry"] == 1
+    assert merged["committee_edge"]["withheld_pair_keys"] == [candidate["pair_key"]]
 
 
 def test_valid_ghost_fixes_remain_protected():
@@ -4488,8 +4626,11 @@ def test_valid_ghost_fixes_remain_protected():
 
     statuses = {}
     for pair_key, winner in expected_winners.items():
-        candidate = _get_candidate(candidates, pair_key)
-        decision = _committee_decision_for(candidate, winner=winner)
+        candidate = _with_evidence_map_signal(_get_candidate(candidates, pair_key), winner=winner)
+        read = _make_read(candidate, winner=candidate["escalated_summary"]["winner"])
+        guard_read, reason = cer.evidence_map_guard_decision(candidate, read)
+        assert guard_read is not None
+        decision = cer.decision_from_committee_read(candidate, guard_read, reason, read_a=read)
         annotated = cer.annotate_committee_decision_protection(decision, {candidate["pair_key"]: candidate})
         statuses[pair_key] = annotated["protection_readiness"]["status"]
 

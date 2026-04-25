@@ -1,5 +1,6 @@
 import csv
 import json
+from datetime import datetime, timezone
 
 import scripts.publish_gate as pg
 from scripts.calibration_contract import file_sha256
@@ -240,6 +241,10 @@ def _write_calibration_manifest(tmp_path, *, synthetic=False, samples=12, observ
         ),
         encoding="utf-8",
     )
+
+
+def _fresh_timestamp():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _write_reproducibility_report(path, *, exact=True, within_tolerance=None, manifest_identical=True, runs_compared=2, max_delta=0.0):
@@ -864,7 +869,7 @@ def test_publish_gate_release_profile_contract_success(tmp_path, monkeypatch):
         synthetic=False,
         samples=12,
         observations=12,
-        generated_at="2026-04-11T00:00:00+00:00",
+        generated_at=_fresh_timestamp(),
     )
     _write_reproducibility_report(tmp_path / "outputs/reproducibility_report.json", exact=True, within_tolerance=True, max_delta=0.0)
     (tmp_path / "config/accuracy_gate.json").write_text(

@@ -202,6 +202,100 @@ def test_aggregate_outcomes_committee_edge_overrides_escalated():
     assert outcomes["a::b"]["strongest_judgment"]["adjudication_source"] == "committee_edge"
 
 
+def test_outcomes_from_judgments_treats_committee_withheld_pair_as_unresolved(tmp_path):
+    judgments_path = tmp_path / "checks.committee_edge.json"
+    judgments_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "pair": ["a", "b"],
+                        "seed_order": {"higher": "a", "lower": "b"},
+                        "winner_side": "A",
+                        "decision": "KEEP",
+                        "confidence": "high",
+                        "model_metadata": {"adjudication_source": "escalated_adjudication"},
+                    }
+                ],
+                "committee_edge": {
+                    "protection_readiness": {
+                        "by_pair": [
+                            {
+                                "pair_key": "a::b",
+                                "winner": "b",
+                                "status": "suppress_ambiguous",
+                                "reason": "evidence_source_conflict_not_defeated",
+                                "blocking_reasons": ["source_calibration_conflict_not_defeated"],
+                            }
+                        ]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    outcomes = epa.outcomes_from_judgments(judgments_path)
+
+    assert outcomes["a::b"]["winner"] == ""
+    assert outcomes["a::b"]["committee_withheld"] is True
+    assert outcomes["a::b"]["withheld_status"] == "suppress_ambiguous"
+    assert outcomes["a::b"]["withheld_blocking_reasons"] == ["source_calibration_conflict_not_defeated"]
+
+
+def test_pairwise_eval_counts_committee_withheld_pair_as_covered_not_missed():
+    gold = {
+        "thresholds": {"min_accuracy": 0.88, "min_critical_accuracy": 1.0, "min_coverage": 1.0},
+        "pairs": [
+            {
+                "id": "critical_withheld",
+                "pair": ["a", "b"],
+                "winner": "b",
+                "priority": "critical",
+                "tags": ["rougher_stronger_interpretation", "formulaic_control_risk"],
+                "rationale": "B is stronger, but the committee withheld this pair.",
+            },
+            {
+                "id": "critical_correct",
+                "pair": ["c", "d"],
+                "winner": "c",
+                "priority": "critical",
+                "tags": ["top_pack"],
+            },
+        ],
+    }
+    outcomes = {
+        "a::b": {
+            "pair": ["a", "b"],
+            "winner": "",
+            "committee_withheld": True,
+            "withheld_status": "suppress_ambiguous",
+            "withheld_reason": "evidence_source_conflict_not_defeated",
+            "withheld_blocking_reasons": ["source_calibration_conflict_not_defeated"],
+        },
+        "c::d": {
+            "pair": ["c", "d"],
+            "winner": "c",
+            "ambiguous": False,
+            "strongest_judgment": {"decision_basis": "content_reasoning", "cautions_applied": []},
+        },
+    }
+
+    report = epa.evaluate_outcomes(gold, gold["pairs"], outcomes)
+
+    assert report["summary"]["accuracy"] == 1.0
+    assert report["summary"]["coverage"] == 1.0
+    assert report["summary"]["critical_accuracy"] == 1.0
+    assert report["summary"]["withheld_count"] == 1
+    assert report["summary"]["critical_evaluated_count"] == 1
+    assert report["summary"]["failures"] == []
+    assert report["misses"] == []
+    assert report["missing"] == []
+    assert report["polish_bias_risks"] == []
+    assert report["withheld"][0]["id"] == "critical_withheld"
+    assert report["withheld"][0]["withheld_status"] == "suppress_ambiguous"
+
+
 def test_pairwise_eval_reads_pairwise_matrix_comparisons(tmp_path):
     matrix_path = tmp_path / "matrix.json"
     matrix_path.write_text(

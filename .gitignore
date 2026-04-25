@@ -1,4 +1,6 @@
 .DS_Store
+logs/
+outputs/
 *.docx
 buttontail-manuscript-12-21-25.pages
 marking_framework/inputs/submissions/

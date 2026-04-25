@@ -490,6 +490,11 @@ CAUTION_IGNORED_TRIGGERS = frozenset(
     }
 )
 EVIDENCE_MAP_GUARD_MIN_MEDIUM_MARGIN = 0.75
+PROOF_QUALITY_PRESERVATION_TRIGGERS = frozenset(
+    {
+        "caution_raised_but_ignored_rougher_stronger",
+    }
+)
 UNRESOLVED_GROUP_STATUSES = frozenset(
     {
         "committee_read_ab_concurred",
@@ -4093,7 +4098,18 @@ def committee_decision_conflicts_with_source_or_evidence(
     source_guard_defeated = bool(trace.get("source_calibration_guard")) or truthy(
         trace.get("source_calibration_conflict_defeated")
     )
-    if source_winner in {"A", "B"} and winner_side and source_winner != winner_side and not source_guard_defeated:
+    proof_quality_challenge = proof_quality_preservation_challenge(decision, candidate)
+    proof_quality_defeated_source = bool(
+        proof_quality_challenge.get("accepted")
+        and proof_quality_challenge.get("defeats_source_calibration_conflict")
+    )
+    if (
+        source_winner in {"A", "B"}
+        and winner_side
+        and source_winner != winner_side
+        and not source_guard_defeated
+        and not proof_quality_defeated_source
+    ):
         blockers.append("source_calibration_conflict_not_defeated")
 
     signal = evidence_map_pair_signal(candidate or {})
@@ -4111,6 +4127,157 @@ def committee_decision_conflicts_with_source_or_evidence(
             blockers.append("strong_evidence_map_conflict")
     if truthy(trace.get("evidence_map_conflict")) and not evidence_guard_defeated:
         blockers.append("strong_evidence_map_conflict")
+    return sorted(set(blockers))
+
+
+def candidate_has_proof_quality_preservation_trigger(candidate: dict | None) -> bool:
+    candidate = candidate if isinstance(candidate, dict) else {}
+    triggers = set(candidate.get("triggers") or [])
+    if triggers & PROOF_QUALITY_PRESERVATION_TRIGGERS:
+        return True
+    details = candidate.get("trigger_details") if isinstance(candidate.get("trigger_details"), dict) else {}
+    cautions = set(details.get("escalated_cautions") or [])
+    return bool("rougher_but_stronger_content" in cautions and triggers & CAUTION_IGNORED_TRIGGERS)
+
+
+def summary_metric(summary: dict, key: str) -> float:
+    return num((summary if isinstance(summary, dict) else {}).get(key), 0.0)
+
+
+def proof_quality_signal_supports_winner(signal: dict, winner: str, loser: str) -> tuple[bool, list[str]]:
+    if not isinstance(signal, dict) or not winner or not loser:
+        return False, ["evidence_map_signal_missing"]
+    if str(signal.get("recommended_winner") or "").strip() != winner:
+        return False, ["evidence_map_not_winner_aligned"]
+    if not evidence_map_guard_signal_is_strong(signal):
+        return False, ["evidence_map_signal_not_strong"]
+    if evidence_map_recommended_winner_blocked(signal, winner):
+        return False, ["evidence_map_winner_completion_blocked"]
+
+    winner_summary = evidence_map_summary_for(signal, winner)
+    loser_summary = evidence_map_summary_for(signal, loser)
+    reasons: list[str] = []
+    if summary_metric(winner_summary, "evidence_map_score") <= summary_metric(loser_summary, "evidence_map_score"):
+        return False, ["evidence_map_score_not_higher"]
+    if str(winner_summary.get("band_signal") or "") == "thin_or_summary_heavy":
+        return False, ["evidence_map_winner_thin_or_summary_heavy"]
+
+    metric_pairs = [
+        ("integrated_analysis_count", 1.0, "integrated_analysis_advantage"),
+        ("commentary_unit_count", 2.0, "commentary_advantage"),
+        ("distinct_literary_concept_count", 1.0, "literary_concept_advantage"),
+        ("distinct_high_value_concept_count", 1.0, "high_value_concept_advantage"),
+        ("thematic_depth_score", 2.0, "thematic_depth_advantage"),
+    ]
+    for key, margin, reason in metric_pairs:
+        if summary_metric(winner_summary, key) >= summary_metric(loser_summary, key) + margin:
+            reasons.append(reason)
+
+    winner_penalty = sum(
+        summary_metric(winner_summary, key)
+        for key in ("overclaim_penalty", "rambling_evidence_penalty", "thin_evidence_penalty")
+    )
+    loser_penalty = sum(
+        summary_metric(loser_summary, key)
+        for key in ("overclaim_penalty", "rambling_evidence_penalty", "thin_evidence_penalty")
+    )
+    if (
+        loser_penalty >= winner_penalty + 1.0
+        and summary_metric(winner_summary, "plot_summary_unit_count")
+        <= summary_metric(loser_summary, "plot_summary_unit_count")
+    ):
+        reasons.append("lower_overclaim_or_summary_penalty")
+
+    winner_band = str(winner_summary.get("band_signal") or "")
+    loser_band = str(loser_summary.get("band_signal") or "")
+    if winner_band == "strong_substantive_analysis" and loser_band in {"solid_analysis", "thin_or_summary_heavy"}:
+        reasons.append("substantive_band_advantage")
+
+    return bool(reasons), reasons or ["no_interpretation_content_advantage"]
+
+
+def proof_quality_preservation_challenge(decision: dict, candidate: dict | None = None) -> dict:
+    trace = decision_readiness_trace(decision)
+    existing = trace.get("proof_quality_preservation_challenge")
+    if isinstance(existing, dict):
+        return existing
+
+    winner = str(decision.get("winner") or "").strip()
+    seed_order = (candidate or {}).get("seed_order") if isinstance((candidate or {}).get("seed_order"), dict) else {}
+    higher = str(seed_order.get("higher") or "").strip()
+    lower = str(seed_order.get("lower") or "").strip()
+    loser = lower if winner == higher else higher if winner == lower else str(decision.get("loser") or "").strip()
+    result = {
+        "accepted": False,
+        "reason": "proof_quality_preservation_not_applicable",
+        "blocking_reasons": [],
+        "defeats_source_calibration_conflict": False,
+    }
+    if not winner or not loser:
+        result["reason"] = "proof_quality_preservation_missing_pair"
+        result["blocking_reasons"] = ["missing_pair"]
+    elif not candidate_has_proof_quality_preservation_trigger(candidate):
+        result["reason"] = "proof_quality_preservation_trigger_missing"
+        result["blocking_reasons"] = ["proof_quality_preservation_trigger_missing"]
+    else:
+        guard = trace.get("evidence_map_guard") if isinstance(trace.get("evidence_map_guard"), dict) else {}
+        if str(guard.get("guard_winner") or "").strip() != winner:
+            result["reason"] = "proof_quality_preservation_guard_missing"
+            result["blocking_reasons"] = ["evidence_map_guard_missing"]
+        else:
+            supported, reasons = proof_quality_signal_supports_winner(evidence_map_pair_signal(candidate or {}), winner, loser)
+            if supported:
+                result.update(
+                    {
+                        "accepted": True,
+                        "reason": "evidence_map_proof_quality_preserved",
+                        "supporting_reasons": reasons,
+                        "blocking_reasons": [],
+                        "defeats_source_calibration_conflict": True,
+                    }
+                )
+            else:
+                result["reason"] = "evidence_map_proof_quality_not_preserved"
+                result["blocking_reasons"] = reasons
+
+    trace = dict(trace)
+    trace["proof_quality_preservation_challenge"] = result
+    decision["committee_edge_trace"] = trace
+    return result
+
+
+def committee_decision_has_unresolved_proof_quality_challenge(
+    decision: dict,
+    candidate: dict | None = None,
+) -> list[str]:
+    if not candidate_has_proof_quality_preservation_trigger(candidate):
+        return []
+    checks = normalize_committee_decision_checks(
+        decision.get("decision_checks") if isinstance(decision.get("decision_checks"), dict) else {}
+    )
+    winner_side = normalize_winner_side(decision.get("winner_side"))
+    has_evidence_map_signal = bool(evidence_map_pair_signal(candidate or {}))
+    blockers: list[str] = []
+    challenge: dict | None = None
+    if has_evidence_map_signal:
+        challenge = proof_quality_preservation_challenge(decision, candidate)
+        if challenge.get("accepted"):
+            return []
+        blockers.append("proof_quality_preservation_not_accepted")
+    if not winner_side:
+        if challenge is not None:
+            blockers.extend(str(item) for item in challenge.get("blocking_reasons", []) if str(item))
+        return sorted(set(blockers))
+    source_checks = normalize_source_calibration_checks(checks.get("source_calibration_checks"))
+    if source_checks.get("mature_theme_without_proof") == winner_side:
+        blockers.append("mature_theme_without_proof_not_defeated")
+    if not blockers:
+        return []
+    if challenge is None:
+        challenge = proof_quality_preservation_challenge(decision, candidate)
+        if challenge.get("accepted"):
+            return []
+    blockers.extend(str(item) for item in challenge.get("blocking_reasons", []) if str(item))
     return sorted(set(blockers))
 
 
@@ -4213,6 +4380,16 @@ def committee_protection_status(
             "suppress_ambiguous",
             "mechanics_or_completion_blocker_inconsistent",
             mechanics_blockers,
+            signals=signals,
+        )
+
+    proof_quality_blockers = committee_decision_has_unresolved_proof_quality_challenge(decision, candidate)
+    if proof_quality_blockers:
+        signals["proof_quality_preservation_challenge"] = False
+        return protection_readiness_payload(
+            "suppress_ambiguous",
+            "proof_quality_preservation_not_defeated",
+            proof_quality_blockers,
             signals=signals,
         )
 
@@ -4329,6 +4506,22 @@ def protection_readiness_by_pair(decisions: list[dict]) -> list[dict]:
             }
         )
     return sorted(rows, key=lambda row: (row["pair_key"], row["winner"], row["status"]))
+
+
+def protection_readiness_summary(decisions: list[dict], protected_decisions: list[dict]) -> dict:
+    by_pair = protection_readiness_by_pair(decisions)
+    withheld_pair_keys = [
+        row["pair_key"]
+        for row in by_pair
+        if row["pair_key"] and row["status"] in {"suppress_ambiguous", "needs_retry", "needs_group_read"}
+    ]
+    return {
+        "counts": protection_readiness_counts(decisions),
+        "protected_count": len(protected_decisions),
+        "withheld_count": len(decisions) - len(protected_decisions),
+        "withheld_pair_keys": sorted(set(withheld_pair_keys)),
+        "by_pair": by_pair,
+    }
 
 
 def run_read_a_path(
@@ -4849,6 +5042,7 @@ def merged_checks_payload(
         for decision in normalized_decisions
         if (decision.get("protection_readiness") or {}).get("status", "protect") == "protect"
     ]
+    protection_summary = protection_readiness_summary(normalized_decisions, protected_decisions)
     decision_keys = {pair_key_from_item(decision) for decision in protected_decisions if pair_key_from_item(decision)}
     passthrough = not protected_decisions
     payload = copy.deepcopy(escalated_payload)
@@ -4867,7 +5061,9 @@ def merged_checks_payload(
         "candidate_count": len(candidates),
         "decision_count": len(protected_decisions),
         "decision_count_total": len(normalized_decisions),
-        "protection_readiness_counts": protection_readiness_counts(normalized_decisions),
+        "protection_readiness_counts": protection_summary["counts"],
+        "protection_readiness": protection_summary,
+        "withheld_pair_keys": protection_summary["withheld_pair_keys"],
         "budget": budget,
         "superseded_pair_keys": superseded_keys,
         "source_checks_generated_at": escalated_payload.get("generated_at", ""),
@@ -5359,12 +5555,7 @@ def main() -> int:
         "skipped": skipped,
     }
     normalized_decisions = decisions
-    protection_summary = {
-        "counts": protection_readiness_counts(normalized_decisions),
-        "protected_count": len(protected_decisions),
-        "withheld_count": len(normalized_decisions) - len(protected_decisions),
-        "by_pair": protection_readiness_by_pair(normalized_decisions),
-    }
+    protection_summary = protection_readiness_summary(normalized_decisions, protected_decisions)
     decisions_payload = {
         "generated_at": generated_at,
         "phase": 1,
