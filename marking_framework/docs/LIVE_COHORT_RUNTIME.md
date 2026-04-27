@@ -19,10 +19,10 @@ Core additions:
 
 ## Teacher Pilot Boundary
 
-After `codex/source-scale-floor-preservation` merges, the next use of this
-runtime should be a controlled teacher pilot. The pilot uses the queue-backed
-runtime described here, but it is not a production launch and does not remove
-teacher final authority.
+With source-scale floor preservation merged, the next use of this runtime
+should be a controlled teacher pilot. The pilot uses the queue-backed runtime
+described here, but it is not a production launch and does not remove teacher
+final authority.
 
 Use [`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md) for:
 

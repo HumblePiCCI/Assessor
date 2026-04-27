@@ -36,8 +36,8 @@ The original eight implementation phases are now in the repo:
 The original production-foundation phases are complete in-repo. Current `main`
 has completed the focused Ghost committee-withheld contract and the follow-on
 source-family ranking hardening for speeches, persuasive letters, NAEP ordinal
-release sets, and UK STA portfolios. The active source-scale floor preservation
-slice has now rechecked the merged state against the full external corpus.
+release sets, and UK STA portfolios. Source-scale floor preservation has now
+rechecked the merged state against the full external corpus.
 
 The production-hardening track is complete in-repo, including the rubric-contract layer that bounds rubric variability before scoring.
 
@@ -67,7 +67,7 @@ The remaining work before a real rollout is environmental and operational:
 
 The remaining in-repo work is now proof-by-evaluation, not another open-ended
 refinement loop. The release-comparable broad external corpus packet is green
-on the active source-scale floor preservation branch:
+on merged `main`:
 
 - packet:
   `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_broad_runs3_final/`
@@ -81,9 +81,9 @@ on the active source-scale floor preservation branch:
 - pairwise order agreement delta: `+0.0251`
 - negative dataset clusters: `0`
 
-If this branch merges cleanly, the right next product step is controlled
-teacher pilot testing, with production launch still separated behind auth,
-launch-validator, and rollback-rehearsal evidence.
+The right next product step is controlled teacher pilot testing, with
+production launch still separated behind auth, launch-validator, and
+rollback-rehearsal evidence.
 
 Any further accuracy refinement should be driven by a new failing validation
 packet, not by speculative polishing.
@@ -976,24 +976,22 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Review and merge `codex/source-scale-floor-preservation`.
-2. Start a controlled teacher pilot with teachers retaining final authority.
-3. Monitor cohort confidence, override rate, rank moves, rerun drift, and
+1. Start a controlled teacher pilot with teachers retaining final authority.
+2. Monitor cohort confidence, override rate, rank moves, rerun drift, and
    finalized review deltas.
-4. Refine only if the pilot or a new validation packet exposes a concrete
+3. Refine only if the pilot or a new validation packet exposes a concrete
    concentrated failure.
-5. Rehearse live rollout against the production contract separately from the
+4. Rehearse live rollout against the production contract separately from the
    teacher pilot.
 
 Why this order:
 - the Ghost committee-withheld seam now has an explicit unresolved/withheld eval
   contract, so stale lower-authority winners are not counted as committee-backed
   hard-pair misses
-- the source-family branch fixed the known focused ranking cluster with live
+- source-family hardening fixed the known focused ranking cluster with live
   `gpt-5.4-mini` evidence and has merged to `main`
-- the source-scale floor preservation branch fixed the post-merge broad-corpus
-  regression cluster and produced a positive full-corpus packet with no
-  negative datasets
+- source-scale floor preservation fixed the post-merge broad-corpus regression
+  cluster and produced a positive full-corpus packet with no negative datasets
 - controlled teacher testing is now the highest-value signal; production launch
   remains blocked until the strict launch validator passes in a staging or
   production-like environment
@@ -1193,7 +1191,6 @@ Use this section as the running status checkpoint.
 
 ### Next Decision Point
 
-Open, review, and merge `codex/source-scale-floor-preservation`; then start a
-small controlled teacher pilot using `docs/TEACHER_PILOT_RUNBOOK.md`. Refine
-only if the pilot or a new validation packet exposes a concrete concentrated
-failure.
+Start a small controlled teacher pilot using
+`docs/TEACHER_PILOT_RUNBOOK.md`. Refine only if the pilot or a new validation
+packet exposes a concrete concentrated failure.

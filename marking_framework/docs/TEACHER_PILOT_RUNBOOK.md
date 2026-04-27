@@ -1,7 +1,7 @@
 # Teacher Pilot Runbook
 
 Status
-- State: ready after `codex/source-scale-floor-preservation` merges
+- State: ready on merged `main`
 - Scope: controlled teacher pilot, not production launch
 - Last updated: 2026-04-27
 
@@ -46,7 +46,7 @@ staging or production-like environment.
 
 Before the first teacher cohort:
 
-- PR `codex/source-scale-floor-preservation` is merged to `main`.
+- Current `main` includes source-scale floor preservation.
 - The operator starts from a fresh, clean `main` checkout.
 - `python3 -m pytest -q --no-cov` passes from the repository root.
 - `python3 -m pytest -q` passes from `marking_framework/`.

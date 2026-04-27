@@ -2,14 +2,12 @@
 
 Date: 2026-04-27
 
-Audited branch: `codex/source-scale-floor-preservation`
+Audited branch: merged `main` after PR #11
 
 Base checked:
 
-- `origin/main`: `d75649389b9b9409fdba29a1f1cf754817e58a55`
-- source-scale floor preservation branch:
-  `codex/source-scale-floor-preservation`
-- GitHub open PRs at audit time: none
+- `origin/main`: `99533d5669ea873e38ac16c179423a62783044a4`
+- merged PR: `#11`, `codex/source-scale-floor-preservation`
 
 Superseding update: the original source-family audit below is preserved as the
 historical decision record for that branch. Current project state has advanced:
@@ -45,9 +43,9 @@ dataset clusters.
 ### 1. Teacher-Pilot Preparation Needed A Concrete Runbook
 
 The top-level roadmap and SOTA plan correctly pointed toward a controlled
-teacher pilot after the source-scale branch merges, but the documentation did
-not yet give an operator a single pilot-ready workflow with preconditions,
-evidence capture, metrics, stop rules, and hard boundaries.
+teacher pilot, but the documentation did not yet give an operator a single
+pilot-ready workflow with preconditions, evidence capture, metrics, stop rules,
+and hard boundaries.
 
 Added `docs/TEACHER_PILOT_RUNBOOK.md` to define:
 
@@ -117,8 +115,8 @@ Current evidence:
   mean rank displacement `-0.0752`, Kendall `+0.0501`, pairwise `+0.0251`
 - negative dataset clusters: `0`
 
-Docs now reflect that the next right product step, after this branch merges, is
-a controlled teacher pilot rather than another speculative calibration slice.
+Docs now reflect that the next right product step is a controlled teacher pilot
+rather than another speculative calibration slice.
 
 ### 5. Main Is Behind The Latest Green Validation Branch
 
@@ -178,9 +176,8 @@ Current state after this source-scale floor preservation update:
 
 `docs/SOTA_BUILD_PLAN.md` now points to:
 
-1. review/merge `codex/source-scale-floor-preservation`
-2. start controlled teacher pilot testing
-3. refine only if the pilot or a new validation packet exposes a concrete
+1. start controlled teacher pilot testing
+2. refine only if the pilot or a new validation packet exposes a concrete
    concentrated failure
 
 ### 8. The Runtime Roadmap Needed A Teacher-Pilot Decision Boundary
@@ -235,9 +232,8 @@ Current state:
 - Active branch: source-scale floor preservation with focused and broad live
   validation artifacts.
 - Quality gates: targeted tests, root fast suite, package-local suite, explicit
-  coverage report, and `git diff --check` are green on the active branch.
-- Missing evidence before broader teacher exposure: this branch must be
-  reviewed and merged.
+  coverage report, and `git diff --check` are green on merged `main`.
+- Missing evidence before broader teacher exposure: real teacher pilot evidence.
 - Missing evidence before production launch: strict identity/staging launch
   validator and rollback rehearsal.
 
@@ -247,9 +243,8 @@ Do not continue speculative refinement before teachers see the product.
 
 The next right step is:
 
-1. open/review/merge `codex/source-scale-floor-preservation`
-2. put the product in front of a small controlled teacher pilot
-3. stop and refine only if pilot evidence exposes a concrete failure cluster
+1. put the product in front of a small controlled teacher pilot
+2. stop and refine only if pilot evidence exposes a concrete failure cluster
 
 Teacher pilot should be framed as supervised product validation, not launch:
 
