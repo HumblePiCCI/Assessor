@@ -166,7 +166,7 @@ This slice preserves valid source-authored scale positions without widening the
 source-family hardening into benchmark-specific rewrites. The broad corpus is
 now positive overall and has no negative dataset cluster.
 
-After this branch merges, the next right product step is a controlled teacher
+With this branch merged, the next right product step is a controlled teacher
 pilot following `docs/TEACHER_PILOT_RUNBOOK.md`. Production launch remains a
 separate operational gate requiring real identity wiring, launch-validator
 proof, and rollback rehearsal against the deployment environment.

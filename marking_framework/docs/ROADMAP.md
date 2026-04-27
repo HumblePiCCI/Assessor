@@ -48,9 +48,9 @@ we refine next?" It is:
    longer producing a known regression cluster?
 
 That means the next move is not another speculative refinement slice. The next
-move is a controlled teacher pilot after `codex/source-scale-floor-preservation`
-merges, using [`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md).
-Production launch remains a separate operational gate.
+move is a controlled teacher pilot using
+[`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md). Production launch
+remains a separate operational gate.
 
 ## Current Live-Cohort Read
 
