@@ -49,7 +49,8 @@ we refine next?" It is:
 
 That means the next move is not another speculative refinement slice. The next
 move is a controlled teacher pilot after `codex/source-scale-floor-preservation`
-merges. Production launch remains a separate operational gate.
+merges, using [`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md).
+Production launch remains a separate operational gate.
 
 ## Current Live-Cohort Read
 
@@ -171,8 +172,10 @@ As of the current branch state, these foundations have landed in the runtime pat
 
 The active remaining live-cohort quality problem is no longer "can the runtime
 route hard edges?" or "can the known source-family ranking cluster be fixed?"
-Both have targeted green evidence. The active risk is transfer: full-corpus
-non-regression and real teacher usability on unfamiliar cohorts.
+Both have targeted green evidence, and the source-scale floor preservation
+branch has a positive full-corpus packet with no negative dataset clusters. The
+active risk is now teacher-world transfer: real teacher usability, trust, and
+override concentration on unfamiliar cohorts.
 
 Each workstream is designed to integrate with the current repo, not replace it.
 

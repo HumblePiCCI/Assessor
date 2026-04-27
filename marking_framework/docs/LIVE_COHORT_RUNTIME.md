@@ -17,6 +17,22 @@ Core additions:
 - routed pairwise escalation, evidence mapping, committee-edge resolution, and hard-pair eval before final grade/dashboard output
 - engagement-gated aggregate-learning retention
 
+## Teacher Pilot Boundary
+
+After `codex/source-scale-floor-preservation` merges, the next use of this
+runtime should be a controlled teacher pilot. The pilot uses the queue-backed
+runtime described here, but it is not a production launch and does not remove
+teacher final authority.
+
+Use [`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md) for:
+
+- pilot preconditions
+- cohort selection
+- operator workflow
+- artifacts to capture
+- metrics and stop rules
+- the boundary between supervised pilot evidence and production-launch evidence
+
 ## Runtime Outputs
 
 The pipeline now emits these live-cohort artifacts when available:

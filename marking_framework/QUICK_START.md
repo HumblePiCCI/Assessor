@@ -9,16 +9,28 @@
 
 ## Step-by-Step Workflow
 
-Optional: Run the orchestration script
+Optional: Run the current canonical orchestration path
 
 ```bash
-python3 scripts/hero_path.py --generate-pairs --build-dashboard
+python3 scripts/hero_path.py \
+  --band-seam-adjudication \
+  --verify-consistency \
+  --apply-consistency \
+  --pairwise-eval \
+  --build-dashboard
 ```
 
 LLM-assisted assessors (requires OPENAI_API_KEY):
 
 ```bash
-python3 scripts/hero_path.py --llm-assessors --pricing-report --generate-pairs
+python3 scripts/hero_path.py \
+  --llm-assessors \
+  --pricing-report \
+  --band-seam-adjudication \
+  --verify-consistency \
+  --apply-consistency \
+  --pairwise-eval \
+  --build-dashboard
 ```
 
 Cost caps are set in `config/cost_limits.json`. To bypass:
@@ -147,23 +159,30 @@ If students are flagged in `disagreements.md`:
 3. Re-run aggregation (step 6)
 4. Repeat until flags resolved or accepted
 
-### 8. Final Pairwise Review (Hero Path)
+### 8. Pairwise Evidence, Committee-Edge Merge, And Rerank
 
 ```bash
-python3 scripts/generate_pairwise_review.py
+python3 scripts/band_seam_adjudication.py
+python3 scripts/verify_consistency.py
+python3 scripts/escalate_pairwise_adjudications.py
+python3 scripts/evidence_map.py
+python3 scripts/committee_edge_resolver.py
+python3 scripts/global_rerank.py
+python3 scripts/evaluate_pairwise_adjudicator.py \
+  --judgments outputs/consistency_checks.committee_edge.json \
+  --output outputs/pairwise_adjudicator_eval.json
 ```
 
-Update `assessments/final_review_pairs.json` with keep/swap decisions and reasons, then apply:
+The default committee-edge resolver path is deterministic and model-free. Live
+committee reads are opt-in:
 
 ```bash
-python3 scripts/apply_pairwise_adjustments.py --min-confidence med
+python3 scripts/committee_edge_resolver.py --live --max-reads 12
 ```
 
-Optional LLM helper:
-```bash
-python3 scripts/llm_pairwise_review.py
-python3 scripts/llm_pairwise_review.py --apply
-```
+Legacy manual pairwise files still exist, but the canonical rank path is now
+pairwise consistency, routed escalation, evidence map, committee-edge merge,
+global rerank, and hard-pair eval.
 
 ### 9. Interactive Curve Review
 
@@ -240,6 +259,10 @@ python3 scripts/generate_feedback.py \
 python3 scripts/build_dashboard_data.py
 python3 scripts/serve_ui.py
 ```
+
+For the controlled teacher pilot, follow `docs/TEACHER_PILOT_RUNBOOK.md`.
+Teachers retain final authority, and pilot output must not be treated as a
+production launch or automatic grade publication.
 
 ### 13b. Pay-as-you-go job runner (optional)
 

@@ -32,12 +32,74 @@ dataset clusters.
 - `tests/test_boundary_calibrator.py`
 - `tests/test_portfolio_aggregation.py`
 - `tests/test_run_llm_assessors_helpers.py`
+- `README.md`
+- `QUICK_START.md`
+- `docs/LIVE_COHORT_RUNTIME.md`
+- `docs/LAUNCH_CHECKLIST.md`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
 - `docs/reports/source_family_ranking_challenge_2026-04-27.md`
 - `docs/reports/source_scale_floor_preservation_2026-04-27.md`
 
 ## Findings
 
-### 0. Source-Scale Floor Preservation Supersedes The Broad-Rerun Blocker
+### 1. Teacher-Pilot Preparation Needed A Concrete Runbook
+
+The top-level roadmap and SOTA plan correctly pointed toward a controlled
+teacher pilot after the source-scale branch merges, but the documentation did
+not yet give an operator a single pilot-ready workflow with preconditions,
+evidence capture, metrics, stop rules, and hard boundaries.
+
+Added `docs/TEACHER_PILOT_RUNBOOK.md` to define:
+
+- pilot scope and non-launch boundary
+- preconditions before first teacher cohort
+- cohort-selection constraints
+- operator workflow from fresh `main` through finalization
+- artifacts to capture per cohort
+- teacher-facing qualitative questions
+- metrics to monitor
+- stop rules for pausing pilot expansion and opening a targeted engineering
+  slice
+
+Linked that runbook from `README.md`, `docs/LIVE_COHORT_RUNTIME.md`, and
+`docs/LAUNCH_CHECKLIST.md`.
+
+### 2. Quick Start Was Still Pointing At Legacy Manual Pairwise Flow
+
+`QUICK_START.md` still used the older `generate_pairwise_review.py` /
+`apply_pairwise_adjustments.py` path as the main step-8 workflow. That is no
+longer the canonical rank path.
+
+Updated quick-start commands now route through:
+
+- `band_seam_adjudication.py`
+- `verify_consistency.py`
+- `escalate_pairwise_adjudications.py`
+- `evidence_map.py`
+- `committee_edge_resolver.py`
+- `global_rerank.py`
+- `evaluate_pairwise_adjudicator.py`
+
+The doc now says legacy manual pairwise files still exist, but the canonical
+path is pairwise consistency, routed escalation, evidence map, committee-edge
+merge, global rerank, and hard-pair eval.
+
+### 3. SOTA And Roadmap Had One Remaining Broad-Rerun Drift
+
+One lower SOTA section still described the merged broad-corpus refresh as
+missing. One roadmap section still described full-corpus non-regression as part
+of the active transfer risk. Both were stale after the source-scale floor
+preservation packet.
+
+Updated state:
+
+- broad-corpus refresh is complete on `codex/source-scale-floor-preservation`
+- full corpus packet is positive overall
+- negative dataset clusters are `0`
+- active risk is now teacher-world transfer: usability, trust, and override
+  concentration on unfamiliar cohorts
+
+### 4. Source-Scale Floor Preservation Supersedes The Broad-Rerun Blocker
 
 The previous audit identified the merged broad external-corpus rerun as the
 proof gap before teacher testing. That rerun has now been performed from a
@@ -58,7 +120,7 @@ Current evidence:
 Docs now reflect that the next right product step, after this branch merges, is
 a controlled teacher pilot rather than another speculative calibration slice.
 
-### 1. Main Is Behind The Latest Green Validation Branch
+### 5. Main Is Behind The Latest Green Validation Branch
 
 Historical source-family finding from the original audit: `origin/main` was
 still at the proof-quality/committee-withheld merge base, while the
@@ -79,7 +141,7 @@ Current latest branch evidence:
 Documentation now distinguishes branch-current source-scale floor preservation
 evidence from merged-main truth.
 
-### 2. Committee-Withheld Semantics Were Under-Documented
+### 6. Committee-Withheld Semantics Were Under-Documented
 
 The code now uses the evaluator contract rather than canonical tombstones:
 
@@ -94,7 +156,7 @@ The code now uses the evaluator contract rather than canonical tombstones:
 say, without qualification, that suppressed committee decisions simply fall
 back to the previous active judgment.
 
-### 3. The SOTA Plan Was Still Pointing At Completed Work
+### 7. The SOTA Plan Was Still Pointing At Completed Work
 
 `docs/SOTA_BUILD_PLAN.md` still framed the next decision as Ghost hard-pair live
 validation, then broad external-corpus rerun, then Phase 11 form calibration.
@@ -121,7 +183,7 @@ Current state after this source-scale floor preservation update:
 3. refine only if the pilot or a new validation packet exposes a concrete
    concentrated failure
 
-### 4. The Runtime Roadmap Needed A Teacher-Pilot Decision Boundary
+### 8. The Runtime Roadmap Needed A Teacher-Pilot Decision Boundary
 
 `docs/ROADMAP.md` still described the active live-cohort issue as whether
 committee decisions should become protected evidence. That is no longer the
@@ -139,7 +201,7 @@ begin after `codex/source-scale-floor-preservation` is reviewed and merged;
 production launch still requires strict identity, deployment, rollback, and
 launch-validator proof.
 
-### 5. Coverage-Gate Docs Are Aligned
+### 9. Coverage-Gate Docs Are Aligned
 
 `docs/COMPLIANCE_REPORT.md` already retired the stale 100% default coverage
 claim. It now records both the source-family slice evidence and the source-scale
@@ -153,6 +215,11 @@ launch certification separate.
 - `docs/WORKFLOW.md`
 - `docs/DATA_FORMATS.md`
 - `docs/COMPLIANCE_REPORT.md`
+- `docs/LIVE_COHORT_RUNTIME.md`
+- `docs/LAUNCH_CHECKLIST.md`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
+- `README.md`
+- `QUICK_START.md`
 - `docs/reports/docs_alignment_audit_2026-04-27.md`
 - `docs/reports/source_scale_floor_preservation_2026-04-27.md`
 

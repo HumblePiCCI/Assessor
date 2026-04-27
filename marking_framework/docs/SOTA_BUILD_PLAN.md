@@ -196,18 +196,21 @@ The repo now defines the production contract. The remaining gap is applying it i
 - deployment-time secret management
 - live release rehearsal with real ops surfaces
 
-### Gap 2: Current Evidence Still Needs A Merged Broad-Corpus Refresh
+### Gap 2: Teacher-Pilot Evidence Has Not Been Collected Yet
 
-The repo has current focused evidence for the source-family regression cluster,
-and older release evidence for the broader corpus. The missing proof is one
-merged-state, release-comparable broad external corpus packet after the
-source-family branch lands.
+The merged-state broad-corpus refresh is complete on the active
+`codex/source-scale-floor-preservation` branch. The full external corpus packet
+is positive overall, with `0` negative dataset clusters. The missing proof is
+now real teacher-pilot evidence: whether teachers can use the current
+human-in-the-loop flow efficiently, understand the surfaced uncertainty, and
+finalize defensible class orders on their own cohorts.
 
-That packet decides the next branch:
-- if broad accuracy and ordering deltas are neutral or positive, stop refining
-  and start controlled teacher pilot testing
-- if a new regression cluster appears, target that cluster directly with a
-  narrow follow-up slice
+That pilot decides the next branch:
+- if teachers can complete the workflow and override patterns do not expose a
+  concentrated failure, continue supervised pilot expansion
+- if teacher overrides, anchor pauses, rubric confirmations, or qualitative
+  feedback reveal a concrete failure cluster, target that cluster directly
+  with a narrow follow-up slice
 
 ## Target Architecture
 
@@ -1191,5 +1194,6 @@ Use this section as the running status checkpoint.
 ### Next Decision Point
 
 Open, review, and merge `codex/source-scale-floor-preservation`; then start a
-small controlled teacher pilot. Refine only if the pilot or a new validation
-packet exposes a concrete concentrated failure.
+small controlled teacher pilot using `docs/TEACHER_PILOT_RUNBOOK.md`. Refine
+only if the pilot or a new validation packet exposes a concrete concentrated
+failure.

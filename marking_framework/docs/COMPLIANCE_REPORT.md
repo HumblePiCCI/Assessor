@@ -89,8 +89,8 @@ It reports:
 - negative dataset clusters: `0`
 
 This is the current broad non-regression evidence for moving from speculative
-calibration refinement to controlled teacher pilot testing. It is not a
-production-launch certificate.
+calibration refinement to controlled teacher pilot testing using
+`docs/TEACHER_PILOT_RUNBOOK.md`. It is not a production-launch certificate.
 
 ## Production Readiness References
 
