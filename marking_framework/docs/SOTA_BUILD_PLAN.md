@@ -64,16 +64,16 @@ The remaining work before a real rollout is environmental and operational:
 - run the launch validator against the real release candidate
 - rehearse the rollback flow against the deployment environment
 
-The remaining in-repo work is now proof-by-evaluation, not another open-ended
-refinement loop:
-- merge the pushed source-family branch after review
-- run one release-comparable broad external corpus packet against that merged
-  state
-- move to controlled teacher pilot testing if the broad packet is neutral or
-  positive on accuracy and rank-order deltas
+The remaining in-repo work is still proof-by-evaluation, not another open-ended
+refinement loop. The post-merge broad external-corpus packet improved the
+weighted aggregate, but it exposed a concrete release-blocking cluster:
+`internet_samples_eqao_orq` regressed on exact-level accuracy, MAE, Kendall tau,
+pairwise agreement, and rank displacement. Two Thoughtful Learning packets also
+regressed on exact level and MAE while preserving order.
 
-Any further accuracy refinement should be driven by a new failing validation
-packet, not by speculative polishing.
+Any further accuracy refinement should therefore target that source-scale floor
+preservation cluster directly. Controlled teacher pilot testing should wait
+until the focused cluster and a follow-on broad packet are neutral or positive.
 
 The still-useful refinement lanes are:
 - broaden scoring context across earlier grades and more writing forms
@@ -960,14 +960,16 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Open/review/merge `codex/source-family-ranking-challenge`.
-2. Re-run the broader external corpus from the merged state with a fresh output
-   directory and release-comparable settings.
-3. If the broad packet is neutral or positive on exact-level accuracy,
+1. Fix the post-source-family broad-corpus regression cluster:
+   `internet_samples_eqao_orq`,
+   `thoughtful_assessment_grade6_8_instructions_hydrochloric`, and
+   `thoughtful_assessment_grade6_8_persuasive_letter`.
+2. Re-run that focused negative cluster from a fresh worktree.
+3. Re-run the broader external corpus from the corrected merged state with a
+   fresh output directory and release-comparable settings.
+4. If the broad packet is neutral or positive on exact-level accuracy,
    score-band MAE, Kendall tau, and pairwise-order agreement, begin controlled
    teacher pilot testing.
-4. If the broad packet exposes a new concentrated regression cluster, target
-   that cluster directly before teacher pilot expansion.
 5. Rehearse live rollout against the production contract separately from the
    teacher pilot.
 
@@ -976,17 +978,18 @@ Why this order:
   contract, so stale lower-authority winners are not counted as committee-backed
   hard-pair misses
 - the source-family branch fixed the known focused ranking cluster with live
-  `gpt-5.4-mini` evidence, but that branch is not merged and no broad corpus
-  packet has yet been regenerated from the merged state
-- controlled teacher testing is now the highest-value signal once the broad
-  benchmark contract is rechecked; production launch remains blocked until the
+  `gpt-5.4-mini` evidence and has been merged through PR `#9`
+- the post-merge broad packet improved the aggregate but revealed a deterministic
+  EQAO ORQ rank/level regression where a supported source-scale top anchor was
+  not preserved by the live routed path
+- controlled teacher testing is the highest-value product signal after this
+  validation blocker is cleared; production launch remains blocked until the
   strict launch validator passes in a staging or production-like environment
 
 ## Recently Landed Sprint
 
-The source-family ranking challenge is complete on
-`codex/source-family-ranking-challenge` and pushed as
-`99419f7f37319d668ac28ef00f3b518c9737cc5c`. It is not yet merged to `main`.
+The source-family ranking challenge landed through PR `#9`, merged at
+`d75649389b9b9409fdba29a1f1cf754817e58a55`.
 
 ### Sprint Goal
 
@@ -1017,6 +1020,40 @@ Final focused live packet:
 No `llm_failures.jsonl` files were present in the final packet. Local gates
 passed with `python3 -m pytest -q`, `python3 -m pytest -q --no-cov`, and
 `git diff --check`.
+
+## Current Validation Blocker
+
+The post-merge broad external-corpus packet was run from a fresh
+`origin/main` worktree:
+
+- branch: `codex/external-corpus-post-source-family`
+- artifact:
+  `outputs/external_corpus_validation/external_corpus_20260427T_post_source_family_runs3/`
+- report:
+  `docs/reports/external_corpus_post_source_family_2026-04-27.md`
+
+Aggregate deltas were positive or neutral:
+
+- exact-level hit delta: `0.0000`
+- within-one-level hit delta: `+0.0075`
+- score-band MAE delta: `-0.7463`
+- Kendall tau delta: `+0.0261`
+- pairwise-order agreement delta: `+0.0130`
+
+The packet still blocks teacher pilot expansion because it exposed three
+deterministic negative clusters:
+
+- `internet_samples_eqao_orq`: exact `-0.2500`, MAE `+5.0050`, Kendall
+  `-0.6667`, pairwise `-0.3333`, max rank displacement `+2.0000`
+- `thoughtful_assessment_grade6_8_instructions_hydrochloric`: exact `-0.2500`,
+  MAE `+0.2075`, order neutral
+- `thoughtful_assessment_grade6_8_persuasive_letter`: exact `-0.2500`, MAE
+  `+2.4425`, order neutral
+
+The release-blocking shape is source-scale floor preservation under live
+routed evidence. In EQAO ORQ, the Level 4 anchor `s004` carries
+`source_scale_rank=1`, but the routed `main` path leaves it at Level 1/rank 3
+instead of applying the source-scale floor to Level 4/rank 1.
 
 ## Prior Landed Sprint
 
@@ -1113,25 +1150,32 @@ Use this section as the running status checkpoint.
 - the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, side-aware mechanics blocker validation, proof-quality claim-refutation fields, and protected committee-direct rerank constraints
 - committee-withheld hard pairs are reported as explicitly unresolved by the
   hard-pair evaluator instead of being scored as stale lower-authority winners
-- source-family ranking hardening is complete on the pushed branch for speeches,
-  persuasive letters, NAEP ordinal release sets, and UK STA portfolios, with a
-  focused live packet at exact `1.0`, Kendall `1.0`, pairwise `1.0`, and MAE
-  `0.0` on all four targeted datasets
+- source-family ranking hardening is merged for speeches, persuasive letters,
+  NAEP ordinal release sets, and UK STA portfolios, with a focused live packet
+  at exact `1.0`, Kendall `1.0`, pairwise `1.0`, and MAE `0.0` on all four
+  targeted datasets
+- the post-merge broad packet improved aggregate MAE, Kendall tau, pairwise
+  agreement, and rank displacement, but exposed a deterministic EQAO ORQ
+  source-scale top-anchor preservation failure plus two level-only Thoughtful
+  Learning projection regressions
 
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
-- the source-family branch is pushed but not yet merged to `main`
-- broad external-corpus evidence has not yet been regenerated after the
-  source-family branch
+- the EQAO ORQ live routed path can still fail to preserve an explicit
+  source-scale top anchor when committee/pairwise evidence compresses the top
+  paper
+- two Thoughtful Learning packets still need exact-level projection recovery
+  while preserving their currently correct order
 - exemplar coverage is still thinner than the benchmark corpus for early grades
   and some specialized forms, so future refinements should be driven by broad
   corpus or teacher-pilot evidence, not speculative tuning
 
 ### Next Decision Point
 
-Open, review, and merge `codex/source-family-ranking-challenge`; then run one
-fresh broad external-corpus packet from the merged state. If that packet is
-green or neutral on ranking deltas, start a controlled teacher pilot. If it
-fails, refine only the newly exposed regression cluster.
+Fix the source-scale floor preservation cluster exposed by the post-merge broad
+packet. Start with `internet_samples_eqao_orq`, then include the level-only
+Thoughtful instructions and persuasive-letter cases. After that, rerun the
+focused cluster and then the broad external corpus. Teacher pilot begins only
+after that evidence is neutral or positive.

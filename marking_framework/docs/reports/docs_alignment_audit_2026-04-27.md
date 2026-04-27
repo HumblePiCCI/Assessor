@@ -2,6 +2,25 @@
 
 Date: 2026-04-27
 
+## Superseding Post-Merge Update
+
+The source-family branch discussed below has since landed through PR `#9` at
+merge commit `d75649389b9b9409fdba29a1f1cf754817e58a55`.
+
+The recommended broad external-corpus packet has also been run from a fresh
+post-merge worktree. It improved aggregate MAE, Kendall tau, pairwise
+agreement, and rank displacement, but did not clear the teacher-pilot gate
+because it exposed:
+
+- a deterministic rank/level regression in `internet_samples_eqao_orq`
+- level-only regressions in
+  `thoughtful_assessment_grade6_8_instructions_hydrochloric` and
+  `thoughtful_assessment_grade6_8_persuasive_letter`
+
+The current decision is therefore to refine that source-scale floor preservation
+cluster before teacher pilot expansion. See
+`docs/reports/external_corpus_post_source_family_2026-04-27.md`.
+
 Audited branch: `codex/source-family-ranking-challenge`
 
 Base checked:

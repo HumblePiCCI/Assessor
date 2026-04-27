@@ -44,12 +44,39 @@ The 2026-04-27 source-family ranking slice was verified on branch
 - `python3 -m pytest -q` from `marking_framework/`
 - `git diff --check`
 
-The focused live benchmark artifact is
+The focused live benchmark artifact was
 `outputs/source_family_ranking_challenge/source_family_20260426T_focused_runs1_final2/`.
 It reports exact `1.0`, Kendall `1.0`, pairwise `1.0`, and score-band MAE
 `0.0` for the four targeted source-family datasets. This is focused
 non-regression evidence, not a substitute for the next broad external-corpus
 packet after merge.
+
+The source-family branch landed through PR `#9` at merge commit
+`d75649389b9b9409fdba29a1f1cf754817e58a55`.
+
+The post-merge broad external-corpus packet was run from fresh branch
+`codex/external-corpus-post-source-family` with:
+
+```bash
+python3 scripts/benchmark_corpus.py --runs 3 \
+  --candidate-routing config/llm_routing_benchmark.json \
+  --candidate-label main \
+  --baseline-label fallback \
+  --output outputs/external_corpus_validation/external_corpus_20260427T_post_source_family_runs3
+```
+
+Aggregate deltas were neutral or positive on the main quality metrics:
+
+- exact-level hit delta: `0.0000`
+- within-one-level hit delta: `+0.0075`
+- score-band MAE delta: `-0.7463`
+- Kendall tau delta: `+0.0261`
+- pairwise-order agreement delta: `+0.0130`
+
+The packet is not a teacher-pilot clearance because it exposed a deterministic
+EQAO ORQ source-scale top-anchor regression and two level-only Thoughtful
+Learning regressions. Current report:
+`docs/reports/external_corpus_post_source_family_2026-04-27.md`.
 
 ## Production Readiness References
 
