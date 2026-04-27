@@ -28,7 +28,7 @@ def test_run_llm_assessors_helpers():
         {"rationale_min_words": 3},
     )
     assert "CRIT" in prompt_with_criteria
-    assert "min 3 words" in prompt_with_criteria
+    assert "at least 3 words" in prompt_with_criteria
     compact_prompt = rla.build_pass1_prompt("A", "rubric", "outline", "s1", "essay", notes_word_limit=12)
     assert '"criteria_points": [' in compact_prompt
     assert '"criterion_id": "K1"' in compact_prompt
@@ -86,7 +86,7 @@ def test_resolve_pass1_contract_for_instructions_forces_evidence():
     assert contract["reqs"]["rationale_min_words"] == 12
     assert "SCORING CONTRACT:" in contract["criteria_block"]
     assert "executable procedure" in contract["criteria_block"]
-    assert contract["required_ids"] == ["C2", "IN1"]
+    assert contract["required_ids"] == ["IN1", "C2"]
     assert "C1" not in contract["criteria_block"]
 
 
@@ -122,7 +122,7 @@ def test_resolve_pass1_contract_for_summary_report_prioritizes_summary_quality()
     }
     contract = rla.resolve_pass1_contract(criteria_cfg, "summary_report", False)
     assert contract["require_evidence"] is True
-    assert contract["required_ids"] == ["C1", "C2", "SR1", "SR2", "SR3"]
+    assert contract["required_ids"] == ["SR1", "SR2", "SR3", "C1", "C2"]
     assert "summary writing" in contract["criteria_block"]
     assert "C3" not in contract["criteria_block"]
     assert contract["reqs"]["quote_validation"] is False
@@ -484,6 +484,74 @@ def test_build_pass2_student_summaries_uses_instructions_aggregate_signal():
     assert "procedure can be followed accurately" in summary
 
 
+def test_build_pass2_student_summaries_uses_speech_aggregate_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "A humorous inauguration speech."},
+        {"s1": "A humorous inauguration speech."},
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 64.0,
+                    "criteria_points": {"SP1": 76, "SP2": 82, "SP3": 80, "C1": 78, "C3": 72},
+                    "notes": "Funny and well-structured satire with strong voice, but little real evidence.",
+                }
+            },
+            "B": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 62.0,
+                    "criteria_points": {"SP1": 74, "SP2": 80, "SP3": 78, "C1": 76, "C3": 70},
+                    "notes": "Strong voice and rhetorical persona; support is mostly anecdotal.",
+                }
+            },
+        },
+        "speech",
+        False,
+        260,
+        {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_rubric_family_cross_topic"},
+    )
+    summary = entries[0]["summary"]
+    assert "Speech score 63.00." in summary
+    assert "rhetorical effect 81" in summary
+    assert "purposeful rhetorical choices" in summary
+
+
+def test_build_pass2_student_summaries_uses_persuasive_letter_aggregate_signal():
+    entries = rla.build_pass2_student_summaries(
+        ["s1"],
+        {"s1": "Dear Dr. Larson, I would like to help feed and bathe the animals."},
+        {"s1": "Dear Dr. Larson, I would like to help feed and bathe the animals after school. Sincerely, Andrea"},
+        {
+            "A": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 66.0,
+                    "criteria_points": {"PL1": 78, "PL2": 72, "PL3": 82, "C1": 76, "C2": 80},
+                    "notes": "Clear request, polite tone, and relevant experience; support is brief.",
+                }
+            },
+            "B": {
+                "s1": {
+                    "student_id": "s1",
+                    "rubric_total_points": 64.0,
+                    "criteria_points": {"PL1": 76, "PL2": 70, "PL3": 80, "C1": 74, "C2": 78},
+                    "notes": "Clear request and appropriate tone with concrete availability.",
+                }
+            },
+        },
+        "persuasive_letter",
+        False,
+        260,
+        {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_prompt"},
+    )
+    summary = entries[0]["summary"]
+    assert "Persuasive letter score 65.00." in summary
+    assert "audience-specific support 71" in summary
+    assert "letter-specific purpose" in summary
+
+
 def test_unanimous_portfolio_seed_order_requires_full_agreement():
     scores = {
         "A": {"s1": 80, "s2": 70, "s3": 60},
@@ -502,6 +570,15 @@ def test_use_argumentative_seed_order_supports_thoughtful_cross_topic_and_naep_s
     assert rla.use_argumentative_seed_order({"source_family": "NAEP / NCES", "prompt_shared": True}, "argumentative", False) is True
     assert rla.argumentative_seed_mode({"source_family": "NAEP / NCES", "prompt_shared": True}, "argumentative", False) == "single_prompt"
     assert rla.use_argumentative_seed_order(metadata, "argumentative", True) is False
+
+
+def test_source_family_seed_order_supports_speech_and_persuasive_letter_forms():
+    speech = {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_rubric_family_cross_topic"}
+    letter = {"source_family": "thoughtful_learning_assessment_models", "cohort_shape": "same_prompt"}
+    assert rla.use_speech_seed_order(speech, "speech", False) is True
+    assert rla.use_speech_seed_order(speech, "argumentative", False) is False
+    assert rla.use_persuasive_letter_seed_order(letter, "persuasive_letter", False) is True
+    assert rla.use_persuasive_letter_seed_order(letter, "argumentative", False) is False
 
 
 def test_use_instructions_seed_order_for_same_prompt_thoughtful_procedural_sets():

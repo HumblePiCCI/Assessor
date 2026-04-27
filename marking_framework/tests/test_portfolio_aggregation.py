@@ -364,10 +364,10 @@ def test_portfolio_scale_calibration_allows_mini_two_level_projection_for_three_
     updated, report = apply_portfolio_scale_calibration(rows, config, scope, level_bands)
     rows_by_id = {row["student_id"]: row for row in updated}
     assert rows_by_id["s1"]["adjusted_level"] == "4"
-    assert rows_by_id["s2"]["adjusted_level"] == "3"
-    assert rows_by_id["s3"]["adjusted_level"] == "2"
+    assert rows_by_id["s2"]["adjusted_level"] == "2"
+    assert rows_by_id["s3"]["adjusted_level"] == "3"
     assert rows_by_id["s1"]["portfolio_scale_reason"] == "ordinal_portfolio_rank_projection_strong"
-    assert rows_by_id["s2"]["portfolio_scale_reason"] == "ordinal_portfolio_rank_projection_strong"
+    assert rows_by_id["s3"]["portfolio_scale_reason"] == "ordinal_portfolio_rank_projection_strong"
     assert report["applied"] == 3
 
 
@@ -583,6 +583,122 @@ def test_portfolio_scale_calibration_allows_fractional_piece_support_for_top_buc
     assert rows_by_id["s1"]["adjusted_level"] == "4"
     assert rows_by_id["s1"]["portfolio_scale_adjusted"] == "true"
     assert rows_by_id["s1"]["portfolio_scale_reason"] == "ordinal_portfolio_rank_projection_piece_support"
-    assert rows_by_id["s2"]["adjusted_level"] == "3"
-    assert rows_by_id["s3"]["adjusted_level"] == "2"
-    assert report["applied"] == 3
+
+
+def test_portfolio_scale_rank_prefers_piece_distribution_before_minor_convention_delta():
+    config = {
+        "portfolio_mode": {
+            "ordinal_scale_calibration": {
+                "enabled": True,
+                "top_fraction": 0.25,
+                "bottom_fraction": 0.25,
+                "middle_min_percent": 60.0,
+                "bottom_max_percent": 70.0,
+                "max_rank_sd": 1.5,
+                "band_floor_offset_percent": 1.5,
+                "min_projection_note_votes": 3,
+                "sort_strategy": "piece_distribution_then_conventions",
+                "allow_strong_rank_projection": True,
+                "max_upward_jump_levels": 2,
+                "strong_top_piece_min_count": 1.0,
+                "strong_top_upper_half_min_percent": 70.0,
+                "strong_top_overall_min_percent": 62.0,
+                "strong_top_max_lt60_mean": 2.0,
+            }
+        }
+    }
+    scope = {"is_small_ordinal_portfolio": True, "grade_level": 6}
+    level_bands = [
+        {"level": "1", "min": 50, "max": 59, "letter": "D"},
+        {"level": "2", "min": 60, "max": 69, "letter": "C"},
+        {"level": "3", "min": 70, "max": 79, "letter": "B"},
+        {"level": "4", "min": 80, "max": 89, "letter": "A"},
+    ]
+    rows = [
+        {
+            "student_id": "top",
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "rubric_after_penalty_percent": 65.85,
+            "rubric_mean_percent": 65.85,
+            "rank_sd": 0.0,
+            "portfolio_note_votes": 3,
+            "portfolio_note_estimate": 2.0,
+            "portfolio_piece_top70_mean": 1.33,
+            "portfolio_piece_top80_mean": 0.33,
+            "portfolio_piece_lt60_mean": 1.67,
+            "portfolio_piece_upper_half_mean": 71.99,
+            "portfolio_piece_median_mean": 68.09,
+            "portfolio_piece_overall_mean": 66.36,
+            "_level_order": 60.0,
+            "_composite_bucket": 0.60,
+            "_borda_bucket": 10.0,
+            "conventions_mistake_rate_percent": 6.96,
+        },
+        {
+            "student_id": "middle_a",
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "rubric_after_penalty_percent": 54.14,
+            "rubric_mean_percent": 54.14,
+            "rank_sd": 0.47,
+            "portfolio_note_votes": 3,
+            "portfolio_note_estimate": 1.0,
+            "portfolio_piece_top70_mean": 0.0,
+            "portfolio_piece_top80_mean": 0.0,
+            "portfolio_piece_lt60_mean": 5.33,
+            "portfolio_piece_upper_half_mean": 59.15,
+            "portfolio_piece_median_mean": 54.79,
+            "portfolio_piece_overall_mean": 53.82,
+            "_level_order": 50.0,
+            "_composite_bucket": 0.54,
+            "_borda_bucket": 33.0,
+            "conventions_mistake_rate_percent": 6.67,
+        },
+        {
+            "student_id": "middle_b",
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "rubric_after_penalty_percent": 53.84,
+            "rubric_mean_percent": 53.84,
+            "rank_sd": 0.47,
+            "portfolio_note_votes": 3,
+            "portfolio_note_estimate": 1.0,
+            "portfolio_piece_top70_mean": 0.0,
+            "portfolio_piece_top80_mean": 0.0,
+            "portfolio_piece_lt60_mean": 4.67,
+            "portfolio_piece_upper_half_mean": 58.55,
+            "portfolio_piece_median_mean": 52.95,
+            "portfolio_piece_overall_mean": 53.71,
+            "_level_order": 50.0,
+            "_composite_bucket": 0.55,
+            "_borda_bucket": 66.0,
+            "conventions_mistake_rate_percent": 6.36,
+        },
+        {
+            "student_id": "bottom",
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "rubric_after_penalty_percent": 50.0,
+            "rubric_mean_percent": 50.0,
+            "rank_sd": 0.0,
+            "portfolio_note_votes": 3,
+            "portfolio_note_estimate": 1.0,
+            "portfolio_piece_top70_mean": 0.0,
+            "portfolio_piece_top80_mean": 0.0,
+            "portfolio_piece_lt60_mean": 8.0,
+            "portfolio_piece_upper_half_mean": 51.61,
+            "portfolio_piece_median_mean": 45.84,
+            "portfolio_piece_overall_mean": 50.0,
+            "_level_order": 50.0,
+            "_composite_bucket": 0.50,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 7.9,
+        },
+    ]
+
+    updated, _report = apply_portfolio_scale_calibration(rows, config, scope, level_bands)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["top"]["adjusted_level"] == "4"
+    assert rows_by_id["top"]["portfolio_scale_rank"] == 1
+    assert rows_by_id["middle_a"]["portfolio_scale_rank"] < rows_by_id["middle_b"]["portfolio_scale_rank"]

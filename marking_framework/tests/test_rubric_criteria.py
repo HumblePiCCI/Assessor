@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 
 from scripts.rubric_criteria import (
+    contract_criteria_ids,
+    contract_prompt,
     criteria_for_genre,
     criteria_ids,
     criteria_prompt,
@@ -54,6 +56,20 @@ def test_criteria_prompt_and_evidence():
 
 def test_criteria_prompt_empty():
     assert criteria_prompt({}, None) == ""
+
+
+def test_source_family_form_contracts_focus_speech_and_persuasive_letter():
+    criteria = load_rubric_criteria(Path("config/rubric_criteria.json"))
+    assert contract_criteria_ids(criteria, "speech") == ["SP1", "SP2", "SP3", "C1", "C3"]
+    assert "speech for an audience" in contract_prompt(criteria, "speech")
+    speech_reqs = evidence_requirements(criteria, "speech")
+    assert speech_reqs["hard_fail_on_evidence_errors"] is True
+    assert speech_reqs["rationale_min_words"] == 10
+    assert contract_criteria_ids(criteria, "persuasive_letter") == ["PL1", "PL2", "PL3", "C1", "C2"]
+    assert "specific recipient" in contract_prompt(criteria, "persuasive_letter")
+    letter_reqs = evidence_requirements(criteria, "persuasive_letter")
+    assert letter_reqs["hard_fail_on_evidence_errors"] is True
+    assert letter_reqs["rationale_min_words"] == 10
 
 
 def test_criteria_prompt_skips_missing_id_and_indicators():

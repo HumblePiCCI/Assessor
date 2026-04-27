@@ -120,7 +120,7 @@ def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: st
             "- criterion_id (use the ID exactly)\n"
             "- level (one of: 1, 2, 3, 4, 4+)\n"
             "- evidence_quote (exact words copied from the essay)\n"
-            f"- rationale (min {min_words} words)\n"
+            f"- rationale (at least {min_words} words; use a complete explanatory sentence)\n"
             "If you include a numeric score, use a 0-100 percent scale.\n"
         )
     return f"""You are Assessor {role_name}. Score this student using the rubric.

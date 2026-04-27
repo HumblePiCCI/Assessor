@@ -100,6 +100,49 @@ def _level_order_value(level: str, level_bands: list[dict]) -> float:
     return -1.0
 
 
+def _rank_sort_value(value) -> float:
+    token = str(value or "").strip()
+    if not token:
+        return 999999.0
+    try:
+        return float(token)
+    except (TypeError, ValueError):
+        return 999999.0
+
+
+def final_consensus_sort_key(row: dict, *, use_portfolio_scale_rank: bool = False, use_source_scale_rank: bool = False) -> tuple:
+    source_rank = _rank_sort_value(row.get("source_scale_rank")) if use_source_scale_rank else 999999.0
+    portfolio_rank = _rank_sort_value(row.get("portfolio_scale_rank")) if use_portfolio_scale_rank else 999999.0
+    if use_source_scale_rank:
+        return (
+            -_safe_float(row.get("_level_order"), -1.0),
+            source_rank,
+            -_safe_float(row.get("rubric_after_penalty_percent"), 0.0),
+            -_safe_float(row.get("_composite_bucket"), 0.0),
+            -_safe_float(row.get("_borda_bucket"), 0.0),
+            _safe_float(row.get("conventions_mistake_rate_percent"), 100.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    if use_portfolio_scale_rank:
+        return (
+            -_safe_float(row.get("_level_order"), -1.0),
+            portfolio_rank,
+            -_safe_float(row.get("rubric_after_penalty_percent"), 0.0),
+            -_safe_float(row.get("_composite_bucket"), 0.0),
+            -_safe_float(row.get("_borda_bucket"), 0.0),
+            _safe_float(row.get("conventions_mistake_rate_percent"), 100.0),
+            str(row.get("student_id", "")).lower(),
+        )
+    return (
+        -_safe_float(row.get("_level_order"), -1.0),
+        -_safe_float(row.get("_composite_bucket"), 0.0),
+        -_safe_float(row.get("_borda_bucket"), 0.0),
+        -_safe_float(row.get("rubric_after_penalty_percent"), 0.0),
+        _safe_float(row.get("conventions_mistake_rate_percent"), 100.0),
+        str(row.get("student_id", "")).lower(),
+    )
+
+
 def _interpolate_anchor_patch(score: float, patch: dict) -> tuple[float, float]:
     points = patch.get("interpolation_points", []) if isinstance(patch, dict) else []
     ordered = []
@@ -506,15 +549,14 @@ def main() -> int:
         logger.info("Boundary calibration made no score adjustments")
 
     logger.info("Sorting by composite score (weighted: rubric + conventions + comparative)")
+    use_source_scale_rank = any(str(row.get("source_scale_rank", "")).strip() for row in rows)
+    use_portfolio_scale_rank = bool(scope.get("is_portfolio")) and any(str(row.get("portfolio_scale_rank", "")).strip() for row in rows)
     rows_sorted = sorted(
         rows,
-        key=lambda r: (
-            -r["_level_order"],  # PRIMARY: keep adjusted levels in band order
-            -r["_composite_bucket"],  # Tie-break 1: composite score, damped against tiny drift
-            -r["_borda_bucket"],      # Tie-break 2: comparative ranking
-            -r["rubric_after_penalty_percent"],  # Tie-break 3: rubric after penalty
-            r["conventions_mistake_rate_percent"],  # Tie-break 4: conventions (ascending)
-            r["student_id"].lower(),  # Tie-break 5: alphabetical
+        key=lambda r: final_consensus_sort_key(
+            r,
+            use_portfolio_scale_rank=use_portfolio_scale_rank,
+            use_source_scale_rank=use_source_scale_rank and not use_portfolio_scale_rank,
         ),
     )
 

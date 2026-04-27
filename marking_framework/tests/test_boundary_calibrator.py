@@ -81,6 +81,124 @@ def test_boundary_calibrator_rescues_severe_collapse(tmp_path):
     assert report["movement_count"] == 1
 
 
+def test_boundary_calibrator_promotes_thoughtful_persuasive_letter_top_sample_from_form_profile():
+    config = json.loads(Path("config/marking_config.json").read_text(encoding="utf-8"))
+    scope = {
+        "grade_level": 7,
+        "genre": "persuasive_letter",
+        "is_portfolio": False,
+        "is_early_grade_narrative": False,
+        "source_family": "thoughtful_learning_assessment_models",
+        "rubric_family": "",
+        "cohort_shape": "same_prompt",
+        "prompt_shared": False,
+        "sample_count": 4,
+        "scoring_scale_type": "",
+        "scoring_scale_size": 0,
+        "pass1_model_family": "gpt-5.4-mini",
+        "pass1_model_version": "gpt-5.4-mini",
+    }
+    rows = [
+        {
+            "student_id": "s001",
+            "rubric_mean_percent": 60.25,
+            "rubric_after_penalty_percent": 60.25,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.70,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 5.0,
+        },
+        {
+            "student_id": "s002",
+            "rubric_mean_percent": 59.68,
+            "rubric_after_penalty_percent": 59.68,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.66,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.60,
+            "_borda_bucket": 66.0,
+            "conventions_mistake_rate_percent": 5.0,
+        },
+        {
+            "student_id": "s003",
+            "rubric_mean_percent": 59.06,
+            "rubric_after_penalty_percent": 59.06,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.33,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.50,
+            "_borda_bucket": 33.0,
+            "conventions_mistake_rate_percent": 6.0,
+        },
+        {
+            "student_id": "s004",
+            "rubric_mean_percent": 56.48,
+            "rubric_after_penalty_percent": 56.25,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 3.0,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.40,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 15.0,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["s001"]["adjusted_level"] == "4"
+    assert rows_by_id["s001"]["rubric_after_penalty_percent"] == 80.0
+    assert "source_scale_floor:thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini" in rows_by_id["s001"]["boundary_calibration_reason"]
+    assert report["scope"]["source_scale_profile"] == "thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini"
+
+
+def test_load_scope_context_prefers_source_form_over_generic_argument_mode(tmp_path):
+    speech_scope = write_scope(
+        tmp_path,
+        {"grade_level": 11, "assignment_genre": "argumentative", "assignment_name": "Persuasive Writing Speech Benchmark"},
+    )
+    assert speech_scope["genre"] == "speech"
+
+    letter_scope = write_scope(
+        tmp_path,
+        {"grade_level": 7, "assignment_genre": "opinion_letter", "assignment_name": "Persuasive Letter Benchmark"},
+    )
+    assert letter_scope["genre"] == "persuasive_letter"
+
+
 def test_boundary_calibrator_bootstrap_scope_is_more_conservative(tmp_path):
     scope = write_scope(
         tmp_path,

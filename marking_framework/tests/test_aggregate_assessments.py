@@ -23,6 +23,56 @@ def write_conventions(path: Path, rows):
         writer.writerows(rows)
 
 
+def test_final_consensus_sort_key_honors_source_scale_rank_inside_level():
+    rows = [
+        {
+            "student_id": "s002",
+            "_level_order": 80.0,
+            "source_scale_rank": 2,
+            "rubric_after_penalty_percent": 82.0,
+            "_composite_bucket": 0.95,
+            "_borda_bucket": 90.0,
+            "conventions_mistake_rate_percent": 1.0,
+        },
+        {
+            "student_id": "s001",
+            "_level_order": 80.0,
+            "source_scale_rank": 1,
+            "rubric_after_penalty_percent": 87.0,
+            "_composite_bucket": 0.60,
+            "_borda_bucket": 10.0,
+            "conventions_mistake_rate_percent": 8.0,
+        },
+    ]
+    ordered = sorted(rows, key=lambda row: agg.final_consensus_sort_key(row, use_source_scale_rank=True))
+    assert [row["student_id"] for row in ordered] == ["s001", "s002"]
+
+
+def test_final_consensus_sort_key_honors_portfolio_scale_rank_inside_level():
+    rows = [
+        {
+            "student_id": "middle_b",
+            "_level_order": 70.0,
+            "portfolio_scale_rank": 3,
+            "rubric_after_penalty_percent": 71.5,
+            "_composite_bucket": 0.90,
+            "_borda_bucket": 80.0,
+            "conventions_mistake_rate_percent": 5.0,
+        },
+        {
+            "student_id": "middle_a",
+            "_level_order": 70.0,
+            "portfolio_scale_rank": 2,
+            "rubric_after_penalty_percent": 71.5,
+            "_composite_bucket": 0.70,
+            "_borda_bucket": 10.0,
+            "conventions_mistake_rate_percent": 6.0,
+        },
+    ]
+    ordered = sorted(rows, key=lambda row: agg.final_consensus_sort_key(row, use_portfolio_scale_rank=True))
+    assert [row["student_id"] for row in ordered] == ["middle_a", "middle_b"]
+
+
 def test_aggregate_assessments_success(tmp_path, monkeypatch):
     # Setup workspace
     (tmp_path / "assessments/pass1_individual").mkdir(parents=True)

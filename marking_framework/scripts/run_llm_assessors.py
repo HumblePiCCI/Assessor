@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.assessor_context import (
     build_grade_context, choose_preferred_genre, format_exemplars, genre_specificity, infer_genre_from_text, load_class_metadata, load_exemplars,
-    load_grade_profiles, normalize_genre, resolve_exemplar_selection, select_grade_level,
+    load_grade_profiles, normalize_genre, resolve_exemplar_selection, resolve_metadata_genre, select_grade_level,
 )
 from scripts.rubric_criteria import (
     contract_criteria_ids,
@@ -221,6 +221,27 @@ def build_pass1_genre_guidance(genre: str | None) -> str:
                 "- Do not over-reward fluent opinion if the support is vague or disconnected from the claim.",
             ]
         )
+    if normalized == "speech":
+        return "\n".join(
+            [
+                "PASS 1 SPEECH SCORING GUARDRAILS:",
+                "- Score this as a speech for an audience, not as a source-cited essay.",
+                "- Value a clear audience purpose, rhetorical stance, voice, pacing, and opening-to-closing shape.",
+                "- Satire, humor, repetition, and persona can be valid speech craft when they are purposeful and controlled.",
+                "- Do not collapse an otherwise coherent speech solely because evidence is anecdotal, performed, or rhetorical rather than research-like.",
+                "- Penalize a speech when the central purpose is unclear, support is nearly absent, or errors/disorganization block audience impact.",
+            ]
+        )
+    if normalized == "persuasive_letter":
+        return "\n".join(
+            [
+                "PASS 1 PERSUASIVE-LETTER SCORING GUARDRAILS:",
+                "- Score this as a persuasive letter to a real recipient, not a generic five-paragraph argument.",
+                "- Value clear request or position, audience-specific reasons, concrete suitability/evidence, appropriate tone, and usable letter form.",
+                "- Counterargument matters only when the task invites objections; do not over-penalize a concise application-style letter for not using essay counterargument structure.",
+                "- A brief but specific and audience-aware letter can outrank a longer letter with vaguer reasons or weaker control.",
+            ]
+        )
     if normalized == "summary_report":
         return "\n".join(
             [
@@ -330,7 +351,7 @@ def _resolve_consensus_pass2_item(student_id: str, assessor_items: dict, genre: 
     if not collected:
         return {}
     normalized_genre = str(genre or "").strip().lower()
-    if normalized_genre not in {"summary_report", "argumentative", "instructions"}:
+    if normalized_genre not in {"summary_report", "argumentative", "instructions", "speech", "persuasive_letter"}:
         preferred = [item for item in collected if not _is_fallback_deterministic_note(item.get("notes"))]
         return dict(preferred[0] if preferred else collected[0])
 
@@ -977,6 +998,220 @@ def build_argumentative_report_ranking_summary(item: dict, fallback_summary: str
     return _truncate_compact(" ".join(parts), max_chars)
 
 
+def _speech_signal_bonus_penalty(note_text: str) -> float:
+    lowered = str(note_text or "").lower()
+    bonus = 0.0
+    penalty = 0.0
+    if "audience appeal" in lowered or "audience fit" in lowered or "engaging voice" in lowered:
+        bonus += 4.0
+    if "strong voice" in lowered or "clear voice" in lowered or "persona" in lowered:
+        bonus += 4.0
+    if "clear structure" in lowered or "well-structured" in lowered or "strong structure" in lowered:
+        bonus += 4.0
+    if "rhetorical" in lowered or "satire" in lowered or "humor" in lowered or "comedic" in lowered:
+        bonus += 3.0
+    if "effective appeal" in lowered or "persuasive appeal" in lowered:
+        bonus += 3.0
+
+    if "little real evidence" in lowered or "limited research" in lowered:
+        penalty += 3.0
+    if "shallow analysis" in lowered or "weak argument" in lowered or "ideas are simple" in lowered:
+        penalty += 5.0
+    if "loosely organized" in lowered or "disorganized" in lowered:
+        penalty += 5.0
+    if "frequent errors" in lowered or "error-filled" in lowered:
+        penalty += 5.0
+    if "incomplete" in lowered or "fragmentary" in lowered:
+        penalty += 12.0
+    return bonus - penalty
+
+
+def build_speech_seed_order(known_ids: list[str], assessor_items: dict[str, dict]) -> list[str] | None:
+    if not known_ids:
+        return None
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "speech")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        weighted_components = []
+        total_weight = 0.0
+        for cid, weight in (
+            ("SP1", 0.24),
+            ("SP2", 0.28),
+            ("SP3", 0.22),
+            ("C1", 0.10),
+            ("C3", 0.08),
+            ("AR1", 0.04),
+            ("AR2", 0.04),
+        ):
+            value = criteria_points.get(cid)
+            if isinstance(value, (int, float)):
+                weighted_components.append(weight * float(value))
+                total_weight += weight
+        rubric_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+        base_signal = (sum(weighted_components) / total_weight) if total_weight > 0 else rubric_score
+        note_signal = _speech_signal_bonus_penalty(str(item.get("notes", "") or ""))
+        scores[sid] = round((0.74 * base_signal) + (0.26 * rubric_score) + note_signal, 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
+def build_speech_report_ranking_summary(item: dict, fallback_summary: str, max_chars: int = 280) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    sp1 = float(criteria_points.get("SP1", 0.0) or 0.0)
+    sp2 = float(criteria_points.get("SP2", 0.0) or 0.0)
+    sp3 = float(criteria_points.get("SP3", 0.0) or 0.0)
+    c1 = float(criteria_points.get("C1", 0.0) or 0.0)
+    parts = [f"Speech score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("audience", sp1),
+        ("rhetorical effect", sp2),
+        ("structure", sp3),
+        ("organization", c1),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    strengths = []
+    cautions = []
+    note_text = str(item.get("notes", "") or fallback_summary)
+    lowered_note = note_text.lower()
+    if sp1 >= 78 or "audience appeal" in lowered_note:
+        strengths.append("audience-shaped delivery")
+    if sp2 >= 78 or "rhetorical" in lowered_note or "satire" in lowered_note:
+        strengths.append("purposeful rhetorical choices")
+    if sp3 >= 78 or "strong structure" in lowered_note or "well-structured" in lowered_note:
+        strengths.append("clear speech arc")
+    if "little real evidence" in lowered_note or "limited research" in lowered_note:
+        cautions.append("support is mostly rhetorical or anecdotal")
+    if "frequent errors" in lowered_note or "loosely organized" in lowered_note:
+        cautions.append("control weakens audience impact")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(dict.fromkeys(cautions)) + ".")
+    note = _truncate_compact(note_text, 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
+
+
+def _persuasive_letter_signal_bonus_penalty(note_text: str, text: str) -> float:
+    lowered = str(note_text or "").lower()
+    body = str(text or "").lower()
+    bonus = 0.0
+    penalty = 0.0
+    if "clear request" in lowered or "clear opinion" in lowered or "clear position" in lowered:
+        bonus += 4.0
+    if "polite" in lowered or "appropriate tone" in lowered or "audience-aware" in lowered:
+        bonus += 4.0
+    if "relevant experience" in lowered or "specific" in lowered or "concrete" in lowered:
+        bonus += 4.0
+    if "letter format" in lowered or ("dear " in body and ("sincerely" in body or "your friend" in body)):
+        bonus += 2.0
+    if "feeding" in body or "bathing" in body or "after school" in body or "weekends" in body:
+        bonus += 2.0
+
+    if "no real argument" in lowered or "little persuasion" in lowered or "minimal persuasion" in lowered:
+        penalty += 4.0
+    if "vague" in lowered or "brief" in lowered or "limited supporting detail" in lowered:
+        penalty += 3.0
+    if "conventions have many errors" in lowered or "several spelling errors" in lowered or "frequent errors" in lowered:
+        penalty += 6.0
+    if "not on saturday" in body or "no experience" in body or "not much experience" in body or "don’t have lots of experiences" in body:
+        penalty += 3.0
+    return bonus - penalty
+
+
+def build_persuasive_letter_seed_order(
+    known_ids: list[str],
+    texts: dict[str, str],
+    assessor_items: dict[str, dict],
+) -> list[str] | None:
+    if not known_ids:
+        return None
+    scores = {}
+    for sid in known_ids:
+        item = _resolve_consensus_pass2_item(sid, assessor_items, "persuasive_letter")
+        if not item:
+            continue
+        criteria_points = _criterion_scores_from_item(item)
+        weighted_components = []
+        total_weight = 0.0
+        for cid, weight in (
+            ("PL1", 0.25),
+            ("PL2", 0.28),
+            ("PL3", 0.22),
+            ("C1", 0.10),
+            ("C2", 0.08),
+            ("AR1", 0.04),
+            ("AR2", 0.03),
+        ):
+            value = criteria_points.get(cid)
+            if isinstance(value, (int, float)):
+                weighted_components.append(weight * float(value))
+                total_weight += weight
+        rubric_score = float(item.get("rubric_total_points", 0.0) or 0.0)
+        base_signal = (sum(weighted_components) / total_weight) if total_weight > 0 else rubric_score
+        note_signal = _persuasive_letter_signal_bonus_penalty(str(item.get("notes", "") or ""), texts.get(sid, ""))
+        scores[sid] = round((0.74 * base_signal) + (0.26 * rubric_score) + note_signal, 4)
+    if len(scores) != len(known_ids):
+        return None
+    return ranking_from_scores(scores, known_ids)
+
+
+def build_persuasive_letter_report_ranking_summary(
+    item: dict,
+    fallback_summary: str,
+    text: str,
+    max_chars: int = 280,
+) -> str:
+    if not isinstance(item, dict):
+        return _truncate_compact(fallback_summary, max_chars)
+    score = float(item.get("rubric_total_points", 0.0) or 0.0)
+    criteria_points = _criterion_scores_from_item(item)
+    pl1 = float(criteria_points.get("PL1", criteria_points.get("AR1", 0.0)) or 0.0)
+    pl2 = float(criteria_points.get("PL2", criteria_points.get("AR2", 0.0)) or 0.0)
+    pl3 = float(criteria_points.get("PL3", criteria_points.get("C1", 0.0)) or 0.0)
+    parts = [f"Persuasive letter score {score:.2f}."]
+    metrics = []
+    for label, value in (
+        ("request/position", pl1),
+        ("audience-specific support", pl2),
+        ("tone/form", pl3),
+    ):
+        if value > 0:
+            metrics.append(f"{label} {value:.0f}")
+    if metrics:
+        parts.append("Criteria: " + "; ".join(metrics) + ".")
+    note_text = str(item.get("notes", "") or fallback_summary)
+    strengths = []
+    cautions = []
+    signal = _persuasive_letter_signal_bonus_penalty(note_text, text)
+    if signal > 0:
+        strengths.append("letter-specific purpose and audience fit")
+    if "brief" in note_text.lower() or "vague" in note_text.lower():
+        cautions.append("support remains brief or general")
+    if "conventions" in note_text.lower() and "errors" in note_text.lower():
+        cautions.append("errors weaken recipient-facing control")
+    if strengths:
+        parts.append("Strengths: " + ", ".join(dict.fromkeys(strengths)) + ".")
+    if cautions:
+        parts.append("Cautions: " + ", ".join(dict.fromkeys(cautions)) + ".")
+    note = _truncate_compact(note_text, 140)
+    if note:
+        parts.append(note)
+    return _truncate_compact(" ".join(parts), max_chars)
+
+
 def argumentative_seed_mode(metadata: dict, genre: str | None, portfolio_scope: bool) -> str:
     if portfolio_scope or str(genre or "").strip().lower() != "argumentative":
         return ""
@@ -993,6 +1228,22 @@ def argumentative_seed_mode(metadata: dict, genre: str | None, portfolio_scope: 
 
 def use_argumentative_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
     return bool(argumentative_seed_mode(metadata, genre, portfolio_scope))
+
+
+def use_speech_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    if portfolio_scope or str(genre or "").strip().lower() != "speech":
+        return False
+    source_family = str((metadata or {}).get("source_family") or "").strip().lower()
+    cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
+    return "thoughtful" in source_family and "same_rubric_family_cross_topic" in cohort_shape
+
+
+def use_persuasive_letter_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
+    if portfolio_scope or str(genre or "").strip().lower() != "persuasive_letter":
+        return False
+    source_family = str((metadata or {}).get("source_family") or "").strip().lower()
+    cohort_shape = str((metadata or {}).get("cohort_shape") or (metadata or {}).get("cohort_coherence") or "").strip().lower()
+    return "thoughtful" in source_family and "same_prompt" in cohort_shape
 
 
 def use_instructions_seed_order(metadata: dict, genre: str | None, portfolio_scope: bool) -> bool:
@@ -1018,6 +1269,20 @@ def build_pass2_ranking_contract(genre: str | None, portfolio_scope: bool, metad
             "- Student summaries already reflect piece-level portfolio scoring.\n"
             "- Compare the overall portfolio judgment, piece profile, and strongest pieces rather than isolated excerpts.\n"
             "- A portfolio with stronger piece distribution and stronger top pieces should outrank a flatter lower portfolio."
+        )
+    if use_speech_seed_order(metadata or {}, genre, portfolio_scope):
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as speeches, not source-cited essays.\n"
+            "- Audience purpose, rhetorical effectiveness, voice, and speech structure should outweigh generic essay polish alone.\n"
+            "- A controlled satirical or humorous speech can outrank a plainer speech when its audience impact and structure are stronger."
+        )
+    if use_persuasive_letter_seed_order(metadata or {}, genre, portfolio_scope):
+        return (
+            "RANKING CONTRACT:\n"
+            "- Rank these as persuasive letters to a real recipient, not generic argument essays.\n"
+            "- Clear request or position, audience-specific reasons, appropriate tone, and usable letter form should drive the order.\n"
+            "- A concise specific letter should outrank a vaguer or less controlled letter even if both are short."
         )
     if str(genre or "").strip().lower() == "summary_report":
         return (
@@ -1090,12 +1355,18 @@ def build_pass2_student_summaries(
     normalized_genre = str(genre or "").strip().lower()
     argumentative_seed_mode_active = use_argumentative_seed_order(metadata or {}, genre, portfolio_scope)
     instructions_seed_mode = use_instructions_seed_order(metadata or {}, genre, portfolio_scope)
+    speech_seed_mode = use_speech_seed_order(metadata or {}, genre, portfolio_scope)
+    persuasive_letter_seed_mode = use_persuasive_letter_seed_order(metadata or {}, genre, portfolio_scope)
     literary_seed_mode = use_literary_analysis_seed_order(metadata or {}, genre, portfolio_scope, source_texts, assessor_items)
     for sid in known_ids:
         raw_summary = raw_summaries.get(sid, "")
         item = _resolve_consensus_pass2_item(sid, assessor_items, genre)
         if portfolio_scope:
             summary = summarize_portfolio_for_ranking(item, max_chars=max_chars)
+        elif speech_seed_mode:
+            summary = build_speech_report_ranking_summary(item, raw_summary, max_chars=max_chars)
+        elif persuasive_letter_seed_mode:
+            summary = build_persuasive_letter_report_ranking_summary(item, raw_summary, source_texts.get(sid, ""), max_chars=max_chars)
         elif normalized_genre == "summary_report":
             summary = build_summary_report_ranking_summary(item, raw_summary, max_chars=max_chars)
         elif instructions_seed_mode:
@@ -1193,12 +1464,7 @@ def main() -> int:
     rubric_manifest = load_rubric_json(Path(args.rubric_manifest))
     explicit_genre = normalize_genre(args.genre)
     rubric_genre = normalize_genre(normalized_rubric.get("genre"))
-    metadata_genre = normalize_genre(
-        metadata.get("genre")
-        or metadata.get("assignment_genre")
-        or metadata.get("genre_form")
-        or metadata.get("assessment_unit")
-    )
+    metadata_genre = resolve_metadata_genre(metadata)
     inferred_genre = None
     if not explicit_genre and not rubric_genre and genre_specificity(metadata_genre) < 4:
         inferred_genre = infer_genre_from_text(rubric_context.get("raw_text", rubric), outline)
@@ -1575,12 +1841,20 @@ def main() -> int:
     summary_seed_order = build_summary_seed_order(known_ids, texts, pass1_items_by_assessor) if use_summary_seed_order(metadata, genre, portfolio_scope) else None
     instructions_seed_order = build_instructions_seed_order(known_ids, pass1_items_by_assessor) if use_instructions_seed_order(metadata, genre, portfolio_scope) else None
     argumentative_seed_order = build_argumentative_seed_order(known_ids, pass1_items_by_assessor) if use_argumentative_seed_order(metadata, genre, portfolio_scope) else None
+    speech_seed_order = build_speech_seed_order(known_ids, pass1_items_by_assessor) if use_speech_seed_order(metadata, genre, portfolio_scope) else None
+    persuasive_letter_seed_order = build_persuasive_letter_seed_order(known_ids, texts, pass1_items_by_assessor) if use_persuasive_letter_seed_order(metadata, genre, portfolio_scope) else None
     literary_seed_order = build_literary_analysis_seed_order(known_ids, texts, pass1_items_by_assessor) if use_literary_analysis_seed_order(metadata, genre, portfolio_scope, texts, pass1_items_by_assessor) else None
     pass2_rankings_by_assessor = {}
     for assessor in assessors:
         score_order = ranking_from_scores(pass1_scores_by_assessor.get(assessor, {}), known_ids)
         ranking_contract = build_pass2_ranking_contract(genre, portfolio_scope, metadata)
-        summary_item_source = pass1_items_by_assessor if (summary_seed_order or instructions_seed_order or argumentative_seed_order) else pass1_items_by_assessor.get(assessor, {})
+        summary_item_source = pass1_items_by_assessor if (
+            summary_seed_order
+            or instructions_seed_order
+            or argumentative_seed_order
+            or speech_seed_order
+            or persuasive_letter_seed_order
+        ) else pass1_items_by_assessor.get(assessor, {})
         student_summaries = build_pass2_student_summaries(
             known_ids,
             raw_summary_map,
@@ -1681,6 +1955,10 @@ def main() -> int:
             lines = list(instructions_seed_order)
         elif argumentative_seed_order:
             lines = list(argumentative_seed_order)
+        elif speech_seed_order:
+            lines = list(speech_seed_order)
+        elif persuasive_letter_seed_order:
+            lines = list(persuasive_letter_seed_order)
         elif literary_seed_order:
             lines = list(literary_seed_order)
         pass2_rankings_by_assessor[assessor] = list(lines)
