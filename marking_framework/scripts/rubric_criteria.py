@@ -70,8 +70,9 @@ def contract_criteria(criteria: dict, genre: str | None) -> list:
     allowed_ids = entry.get("contract_criteria_ids", [])
     if not isinstance(allowed_ids, list) or not allowed_ids:
         return items
-    allowed = {str(cid or "").strip() for cid in allowed_ids if str(cid or "").strip()}
-    filtered = [item for item in items if str(item.get("id", "")).strip() in allowed]
+    ordered_ids = [str(cid or "").strip() for cid in allowed_ids if str(cid or "").strip()]
+    by_id = {str(item.get("id", "")).strip(): item for item in items if str(item.get("id", "")).strip()}
+    filtered = [by_id[cid] for cid in ordered_ids if cid in by_id]
     return filtered or items
 
 

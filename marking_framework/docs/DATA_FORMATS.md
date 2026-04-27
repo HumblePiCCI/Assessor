@@ -45,6 +45,11 @@
   - live/fixture read trace when committee reads are enabled, including per-pair protection status and blocking reasons
 - `outputs/consistency_checks.committee_edge.json`
   - canonical merged judgment file consumed by `global_rerank.py`; only committee decisions with `protection_readiness.status == "protect"` are appended as direct `adjudication_source="committee_edge"` judgments eligible for protected `committee_direct_edge` rerank constraints
+  - includes committee-edge metadata such as `withheld_pair_keys` and
+    `protection_readiness`; `evaluate_pairwise_adjudicator.py` uses this
+    metadata to report suppressed/retry/group-read-needed hard pairs as
+    `withheld`/unresolved instead of scoring stale lower-authority winners as
+    committee-backed decisions
 
 8) Evidence Map And Group Packets
 - `outputs/evidence_map.json`
@@ -56,7 +61,8 @@
 
 9) Pairwise Adjudicator Eval
 - `outputs/pairwise_adjudicator_eval.json`
-  - hard-pair accuracy, critical accuracy, coverage, and polish-bias risk report
+  - hard-pair accuracy, critical accuracy, coverage, withheld/unresolved counts,
+    and polish-bias risk report
 
 10) Final Order (`outputs/final_order.csv`)
 - Consensus rows with `final_rank` after deterministic global rerank.

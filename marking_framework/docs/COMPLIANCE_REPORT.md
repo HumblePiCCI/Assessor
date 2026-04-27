@@ -1,6 +1,6 @@
 # Compliance Report - Hero Path Grading Platform
 
-**Last reviewed:** 2026-04-25
+**Last reviewed:** 2026-04-27
 **Status:** Current test gates are green; historical LOC and 100% coverage claims are retired.
 
 ## Current Verification Contract
@@ -36,6 +36,20 @@ The relevant Ghost hard-pair gate artifact for this slice is
 `outputs/live_validation/consistency_checks.committee_edge.withheld_eval_contract_20260425T210609Z.json`.
 It reports full critical accuracy after committee-withheld pairs are counted as
 explicitly unresolved rather than falling back to stale lower-authority winners.
+
+The 2026-04-27 source-family ranking slice was verified on branch
+`codex/source-family-ranking-challenge` with:
+
+- `python3 -m pytest -q --no-cov`
+- `python3 -m pytest -q` from `marking_framework/`
+- `git diff --check`
+
+The focused live benchmark artifact is
+`outputs/source_family_ranking_challenge/source_family_20260426T_focused_runs1_final2/`.
+It reports exact `1.0`, Kendall `1.0`, pairwise `1.0`, and score-band MAE
+`0.0` for the four targeted source-family datasets. This is focused
+non-regression evidence, not a substitute for the next broad external-corpus
+packet after merge.
 
 ## Production Readiness References
 

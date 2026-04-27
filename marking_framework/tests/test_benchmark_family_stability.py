@@ -60,8 +60,8 @@ def test_load_dataset_metadata_normalizes_family_key(tmp_path):
         encoding="utf-8",
     )
     metadata = bfs.load_dataset_metadata(dataset)
-    assert metadata["genre"] == "argumentative"
-    assert metadata["family_key"] == "Thoughtful | argumentative | same_rubric_family_cross_topic"
+    assert metadata["genre"] == "persuasive_letter"
+    assert metadata["family_key"] == "Thoughtful | persuasive_letter | same_rubric_family_cross_topic"
 
 
 def test_cluster_families_aggregates_weighted_metrics():

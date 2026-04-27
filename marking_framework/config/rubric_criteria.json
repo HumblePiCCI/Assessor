@@ -349,6 +349,19 @@
       ]
     },
     "speech": {
+      "contract_criteria_ids": ["SP1", "SP2", "SP3", "C1", "C3"],
+      "contract_guidance": [
+        "Score this as a speech for an audience, not a generic argument essay.",
+        "A top speech has a clear audience purpose, controlled rhetorical choices, engaging voice, and an effective opening-to-closing arc.",
+        "Satire, humor, repetition, and persona are valid evidence of speech craft when they are purposeful and controlled; do not require research-style evidence unless the rubric explicitly does."
+      ],
+      "evidence_requirements": {
+        "force_require_evidence": true,
+        "quote_validation": false,
+        "rationale_min_words": 10,
+        "hard_fail_on_evidence_errors": true,
+        "preserve_validation": true
+      },
       "additional_criteria": [
         {
           "id": "SP1",
@@ -366,6 +379,41 @@
           "id": "SP3",
           "name": "Speech structure",
           "description": "Opening, development, and closing work together as an effective speech",
+          "weight_override": null
+        }
+      ]
+    },
+    "persuasive_letter": {
+      "contract_criteria_ids": ["PL1", "PL2", "PL3", "C1", "C2"],
+      "contract_guidance": [
+        "Score this as a persuasive letter to a specific recipient, not a generic five-paragraph argument.",
+        "A top persuasive letter states a clear request or position, gives audience-specific reasons or evidence, uses an appropriate tone, and follows a usable letter form.",
+        "Do not require formal essay counterargument structure unless the prompt asks for objections; concise recipient-focused support can be enough for strong performance."
+      ],
+      "evidence_requirements": {
+        "force_require_evidence": true,
+        "quote_validation": false,
+        "rationale_min_words": 10,
+        "hard_fail_on_evidence_errors": true,
+        "preserve_validation": true
+      },
+      "additional_criteria": [
+        {
+          "id": "PL1",
+          "name": "Request or position clarity",
+          "description": "Clearly states what the writer wants the recipient to believe, do, grant, or consider",
+          "weight_override": null
+        },
+        {
+          "id": "PL2",
+          "name": "Audience-specific support",
+          "description": "Uses concrete reasons, experience, details, or benefits that matter to the recipient",
+          "weight_override": null
+        },
+        {
+          "id": "PL3",
+          "name": "Letter tone and form",
+          "description": "Maintains an appropriate recipient-facing tone and usable letter structure",
           "weight_override": null
         }
       ]

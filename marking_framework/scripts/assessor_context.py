@@ -39,14 +39,14 @@ GENRE_ALIASES = {
     "speech": {"speech", "persuasive speech", "oral argument", "address"},
     "portfolio": {"portfolio", "writing portfolio", "mixed forms", "mixed form"},
     "research_report": {"research_report", "research report", "research project"},
-    "opinion_letter": {"opinion_letter", "opinion letter", "letter to the editor"},
+    "persuasive_letter": {"persuasive_letter", "persuasive letter", "opinion_letter", "opinion letter", "letter to the editor"},
     "advertisement": {"advertisement", "ad", "persuasive ad"},
     "letter": {"letter", "reader response", "response letter"},
     "persuasive_response": {"persuasive_response", "persuasive response", "persuasive essay"},
 }
 
 CANONICAL_GENRE_MAP = {
-    "opinion_letter": "argumentative",
+    "opinion_letter": "persuasive_letter",
     "advertisement": "argumentative",
     "letter": "argumentative",
     "persuasive_response": "argumentative",
@@ -59,6 +59,7 @@ GENRE_SPECIFICITY = {
     "instructions": 4,
     "summary_report": 4,
     "speech": 4,
+    "persuasive_letter": 4,
     "book_review": 4,
     "informative_letter": 4,
     "news_report": 4,
@@ -79,6 +80,7 @@ EXEMPLAR_GENRE_FALLBACKS = {
     "narrative": ["literary_analysis", "informational_report", "argumentative", "news_report"],
     "news_report": ["news_report", "informational_report", "argumentative", "literary_analysis"],
     "portfolio": ["literary_analysis", "informational_report", "argumentative", "news_report"],
+    "persuasive_letter": ["argumentative", "informational_report", "literary_analysis", "news_report"],
     "speech": ["argumentative", "informational_report", "literary_analysis", "news_report"],
     "summary_report": ["informational_report", "literary_analysis", "argumentative", "news_report"],
 }
@@ -189,6 +191,7 @@ def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
         ("instructions", ("instructions", "procedure", "follow these steps", "materials", "safety")),
         ("summary_report", ("summary", "main idea", "key details", "in your own words")),
         ("speech", ("speech", "audience", "address", "fellow students", "fellow americans")),
+        ("persuasive_letter", ("persuasive letter", "opinion letter", "letter to the editor")),
         ("book_review", ("book review", "recommend this book", "would you recommend")),
         ("news_report", ("headline", "news report", "who what when where", "objective tone")),
         ("argumentative", ("persuasive", "convince", "opinion", "letter to the editor", "argument")),
@@ -200,6 +203,47 @@ def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
         if any(marker in merged for marker in markers):
             return genre
     return None
+
+
+def infer_genre_from_metadata(metadata: dict | None) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    merged = " ".join(
+        str(metadata.get(key) or "")
+        for key in (
+            "assignment_name",
+            "genre_form",
+            "assessment_unit",
+            "cohort_shape",
+            "cohort_coherence",
+            "rubric_family",
+            "dataset_name",
+        )
+    ).lower()
+    if "portfolio" in merged:
+        return "portfolio"
+    if "speech" in merged or "address" in merged:
+        return "speech"
+    if "persuasive letter" in merged or "opinion letter" in merged or "letter to the editor" in merged:
+        return "persuasive_letter"
+    if "instruction" in merged or "procedur" in merged:
+        return "instructions"
+    if "summary" in merged:
+        return "summary_report"
+    return None
+
+
+def resolve_metadata_genre(metadata: dict | None) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    declared = normalize_genre(
+        metadata.get("genre")
+        or metadata.get("assignment_genre")
+        or metadata.get("genre_form")
+        or metadata.get("assessment_unit")
+    )
+    inferred = infer_genre_from_metadata(metadata)
+    return choose_preferred_genre(declared, inferred)
 
 
 def genre_specificity(genre: str | None) -> int:

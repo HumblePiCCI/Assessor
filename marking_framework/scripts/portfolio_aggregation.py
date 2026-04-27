@@ -262,11 +262,11 @@ def _portfolio_sort_key_with_strategy(row: dict, strategy: str) -> tuple:
             -_num(row.get("portfolio_piece_top80_mean"), -1.0),
             -_num(row.get("portfolio_piece_top70_mean"), -1.0),
             -_num(row.get("portfolio_note_estimate"), -1.0),
-            _num(row.get("conventions_mistake_rate_percent"), 100.0),
             -_num(row.get("portfolio_piece_upper_half_mean"), -1.0),
             -_num(row.get("portfolio_piece_median_mean"), -1.0),
             -_num(row.get("portfolio_piece_overall_mean"), -1.0),
             _num(row.get("portfolio_piece_lt60_mean"), 999.0),
+            _num(row.get("conventions_mistake_rate_percent"), 100.0),
             -_num(row.get("_composite_bucket"), 0.0),
             -_num(row.get("_borda_bucket"), 0.0),
             str(row.get("student_id", "")).lower(),
@@ -321,6 +321,10 @@ def apply_portfolio_scale_calibration(
 
     sort_strategy = str(scale_cfg.get("sort_strategy", "") or "").strip().lower()
     sorted_rows = [dict(row) for row in sorted(rows, key=lambda row: _portfolio_sort_key_with_strategy(row, sort_strategy))]
+    scale_rank_by_student = {
+        str(row.get("student_id", "")).strip(): idx
+        for idx, row in enumerate(sorted_rows, start=1)
+    }
     top_count, middle_count, bottom_count = _three_band_counts(
         len(sorted_rows),
         _num(scale_cfg.get("top_fraction"), 0.25),
@@ -374,6 +378,8 @@ def apply_portfolio_scale_calibration(
     for row in rows:
         updated_row = dict(row)
         student_id = str(row.get("student_id", "")).strip()
+        updated_row["portfolio_scale_rank"] = scale_rank_by_student.get(student_id, "")
+        updated_row["portfolio_scale_sort_strategy"] = sort_strategy
         current_level = str(row.get("adjusted_level", "") or "").strip()
         current_score = _num(row.get("rubric_after_penalty_percent"), 0.0)
         rubric_mean = _num(row.get("rubric_mean_percent"), current_score)

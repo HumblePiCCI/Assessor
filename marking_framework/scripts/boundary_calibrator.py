@@ -6,10 +6,10 @@ from pathlib import Path
 
 try:
     from scripts.aggregate_helpers import get_level_band, get_level_bands
-    from scripts.assessor_context import load_class_metadata, load_grade_profiles, normalize_genre, select_grade_level
+    from scripts.assessor_context import load_class_metadata, load_grade_profiles, resolve_metadata_genre, select_grade_level
 except ImportError:  # pragma: no cover - Running as a script
     from aggregate_helpers import get_level_band, get_level_bands  # pragma: no cover
-    from assessor_context import load_class_metadata, load_grade_profiles, normalize_genre, select_grade_level  # pragma: no cover
+    from assessor_context import load_class_metadata, load_grade_profiles, resolve_metadata_genre, select_grade_level  # pragma: no cover
 
 
 def _num(value, default=0.0) -> float:
@@ -64,13 +64,7 @@ def load_scope_context(metadata_path: Path, profiles_path: Path, routing_path: P
     profiles = load_grade_profiles(profiles_path)
     pass1_model_version, pass1_model_family = _load_pass1_model_info(routing_path)
     grade_level = select_grade_level(None, metadata)
-    raw_genre = (
-        metadata.get("genre")
-        or metadata.get("assignment_genre")
-        or metadata.get("genre_form")
-        or metadata.get("assessment_unit")
-    )
-    genre = normalize_genre(raw_genre)
+    genre = resolve_metadata_genre(metadata)
     assessment_unit = str(metadata.get("assessment_unit", "") or "").strip().lower()
     genre_form = str(metadata.get("genre_form", "") or "").strip().lower()
     cohort_shape = str(metadata.get("cohort_shape") or metadata.get("cohort_coherence") or "").strip()
@@ -439,6 +433,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
             reasons.append("early_grade_narrative_floor")
 
         source_rank = int(source_rank_map.get(student_id, provisional_rank))
+        source_rank_strategy_label = source_rank_strategy if source_scale_profile_name else ""
         if source_scale_profile_name and source_rank <= len(source_rank_floors):
             rank_idx = source_rank - 1
             source_floor = source_rank_floors[rank_idx]
@@ -490,6 +485,9 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
         updated_row["boundary_calibration_delta"] = round(target_score - current_score, 2)
         updated_row["boundary_calibration_reason"] = ";".join(dict.fromkeys(reasons))
         updated_row["boundary_calibration_capped"] = str(bool(capped)).lower()
+        updated_row["source_scale_profile"] = source_scale_profile_name
+        updated_row["source_scale_rank"] = source_rank if source_scale_profile_name else ""
+        updated_row["source_scale_rank_strategy"] = source_rank_strategy_label
 
         if abs(target_score - current_score) >= 0.01:
             updated_row["rubric_after_penalty_percent"] = target_score

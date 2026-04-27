@@ -12,6 +12,7 @@ from scripts.assessor_context import (
     load_exemplars,
     load_grade_profiles,
     normalize_genre,
+    resolve_metadata_genre,
     grade_band_for_level,
     resolve_exemplars_dir,
     select_grade_level,
@@ -53,7 +54,8 @@ def test_build_grade_context():
 def test_normalize_genre():
     assert normalize_genre("Literary Analysis") == "literary_analysis"
     assert normalize_genre("news report") == "news_report"
-    assert normalize_genre("opinion letter") == "argumentative"
+    assert normalize_genre("opinion letter") == "persuasive_letter"
+    assert normalize_genre("persuasive letter") == "persuasive_letter"
     assert normalize_genre("summary report") == "summary_report"
     assert normalize_genre("book review") == "book_review"
     assert normalize_genre("informative letter") == "informative_letter"
@@ -67,7 +69,8 @@ def test_infer_genre_from_text():
     assert infer_genre_from_text("Write clear instructions with materials and safety notes", "") == "instructions"
     assert infer_genre_from_text("Write a summary of the article in your own words", "") == "summary_report"
     assert infer_genre_from_text("Prepare a speech for your classmates", "") == "speech"
-    assert infer_genre_from_text("Write a persuasive letter", "convince your principal") == "argumentative"
+    assert infer_genre_from_text("Write a persuasive letter", "convince your principal") == "persuasive_letter"
+    assert infer_genre_from_text("Write a persuasive essay", "convince your principal") == "argumentative"
     assert infer_genre_from_text("Write a news report headline", "") == "news_report"
     assert infer_genre_from_text("Explain facts and details", "") == "informational_report"
     assert infer_genre_from_text("Analyze theme and character", "") == "literary_analysis"
@@ -79,6 +82,11 @@ def test_choose_preferred_genre_uses_more_specific_inference():
     assert choose_preferred_genre("argumentative", "informative_letter") == "informative_letter"
     assert choose_preferred_genre("narrative", "narrative") == "narrative"
     assert choose_preferred_genre(None, "summary report") == "summary_report"
+
+
+def test_resolve_metadata_genre_preserves_specific_form_over_generic_mode():
+    assert resolve_metadata_genre({"assignment_genre": "argumentative", "assignment_name": "Persuasive Writing Speech Benchmark"}) == "speech"
+    assert resolve_metadata_genre({"assignment_genre": "opinion_letter", "assignment_name": "Persuasive Letter Benchmark"}) == "persuasive_letter"
 
 
 def test_grade_band_for_level():
