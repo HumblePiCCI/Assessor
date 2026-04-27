@@ -2,7 +2,7 @@
 
 Status
 - State: active working plan
-- Last updated: 2026-04-22
+- Last updated: 2026-04-27
 - Intended use: canonical continuation document for architecture, sequencing, and acceptance criteria across future sessions
 
 ## Purpose
@@ -33,7 +33,10 @@ The original eight implementation phases are now in the repo:
 - Phase 10: rubric ingestion, normalization, and verification
 - Phase 11: scope-native scoring and boundary calibration
 
-The original production-foundation phases are complete in-repo. The next in-repo phase is accuracy refinement against the expanded external gold corpus.
+The original production-foundation phases are complete in-repo. The current
+branch state has also completed the focused Ghost committee-withheld contract
+and the follow-on source-family ranking hardening for speeches, persuasive
+letters, NAEP ordinal release sets, and UK STA portfolios.
 
 The production-hardening track is complete in-repo, including the rubric-contract layer that bounds rubric variability before scoring.
 
@@ -61,7 +64,18 @@ The remaining work before a real rollout is environmental and operational:
 - run the launch validator against the real release candidate
 - rehearse the rollback flow against the deployment environment
 
-The remaining in-repo work is now accuracy refinement and corpus-driven evaluation hardening:
+The remaining in-repo work is now proof-by-evaluation, not another open-ended
+refinement loop:
+- merge the pushed source-family branch after review
+- run one release-comparable broad external corpus packet against that merged
+  state
+- move to controlled teacher pilot testing if the broad packet is neutral or
+  positive on accuracy and rank-order deltas
+
+Any further accuracy refinement should be driven by a new failing validation
+packet, not by speculative polishing.
+
+The still-useful refinement lanes are:
 - broaden scoring context across earlier grades and more writing forms
 - reduce over-anchoring when exemplar scope is weak or cross-band
 - add boundary calibration so strong relative ordering produces stronger exact-level hit
@@ -169,16 +183,18 @@ The repo now defines the production contract. The remaining gap is applying it i
 - deployment-time secret management
 - live release rehearsal with real ops surfaces
 
-### Gap 2: Rubric Variability Still Enters The Pipeline Too Raw
+### Gap 2: Current Evidence Still Needs A Merged Broad-Corpus Refresh
 
-Uploaded rubrics can vary widely in structure, wording, file type, and explicitness.
+The repo has current focused evidence for the source-family regression cluster,
+and older release evidence for the broader corpus. The missing proof is one
+merged-state, release-comparable broad external corpus packet after the
+source-family branch lands.
 
-The current system can consume rubric text, but it still relies too heavily on:
-- raw rubric text in assessor prompts
-- static canonical criteria config
-- rubric-family inference by metadata or hash
-
-The next major quality improvement is to convert arbitrary teacher rubrics into a normalized, teacher-confirmed internal rubric contract before scoring.
+That packet decides the next branch:
+- if broad accuracy and ordering deltas are neutral or positive, stop refining
+  and start controlled teacher pilot testing
+- if a new regression cluster appears, target that cluster directly with a
+  narrow follow-up slice
 
 ## Target Architecture
 
@@ -906,6 +922,7 @@ Build tasks
      - summary
      - instructions
      - speech
+     - persuasive letter
 
 3. Reduce anchor dominance when scope match is weak
    - treat the deterministic scorer as a sanity check, not the main shaper of pass-1 scores
@@ -943,17 +960,65 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Re-run the routed Ghost hard-pair validation on `gpt-5.4-mini` with protection-readiness active.
-2. Re-run the broader external corpus once the protected-edge miss profile is clean.
-3. Return to Phase 11 scope-native scoring and boundary calibration for non-literary and early-grade forms.
-4. Rehearse live rollout against the production contract.
+1. Open/review/merge `codex/source-family-ranking-challenge`.
+2. Re-run the broader external corpus from the merged state with a fresh output
+   directory and release-comparable settings.
+3. If the broad packet is neutral or positive on exact-level accuracy,
+   score-band MAE, Kendall tau, and pairwise-order agreement, begin controlled
+   teacher pilot testing.
+4. If the broad packet exposes a new concentrated regression cluster, target
+   that cluster directly before teacher pilot expansion.
+5. Rehearse live rollout against the production contract separately from the
+   teacher pilot.
 
 Why this order:
-- the Ghost literary-analysis live seam is the current highest-resolution failure: selected hard pairs reach the right packet, proof-quality claim-refutation is enforced, surviving committee decisions are protected by rerank, and unsafe committee decisions are now withheld from canonical protected evidence by protection-readiness
-- Phase 11 still addresses the broader accuracy gap surfaced by the expanded explicit-gold corpus
-- live rollout rehearsal closes the environment-specific deployment gap after the scoring path is stronger
+- the Ghost committee-withheld seam now has an explicit unresolved/withheld eval
+  contract, so stale lower-authority winners are not counted as committee-backed
+  hard-pair misses
+- the source-family branch fixed the known focused ranking cluster with live
+  `gpt-5.4-mini` evidence, but that branch is not merged and no broad corpus
+  packet has yet been regenerated from the merged state
+- controlled teacher testing is now the highest-value signal once the broad
+  benchmark contract is rechecked; production launch remains blocked until the
+  strict launch validator passes in a staging or production-like environment
 
 ## Recently Landed Sprint
+
+The source-family ranking challenge is complete on
+`codex/source-family-ranking-challenge` and pushed as
+`99419f7f37319d668ac28ef00f3b518c9737cc5c`. It is not yet merged to `main`.
+
+### Sprint Goal
+
+Preserve source-native ordering and level projection for the focused regression
+cluster that remained after the Ghost committee-withheld contract.
+
+### Sprint Scope
+
+1. Resolve metadata forms such as `speech` and `persuasive_letter` before
+   falling back to generic genre inference.
+2. Add speech and persuasive-letter rubric contracts, pass-2 summaries, and
+   seed-order logic.
+3. Preserve supported `source_scale_rank` and `portfolio_scale_rank` in final
+   consensus sorting.
+4. Tighten portfolio ordinal sorting so piece-distribution evidence outranks
+   minor convention deltas.
+
+### Sprint Validation
+
+Final focused live packet:
+
+- `outputs/source_family_ranking_challenge/source_family_20260426T_focused_runs1_final2/`
+- `naep_1998_g12_persuasive_one_vote`: exact `1.0`, Kendall `1.0`, pairwise `1.0`, MAE `0.0`
+- `thoughtful_assessment_grade11_12_speech`: exact `1.0`, Kendall `1.0`, pairwise `1.0`, MAE `0.0`
+- `thoughtful_assessment_grade6_8_persuasive_letter`: exact `1.0`, Kendall `1.0`, pairwise `1.0`, MAE `0.0`
+- `uk_sta_2018_ks2_writing_portfolios`: exact `1.0`, Kendall `1.0`, pairwise `1.0`, MAE `0.0`
+
+No `llm_failures.jsonl` files were present in the final packet. Local gates
+passed with `python3 -m pytest -q`, `python3 -m pytest -q --no-cov`, and
+`git diff --check`.
+
+## Prior Landed Sprint
 
 The protected committee-edge audit slice has landed in the routed literary committee seam.
 
@@ -1046,15 +1111,27 @@ Use this section as the running status checkpoint.
 - rubric ingestion now supports multi-format extraction, normalized rubric manifests, verification artifacts, paused low-confidence confirmation, teacher edits, and runtime consumption of the verified rubric contract
 - Phase 11 has started with broader grade/genre routing, genre-aware criterion prompting, and scope-sensitive pass-1 guard behavior to reduce benchmark compression from weak exemplar matches
 - the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, side-aware mechanics blocker validation, proof-quality claim-refutation fields, and protected committee-direct rerank constraints
+- committee-withheld hard pairs are reported as explicitly unresolved by the
+  hard-pair evaluator instead of being scored as stale lower-authority winners
+- source-family ranking hardening is complete on the pushed branch for speeches,
+  persuasive letters, NAEP ordinal release sets, and UK STA portfolios, with a
+  focused live packet at exact `1.0`, Kendall `1.0`, pairwise `1.0`, and MAE
+  `0.0` on all four targeted datasets
 
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
-- exemplar coverage is still thinner than the benchmark corpus for early grades, portfolios, and some specialized forms, so routing improvements will need to be followed by richer exemplar and calibration banks
-- exact-level calibration still lags ordering quality on parts of the public corpus, especially top-band cases
-- because committee-edge winners are protected by rerank, the next validation risk is empirical: confirm `gpt-5.4-mini` live decisions land in `protect`, `suppress_ambiguous`, `needs_retry`, or `needs_group_read` as expected on the Ghost hard pairs before broadening to the external corpus
+- the source-family branch is pushed but not yet merged to `main`
+- broad external-corpus evidence has not yet been regenerated after the
+  source-family branch
+- exemplar coverage is still thinner than the benchmark corpus for early grades
+  and some specialized forms, so future refinements should be driven by broad
+  corpus or teacher-pilot evidence, not speculative tuning
 
 ### Next Decision Point
 
-Rerun the Ghost routed hard-pair validation on `gpt-5.4-mini` with protection-readiness enabled. If valid fixes remain protected while unsafe edges are suppressed, retried, or corrected, run the external corpus again and decide whether the next broader slice is boundary calibration, portfolio mode, or exemplar-bank expansion.
+Open, review, and merge `codex/source-family-ranking-challenge`; then run one
+fresh broad external-corpus packet from the merged state. If that packet is
+green or neutral on ranking deltas, start a controlled teacher pilot. If it
+fails, refine only the newly exposed regression cluster.

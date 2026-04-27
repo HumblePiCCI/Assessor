@@ -2,7 +2,7 @@
 
 Status
 - State: active runtime roadmap
-- Last updated: 2026-04-22
+- Last updated: 2026-04-27
 - Intended use: technical roadmap for moving from benchmark-green to live-cohort-stable
 
 ## Purpose
@@ -14,13 +14,38 @@ This roadmap focuses on the remaining hard problem:
 
 - making the product stable, trustworthy, and calibration-aware on new teacher cohorts that do not come with gold labels
 
-The immediate trigger for this roadmap is the Grade 7 smoke test on a novel live set:
+The original trigger for this roadmap was the Grade 7 smoke test on a novel live set:
 - fresh project flow worked after pipeline fixes
 - teacher workflow completed end to end
 - benchmark and release gates remain green on the frozen public corpus
 - but the live cohort still showed high assessor spread, high rerank swap rate, and noticeable rerun drift
 
 That is the real gap between "benchmark SOTA" and "teacher-world SOTA."
+
+## State Of Play
+
+As of 2026-04-27, the repo has moved past the last two targeted engineering
+blockers:
+
+- Ghost committee decisions now distinguish protected committee evidence from
+  `suppress_ambiguous`, `needs_retry`, and `needs_group_read` outcomes.
+- Hard-pair eval treats committee-withheld pairs as explicitly unresolved rather
+  than silently trusting stale lower-authority winners.
+- The focused source-family branch now validates speeches, persuasive letters,
+  NAEP ordinal release sets, and UK STA portfolios with perfect focused live
+  metrics on `gpt-5.4-mini`.
+
+The remaining product question is no longer "which known targeted seam should
+we refine next?" It is:
+
+1. Does the source-family branch hold up on a full external-corpus rerun after
+   merge?
+2. Do real teachers find the current human-in-the-loop review flow useful,
+   trustworthy, and efficient on their own cohorts?
+
+That means the next move is not another speculative refinement slice. The next
+move is a controlled teacher pilot after the merged broad-corpus packet stays
+green or neutral.
 
 ## Current Live-Cohort Read
 
@@ -131,7 +156,7 @@ The original live-cohort roadmap was split into six workstreams:
 5. Retrieval-backed scope grounding
 6. Governed post-release calibration learning
 
-As of the current `main`, these foundations have landed in the runtime path:
+As of the current branch state, these foundations have landed in the runtime path:
 - deterministic scope grounding and `outputs/scope_grounding.json`
 - runtime cohort confidence and `outputs/cohort_confidence.json`
 - anchor calibration pause/resume
@@ -141,11 +166,9 @@ As of the current `main`, these foundations have landed in the runtime path:
 - routed pairwise escalation, evidence maps, evidence group packets, committee-edge resolution, and hard-pair eval before publish/SOTA gates
 
 The active remaining live-cohort quality problem is no longer "can the runtime
-route hard edges?" The hard edges now reach the routed committee path, and
-surviving direct committee-edge decisions are protected by rerank. The active
-failure is narrower: before a live `gpt-5.4-mini` committee decision becomes
-protected evidence, the resolver must decide whether that edge is safe to
-protect, ambiguous enough to suppress, or transport-compromised enough to retry.
+route hard edges?" or "can the known source-family ranking cluster be fixed?"
+Both have targeted green evidence. The active risk is transfer: full-corpus
+non-regression and real teacher usability on unfamiliar cohorts.
 
 Each workstream is designed to integrate with the current repo, not replace it.
 
