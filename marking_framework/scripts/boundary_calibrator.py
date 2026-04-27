@@ -114,6 +114,16 @@ def _list_float(values, default: float = 0.0) -> list[float]:
     return [_num(value, default) for value in values]
 
 
+def _list_bool(values) -> list[bool]:
+    if not isinstance(values, list):
+        return []
+    truthy = {"1", "true", "yes", "y"}
+    return [
+        value if isinstance(value, bool) else str(value or "").strip().lower() in truthy
+        for value in values
+    ]
+
+
 def _contains_any(text: str, tokens: list[str]) -> bool:
     lowered = str(text or "").lower()
     return any(str(token or "").lower() in lowered for token in tokens if str(token or "").strip())
@@ -362,9 +372,18 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
     source_min_current = _list_float(source_scale_profile.get("min_current_score_by_rank", []))
     source_min_base = _list_float(source_scale_profile.get("min_base_score_by_rank", []))
     source_min_borda = _list_float(source_scale_profile.get("min_borda_percent_by_rank", []))
+    source_preserve_floors = _list_bool(source_scale_profile.get("preserve_floor_by_rank", []))
+    source_preserve_min_current = _list_float(source_scale_profile.get("preserve_floor_min_current_score_by_rank", []))
+    source_preserve_min_base = _list_float(source_scale_profile.get("preserve_floor_min_base_score_by_rank", []))
+    source_preserve_min_borda = _list_float(source_scale_profile.get("preserve_floor_min_borda_percent_by_rank", []))
     source_max_rank_sd = _num(source_scale_profile.get("max_rank_sd"), max_rank_sd)
     source_max_rubric_sd = _num(source_scale_profile.get("max_rubric_sd_points"), max_rubric_sd_points)
     source_max_adjustment = _num(source_scale_profile.get("max_adjustment_percent"), default_max_adjustment)
+    source_preserve_max_rank_sd = _num(source_scale_profile.get("preserve_floor_max_rank_sd"), source_max_rank_sd)
+    source_preserve_max_rubric_sd = _num(
+        source_scale_profile.get("preserve_floor_max_rubric_sd_points"),
+        source_max_rubric_sd,
+    )
     source_rank_strategy = str(source_scale_profile.get("rank_strategy", "") or "").strip().lower()
     source_disable_severe_collapse = bool(source_scale_profile.get("disable_severe_collapse_floor", False))
     source_rank_map = _source_rank_map(rows, source_rank_strategy) if source_scale_profile_name else {}
@@ -434,7 +453,7 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
 
         source_rank = int(source_rank_map.get(student_id, provisional_rank))
         source_rank_strategy_label = source_rank_strategy if source_scale_profile_name else ""
-        if source_scale_profile_name and source_rank <= len(source_rank_floors):
+        if source_scale_profile_name and 0 < source_rank <= len(source_rank_floors):
             rank_idx = source_rank - 1
             source_floor = source_rank_floors[rank_idx]
             source_ceiling = source_rank_ceilings[rank_idx] if rank_idx < len(source_rank_ceilings) else 0.0
@@ -449,11 +468,38 @@ def apply_boundary_calibration(rows: list[dict], config: dict, scope: dict | Non
                 and rank_sd <= source_max_rank_sd
                 and rubric_sd <= source_max_rubric_sd
             )
+            preserve_floor = rank_idx < len(source_preserve_floors) and bool(source_preserve_floors[rank_idx])
+            preserve_current_gate = (
+                source_preserve_min_current[rank_idx]
+                if rank_idx < len(source_preserve_min_current)
+                else current_gate
+            )
+            preserve_base_gate = (
+                source_preserve_min_base[rank_idx]
+                if rank_idx < len(source_preserve_min_base)
+                else base_gate
+            )
+            preserve_borda_gate = (
+                source_preserve_min_borda[rank_idx]
+                if rank_idx < len(source_preserve_min_borda)
+                else borda_gate
+            )
+            floor_preservation_supported = (
+                preserve_floor
+                and current_score >= preserve_current_gate
+                and base_score >= preserve_base_gate
+                and borda_percent >= preserve_borda_gate
+                and rank_sd <= source_preserve_max_rank_sd
+                and rubric_sd <= source_preserve_max_rubric_sd
+            )
+            floor_supported = source_supported or floor_preservation_supported
             if source_supported and source_rank > 1 and 0.0 < source_ceiling < floor_level_4:
                 source_top_boundary_blocked = True
-            if source_supported and current_score < source_floor:
+            if floor_supported and current_score < source_floor:
                 target_score = max(target_score, source_floor)
                 reasons.append(f"source_scale_floor:{source_scale_profile_name}")
+                if floor_preservation_supported and not source_supported:
+                    reasons.append("source_scale_floor_preserved")
             if source_supported and source_ceiling > 0.0 and current_score > source_ceiling:
                 target_score = min(target_score, source_ceiling)
                 reasons.append(f"source_scale_ceiling:{source_scale_profile_name}")

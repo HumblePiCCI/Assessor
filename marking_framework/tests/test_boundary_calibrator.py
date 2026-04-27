@@ -7,6 +7,9 @@ from pathlib import Path
 from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context
 
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+
+
 def make_config() -> dict:
     return {
         "boundary_calibration": {
@@ -82,7 +85,7 @@ def test_boundary_calibrator_rescues_severe_collapse(tmp_path):
 
 
 def test_boundary_calibrator_promotes_thoughtful_persuasive_letter_top_sample_from_form_profile():
-    config = json.loads(Path("config/marking_config.json").read_text(encoding="utf-8"))
+    config = json.loads((PACKAGE_ROOT / "config/marking_config.json").read_text(encoding="utf-8"))
     scope = {
         "grade_level": 7,
         "genre": "persuasive_letter",
@@ -183,6 +186,325 @@ def test_boundary_calibrator_promotes_thoughtful_persuasive_letter_top_sample_fr
     assert rows_by_id["s001"]["rubric_after_penalty_percent"] == 80.0
     assert "source_scale_floor:thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini" in rows_by_id["s001"]["boundary_calibration_reason"]
     assert report["scope"]["source_scale_profile"] == "thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini"
+
+
+def test_boundary_calibrator_preserves_eqao_top_source_floor_under_routed_rank_sd():
+    config = json.loads((PACKAGE_ROOT / "config/marking_config.json").read_text(encoding="utf-8"))
+    scope = {
+        "grade_level": 6,
+        "genre": "argumentative",
+        "is_portfolio": False,
+        "is_early_grade_narrative": False,
+        "scoring_scale_type": "ordinal",
+        "scoring_scale_size": 4,
+        "source_family": "EQAO ORQ",
+        "rubric_family": "",
+        "prompt_shared": True,
+        "sample_count": 4,
+        "cohort_shape": "same_prompt",
+        "pass1_model_family": "gpt-5.4-mini",
+        "pass1_model_version": "gpt-5.4-mini",
+    }
+    rows = [
+        {
+            "student_id": "s001",
+            "rubric_mean_percent": 53.55,
+            "rubric_after_penalty_percent": 53.55,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.1111,
+            "rank_sd": 0.47,
+            "rubric_sd_points": 0.73,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.5362,
+            "_borda_bucket": 11.11,
+            "conventions_mistake_rate_percent": 3.57,
+        },
+        {
+            "student_id": "s002",
+            "rubric_mean_percent": 58.91,
+            "rubric_after_penalty_percent": 58.91,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.5556,
+            "rank_sd": 0.47,
+            "rubric_sd_points": 0.36,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.6335,
+            "_borda_bucket": 55.56,
+            "conventions_mistake_rate_percent": 8.11,
+        },
+        {
+            "student_id": "s003",
+            "rubric_mean_percent": 58.56,
+            "rubric_after_penalty_percent": 58.56,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.6667,
+            "rank_sd": 0.82,
+            "rubric_sd_points": 0.44,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.6423,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 11.76,
+        },
+        {
+            "student_id": "s004",
+            "rubric_mean_percent": 59.98,
+            "rubric_after_penalty_percent": 59.98,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "--",
+            "level_with_modifier": "1--",
+            "borda_percent": 0.6667,
+            "rank_sd": 1.41,
+            "rubric_sd_points": 0.52,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.6506,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 12.82,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["s004"]["source_scale_rank"] == 1
+    assert rows_by_id["s004"]["adjusted_level"] == "4"
+    assert rows_by_id["s004"]["rubric_after_penalty_percent"] == 80.0
+    assert "source_scale_floor:eqao_anchor_4pt_gpt54mini" in rows_by_id["s004"]["boundary_calibration_reason"]
+    assert "source_scale_floor_preserved" in rows_by_id["s004"]["boundary_calibration_reason"]
+    assert report["scope"]["source_scale_profile"] == "eqao_anchor_4pt_gpt54mini"
+
+
+def test_boundary_calibrator_preserves_persuasive_letter_rank_two_floor_when_borda_compresses():
+    config = json.loads((PACKAGE_ROOT / "config/marking_config.json").read_text(encoding="utf-8"))
+    scope = {
+        "grade_level": 7,
+        "genre": "persuasive_letter",
+        "is_portfolio": False,
+        "is_early_grade_narrative": False,
+        "source_family": "thoughtful_learning_assessment_models",
+        "rubric_family": "",
+        "cohort_shape": "same_prompt",
+        "prompt_shared": False,
+        "sample_count": 4,
+        "scoring_scale_type": "",
+        "scoring_scale_size": 0,
+        "pass1_model_family": "gpt-5.4-mini",
+        "pass1_model_version": "gpt-5.4-mini",
+    }
+    rows = [
+        {
+            "student_id": "s001",
+            "rubric_mean_percent": 65.25,
+            "rubric_after_penalty_percent": 65.25,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 0.0,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.7492,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 5.04,
+        },
+        {
+            "student_id": "s002",
+            "rubric_mean_percent": 60.23,
+            "rubric_after_penalty_percent": 60.23,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "",
+            "level_with_modifier": "2",
+            "borda_percent": 0.3333,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 0.47,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.614,
+            "_borda_bucket": 33.33,
+            "conventions_mistake_rate_percent": 5.1,
+        },
+        {
+            "student_id": "s003",
+            "rubric_mean_percent": 59.06,
+            "rubric_after_penalty_percent": 59.06,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "-",
+            "level_with_modifier": "1-",
+            "borda_percent": 0.6667,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 0.25,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.654,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 6.25,
+        },
+        {
+            "student_id": "s004",
+            "rubric_mean_percent": 57.62,
+            "rubric_after_penalty_percent": 57.39,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "--",
+            "level_with_modifier": "1--",
+            "borda_percent": 0.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.92,
+            "flags": "rubric_sd;conventions_penalty",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.5282,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 15.69,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["s002"]["source_scale_rank"] == 2
+    assert rows_by_id["s002"]["adjusted_level"] == "3"
+    assert rows_by_id["s002"]["rubric_after_penalty_percent"] == 70.0
+    assert "source_scale_floor:thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini" in rows_by_id["s002"]["boundary_calibration_reason"]
+    assert "source_scale_floor_preserved" in rows_by_id["s002"]["boundary_calibration_reason"]
+    assert report["scope"]["source_scale_profile"] == "thoughtful_persuasive_letter_same_prompt_grade6_8_gpt54mini"
+
+
+def test_boundary_calibrator_matches_instructions_to_thoughtful_same_prompt_floor_profile():
+    config = json.loads((PACKAGE_ROOT / "config/marking_config.json").read_text(encoding="utf-8"))
+    scope = {
+        "grade_level": 7,
+        "genre": "instructions",
+        "is_portfolio": False,
+        "is_early_grade_narrative": False,
+        "source_family": "thoughtful_learning_assessment_models",
+        "rubric_family": "",
+        "cohort_shape": "same_prompt",
+        "prompt_shared": False,
+        "sample_count": 4,
+        "scoring_scale_type": "",
+        "scoring_scale_size": 0,
+        "pass1_model_family": "gpt-5.4-mini",
+        "pass1_model_version": "gpt-5.4-mini",
+    }
+    rows = [
+        {
+            "student_id": "s001",
+            "rubric_mean_percent": 81.55,
+            "rubric_after_penalty_percent": 81.55,
+            "adjusted_level": "4",
+            "adjusted_letter": "A",
+            "base_level": "4",
+            "base_letter": "A",
+            "level_modifier": "",
+            "level_with_modifier": "4",
+            "borda_percent": 1.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 4.82,
+            "flags": "",
+            "_level_order": 80.0,
+            "_composite_bucket": 0.8639,
+            "_borda_bucket": 100.0,
+            "conventions_mistake_rate_percent": 4.61,
+        },
+        {
+            "student_id": "s002",
+            "rubric_mean_percent": 65.08,
+            "rubric_after_penalty_percent": 65.08,
+            "adjusted_level": "2",
+            "adjusted_letter": "C",
+            "base_level": "2",
+            "base_letter": "C",
+            "level_modifier": "+",
+            "level_with_modifier": "2+",
+            "borda_percent": 0.6667,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.33,
+            "flags": "",
+            "_level_order": 60.0,
+            "_composite_bucket": 0.7017,
+            "_borda_bucket": 66.67,
+            "conventions_mistake_rate_percent": 2.54,
+        },
+        {
+            "student_id": "s003",
+            "rubric_mean_percent": 59.05,
+            "rubric_after_penalty_percent": 59.05,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "+",
+            "level_with_modifier": "1+",
+            "borda_percent": 0.3333,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.27,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.611,
+            "_borda_bucket": 33.33,
+            "conventions_mistake_rate_percent": 1.59,
+        },
+        {
+            "student_id": "s004",
+            "rubric_mean_percent": 49.88,
+            "rubric_after_penalty_percent": 49.88,
+            "adjusted_level": "1",
+            "adjusted_letter": "D",
+            "base_level": "1",
+            "base_letter": "D",
+            "level_modifier": "",
+            "level_with_modifier": "1",
+            "borda_percent": 0.0,
+            "rank_sd": 0.0,
+            "rubric_sd_points": 1.27,
+            "flags": "",
+            "_level_order": 50.0,
+            "_composite_bucket": 0.5084,
+            "_borda_bucket": 0.0,
+            "conventions_mistake_rate_percent": 5.63,
+        },
+    ]
+
+    updated, report = apply_boundary_calibration(rows, config, scope)
+    rows_by_id = {row["student_id"]: row for row in updated}
+    assert rows_by_id["s003"]["source_scale_rank"] == 3
+    assert rows_by_id["s003"]["adjusted_level"] == "2"
+    assert rows_by_id["s003"]["rubric_after_penalty_percent"] == 60.0
+    assert "source_scale_floor:thoughtful_informational_same_prompt_grade6_8_gpt54mini" in rows_by_id["s003"]["boundary_calibration_reason"]
+    assert rows_by_id["s004"]["rubric_after_penalty_percent"] == 50.0
+    assert "source_scale_floor:thoughtful_informational_same_prompt_grade6_8_gpt54mini" in rows_by_id["s004"]["boundary_calibration_reason"]
+    assert report["scope"]["source_scale_profile"] == "thoughtful_informational_same_prompt_grade6_8_gpt54mini"
 
 
 def test_load_scope_context_prefers_source_form_over_generic_argument_mode(tmp_path):

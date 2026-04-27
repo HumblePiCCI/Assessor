@@ -33,10 +33,11 @@ The original eight implementation phases are now in the repo:
 - Phase 10: rubric ingestion, normalization, and verification
 - Phase 11: scope-native scoring and boundary calibration
 
-The original production-foundation phases are complete in-repo. The current
-branch state has also completed the focused Ghost committee-withheld contract
-and the follow-on source-family ranking hardening for speeches, persuasive
-letters, NAEP ordinal release sets, and UK STA portfolios.
+The original production-foundation phases are complete in-repo. Current `main`
+has completed the focused Ghost committee-withheld contract and the follow-on
+source-family ranking hardening for speeches, persuasive letters, NAEP ordinal
+release sets, and UK STA portfolios. The active source-scale floor preservation
+slice has now rechecked the merged state against the full external corpus.
 
 The production-hardening track is complete in-repo, including the rubric-contract layer that bounds rubric variability before scoring.
 
@@ -65,12 +66,24 @@ The remaining work before a real rollout is environmental and operational:
 - rehearse the rollback flow against the deployment environment
 
 The remaining in-repo work is now proof-by-evaluation, not another open-ended
-refinement loop:
-- merge the pushed source-family branch after review
-- run one release-comparable broad external corpus packet against that merged
-  state
-- move to controlled teacher pilot testing if the broad packet is neutral or
-  positive on accuracy and rank-order deltas
+refinement loop. The release-comparable broad external corpus packet is green
+on the active source-scale floor preservation branch:
+
+- packet:
+  `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_broad_runs3_final/`
+- datasets: `32`
+- students: `133`
+- exact-level delta: `+0.0602`
+- within-one-level delta: `+0.0226`
+- score-band MAE delta: `-1.4389`
+- mean rank displacement delta: `-0.0752`
+- Kendall tau delta: `+0.0501`
+- pairwise order agreement delta: `+0.0251`
+- negative dataset clusters: `0`
+
+If this branch merges cleanly, the right next product step is controlled
+teacher pilot testing, with production launch still separated behind auth,
+launch-validator, and rollback-rehearsal evidence.
 
 Any further accuracy refinement should be driven by a new failing validation
 packet, not by speculative polishing.
@@ -960,14 +973,12 @@ Exit condition
 
 The remaining implementation order is:
 
-1. Open/review/merge `codex/source-family-ranking-challenge`.
-2. Re-run the broader external corpus from the merged state with a fresh output
-   directory and release-comparable settings.
-3. If the broad packet is neutral or positive on exact-level accuracy,
-   score-band MAE, Kendall tau, and pairwise-order agreement, begin controlled
-   teacher pilot testing.
-4. If the broad packet exposes a new concentrated regression cluster, target
-   that cluster directly before teacher pilot expansion.
+1. Review and merge `codex/source-scale-floor-preservation`.
+2. Start a controlled teacher pilot with teachers retaining final authority.
+3. Monitor cohort confidence, override rate, rank moves, rerun drift, and
+   finalized review deltas.
+4. Refine only if the pilot or a new validation packet exposes a concrete
+   concentrated failure.
 5. Rehearse live rollout against the production contract separately from the
    teacher pilot.
 
@@ -976,17 +987,61 @@ Why this order:
   contract, so stale lower-authority winners are not counted as committee-backed
   hard-pair misses
 - the source-family branch fixed the known focused ranking cluster with live
-  `gpt-5.4-mini` evidence, but that branch is not merged and no broad corpus
-  packet has yet been regenerated from the merged state
-- controlled teacher testing is now the highest-value signal once the broad
-  benchmark contract is rechecked; production launch remains blocked until the
-  strict launch validator passes in a staging or production-like environment
+  `gpt-5.4-mini` evidence and has merged to `main`
+- the source-scale floor preservation branch fixed the post-merge broad-corpus
+  regression cluster and produced a positive full-corpus packet with no
+  negative datasets
+- controlled teacher testing is now the highest-value signal; production launch
+  remains blocked until the strict launch validator passes in a staging or
+  production-like environment
 
 ## Recently Landed Sprint
 
+The source-scale floor preservation slice is complete on
+`codex/source-scale-floor-preservation`.
+
+### Sprint Goal
+
+Preserve valid source-authored scale floors when routed evidence compresses a
+supported source family, without allowing unsupported source metadata to become
+an override channel.
+
+### Sprint Scope
+
+1. Add bounded source-profile controls for rank-specific floor preservation.
+2. Keep ceiling and anchor movements gated by the ordinary source-support path.
+3. Opt in only the EQAO, thoughtful persuasive-letter, and thoughtful
+   informational profiles that produced the post-merge regression cluster.
+4. Match the hydrochloric-acid instruction set to the thoughtful informational
+   profile.
+5. Add focused regression tests for the affected floor-preservation cases.
+
+### Sprint Validation
+
+Final focused live packet:
+
+- `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_negative_cluster_runs3_final/`
+- all three targeted datasets have exact-level, MAE, rank displacement, Kendall
+  tau, and pairwise deltas of `0.0000`
+- no hidden `llm_failures.jsonl` files were present in the focused final packet
+
+Final broad live packet:
+
+- `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_broad_runs3_final/`
+- exact-level delta `+0.0602`
+- within-one-level delta `+0.0226`
+- score-band MAE delta `-1.4389`
+- mean rank displacement delta `-0.0752`
+- Kendall tau delta `+0.0501`
+- pairwise order agreement delta `+0.0251`
+- negative dataset clusters: `0`
+
+## Prior Landed Sprint
+
 The source-family ranking challenge is complete on
-`codex/source-family-ranking-challenge` and pushed as
-`99419f7f37319d668ac28ef00f3b518c9737cc5c`. It is not yet merged to `main`.
+`codex/source-family-ranking-challenge`, merged to `main` as part of the
+`d75649389b9b9409fdba29a1f1cf754817e58a55` base used for the source-scale
+floor preservation worktree.
 
 ### Sprint Goal
 
@@ -1018,7 +1073,7 @@ No `llm_failures.jsonl` files were present in the final packet. Local gates
 passed with `python3 -m pytest -q`, `python3 -m pytest -q --no-cov`, and
 `git diff --check`.
 
-## Prior Landed Sprint
+## Earlier Landed Sprint
 
 The protected committee-edge audit slice has landed in the routed literary committee seam.
 
@@ -1113,25 +1168,28 @@ Use this section as the running status checkpoint.
 - the Ghost literary committee-edge path now includes routed pairwise escalation, deterministic evidence maps, evidence group packets, source-calibration prompts, structured group edge ledgers, caution-specific prior-preservation validation, side-aware mechanics blocker validation, proof-quality claim-refutation fields, and protected committee-direct rerank constraints
 - committee-withheld hard pairs are reported as explicitly unresolved by the
   hard-pair evaluator instead of being scored as stale lower-authority winners
-- source-family ranking hardening is complete on the pushed branch for speeches,
-  persuasive letters, NAEP ordinal release sets, and UK STA portfolios, with a
-  focused live packet at exact `1.0`, Kendall `1.0`, pairwise `1.0`, and MAE
-  `0.0` on all four targeted datasets
+- source-family ranking hardening is merged for speeches, persuasive letters,
+  NAEP ordinal release sets, and UK STA portfolios, with a focused live packet
+  at exact `1.0`, Kendall `1.0`, pairwise `1.0`, and MAE `0.0` on all four
+  targeted datasets
+- source-scale floor preservation is complete on
+  `codex/source-scale-floor-preservation`; the full external corpus packet is
+  positive overall with exact-level delta `+0.0602`, score-band MAE delta
+  `-1.4389`, Kendall delta `+0.0501`, pairwise delta `+0.0251`, and `0`
+  negative dataset clusters
 
 ### Outstanding Architectural Risks
 
 - the deployment environment must still supply a real auth provider and run the launch/rollback drills against live infrastructure
 - OCR quality and document-extraction availability will still vary by deployment environment and should be checked during launch rehearsal
-- the source-family branch is pushed but not yet merged to `main`
-- broad external-corpus evidence has not yet been regenerated after the
-  source-family branch
+- controlled teacher pilot evidence has not yet been collected against real
+  teacher cohorts
 - exemplar coverage is still thinner than the benchmark corpus for early grades
   and some specialized forms, so future refinements should be driven by broad
   corpus or teacher-pilot evidence, not speculative tuning
 
 ### Next Decision Point
 
-Open, review, and merge `codex/source-family-ranking-challenge`; then run one
-fresh broad external-corpus packet from the merged state. If that packet is
-green or neutral on ranking deltas, start a controlled teacher pilot. If it
-fails, refine only the newly exposed regression cluster.
+Open, review, and merge `codex/source-scale-floor-preservation`; then start a
+small controlled teacher pilot. Refine only if the pilot or a new validation
+packet exposes a concrete concentrated failure.

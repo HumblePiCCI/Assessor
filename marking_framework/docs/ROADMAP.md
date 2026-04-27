@@ -25,27 +25,31 @@ That is the real gap between "benchmark SOTA" and "teacher-world SOTA."
 ## State Of Play
 
 As of 2026-04-27, the repo has moved past the last two targeted engineering
-blockers:
+blockers and the follow-on broad-corpus regression cluster:
 
 - Ghost committee decisions now distinguish protected committee evidence from
   `suppress_ambiguous`, `needs_retry`, and `needs_group_read` outcomes.
 - Hard-pair eval treats committee-withheld pairs as explicitly unresolved rather
   than silently trusting stale lower-authority winners.
-- The focused source-family branch now validates speeches, persuasive letters,
-  NAEP ordinal release sets, and UK STA portfolios with perfect focused live
-  metrics on `gpt-5.4-mini`.
+- The source-family ranking hardening now validates speeches, persuasive
+  letters, NAEP ordinal release sets, and UK STA portfolios with perfect
+  focused live metrics on `gpt-5.4-mini`.
+- The source-scale floor preservation slice fixes the post-merge broad-corpus
+  regression cluster and produces a positive full external-corpus packet:
+  exact-level delta `+0.0602`, score-band MAE delta `-1.4389`, Kendall delta
+  `+0.0501`, pairwise delta `+0.0251`, and `0` negative dataset clusters.
 
 The remaining product question is no longer "which known targeted seam should
 we refine next?" It is:
 
-1. Does the source-family branch hold up on a full external-corpus rerun after
-   merge?
-2. Do real teachers find the current human-in-the-loop review flow useful,
+1. Do real teachers find the current human-in-the-loop review flow useful,
    trustworthy, and efficient on their own cohorts?
+2. Where do real teacher overrides concentrate once the benchmark corpus is no
+   longer producing a known regression cluster?
 
 That means the next move is not another speculative refinement slice. The next
-move is a controlled teacher pilot after the merged broad-corpus packet stays
-green or neutral.
+move is a controlled teacher pilot after `codex/source-scale-floor-preservation`
+merges. Production launch remains a separate operational gate.
 
 ## Current Live-Cohort Read
 

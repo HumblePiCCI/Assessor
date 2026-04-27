@@ -2,13 +2,20 @@
 
 Date: 2026-04-27
 
-Audited branch: `codex/source-family-ranking-challenge`
+Audited branch: `codex/source-scale-floor-preservation`
 
 Base checked:
 
-- `origin/main`: `4c379dd2cbda3cfbdd6fe04ef746efac12dd7087`
-- source-family branch head: `99419f7f37319d668ac28ef00f3b518c9737cc5c`
+- `origin/main`: `d75649389b9b9409fdba29a1f1cf754817e58a55`
+- source-scale floor preservation branch:
+  `codex/source-scale-floor-preservation`
 - GitHub open PRs at audit time: none
+
+Superseding update: the original source-family audit below is preserved as the
+historical decision record for that branch. Current project state has advanced:
+the source-family branch is merged, and this source-scale floor preservation
+slice has generated a positive full external-corpus packet with no negative
+dataset clusters.
 
 ## Source Of Truth Checked
 
@@ -26,13 +33,39 @@ Base checked:
 - `tests/test_portfolio_aggregation.py`
 - `tests/test_run_llm_assessors_helpers.py`
 - `docs/reports/source_family_ranking_challenge_2026-04-27.md`
+- `docs/reports/source_scale_floor_preservation_2026-04-27.md`
 
 ## Findings
 
+### 0. Source-Scale Floor Preservation Supersedes The Broad-Rerun Blocker
+
+The previous audit identified the merged broad external-corpus rerun as the
+proof gap before teacher testing. That rerun has now been performed from a
+fresh `origin/main` worktree after the source-family merge.
+
+Current evidence:
+
+- branch: `codex/source-scale-floor-preservation`
+- base: `d75649389b9b9409fdba29a1f1cf754817e58a55`
+- focused regression-cluster packet:
+  `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_negative_cluster_runs3_final/`
+- full corpus packet:
+  `outputs/source_scale_floor_preservation/source_scale_floor_20260427T_broad_runs3_final/`
+- broad deltas: exact `+0.0602`, within-one `+0.0226`, MAE `-1.4389`,
+  mean rank displacement `-0.0752`, Kendall `+0.0501`, pairwise `+0.0251`
+- negative dataset clusters: `0`
+
+Docs now reflect that the next right product step, after this branch merges, is
+a controlled teacher pilot rather than another speculative calibration slice.
+
 ### 1. Main Is Behind The Latest Green Validation Branch
 
-`origin/main` is still at the proof-quality/committee-withheld merge base. The
-source-family ranking branch is pushed but not opened as a PR and not merged.
+Historical source-family finding from the original audit: `origin/main` was
+still at the proof-quality/committee-withheld merge base, while the
+source-family ranking branch was pushed but not opened as a PR and not merged.
+
+Current status: this is resolved. The source-family ranking branch has merged
+to `main`, and the current branch starts from that merged base.
 
 Current latest branch evidence:
 
@@ -43,7 +76,8 @@ Current latest branch evidence:
 - targeted datasets all reached exact `1.0`, Kendall `1.0`, pairwise `1.0`,
   and score-band MAE `0.0`
 
-Documentation now distinguishes branch-current evidence from merged-main truth.
+Documentation now distinguishes branch-current source-scale floor preservation
+evidence from merged-main truth.
 
 ### 2. Committee-Withheld Semantics Were Under-Documented
 
@@ -66,21 +100,26 @@ back to the previous active judgment.
 validation, then broad external-corpus rerun, then Phase 11 form calibration.
 That sequence is stale.
 
-Current state:
+Historical state at the original audit:
 
 - Ghost committee-withheld eval semantics are implemented and documented.
 - Source-family ranking hardening for speech, persuasive-letter, NAEP, and UK
   portfolio residuals is complete on the pushed branch.
 - The missing proof is a broad external-corpus rerun from the merged state.
 
+Current state after this source-scale floor preservation update:
+
+- Ghost committee-withheld eval semantics are implemented and documented.
+- Source-family ranking hardening is merged.
+- The broad external-corpus rerun is complete and positive overall, with no
+  negative dataset clusters.
+
 `docs/SOTA_BUILD_PLAN.md` now points to:
 
-1. open/review/merge `codex/source-family-ranking-challenge`
-2. run one fresh release-comparable broad external-corpus packet from the merged
-   state
-3. start controlled teacher pilot testing if the broad packet is neutral or
-   positive on accuracy and rank-order deltas
-4. refine only if that packet exposes a new concentrated regression cluster
+1. review/merge `codex/source-scale-floor-preservation`
+2. start controlled teacher pilot testing
+3. refine only if the pilot or a new validation packet exposes a concrete
+   concentrated failure
 
 ### 4. The Runtime Roadmap Needed A Teacher-Pilot Decision Boundary
 
@@ -90,19 +129,22 @@ current blocker.
 
 The roadmap now states the current product question directly:
 
-- does the source-family branch hold up after a merged broad-corpus rerun?
 - do real teachers find the current human-in-the-loop flow useful, trustworthy,
   and efficient on their own cohorts?
+- where do real teacher overrides concentrate once the benchmark corpus is no
+  longer producing a known regression cluster?
 
 This keeps teacher testing separate from production launch. Teacher pilot can
-begin after merged broad-corpus non-regression; production launch still requires
-strict identity, deployment, rollback, and launch-validator proof.
+begin after `codex/source-scale-floor-preservation` is reviewed and merged;
+production launch still requires strict identity, deployment, rollback, and
+launch-validator proof.
 
 ### 5. Coverage-Gate Docs Are Aligned
 
 `docs/COMPLIANCE_REPORT.md` already retired the stale 100% default coverage
-claim. It now also records the source-family slice evidence and explicitly says
-that the focused packet is not a substitute for the next broad corpus packet.
+claim. It now records both the source-family slice evidence and the source-scale
+floor preservation broad packet evidence, while explicitly keeping production
+launch certification separate.
 
 ## Files Updated
 
@@ -112,6 +154,7 @@ that the focused packet is not a substitute for the next broad corpus packet.
 - `docs/DATA_FORMATS.md`
 - `docs/COMPLIANCE_REPORT.md`
 - `docs/reports/docs_alignment_audit_2026-04-27.md`
+- `docs/reports/source_scale_floor_preservation_2026-04-27.md`
 
 ## State Of Play
 
@@ -121,11 +164,13 @@ ready in the strict deployment sense.
 
 Current state:
 
-- Merged `main`: behind latest focused ranking evidence.
-- Pushed branch: green focused source-family validation, no open PR.
-- Quality gates: local tests are green on the source-family branch.
-- Missing evidence before broader teacher exposure: merged broad external-corpus
-  rerun.
+- Merged `main`: includes source-family ranking hardening.
+- Active branch: source-scale floor preservation with focused and broad live
+  validation artifacts.
+- Quality gates: targeted tests, root fast suite, package-local suite, explicit
+  coverage report, and `git diff --check` are green on the active branch.
+- Missing evidence before broader teacher exposure: this branch must be
+  reviewed and merged.
 - Missing evidence before production launch: strict identity/staging launch
   validator and rollback rehearsal.
 
@@ -135,10 +180,9 @@ Do not continue speculative refinement before teachers see the product.
 
 The next right step is:
 
-1. open/review/merge `codex/source-family-ranking-challenge`
-2. run one fresh broad external-corpus packet from merged `main`
-3. if the packet is neutral or positive, put the product in front of a small
-   controlled teacher pilot
+1. open/review/merge `codex/source-scale-floor-preservation`
+2. put the product in front of a small controlled teacher pilot
+3. stop and refine only if pilot evidence exposes a concrete failure cluster
 
 Teacher pilot should be framed as supervised product validation, not launch:
 
@@ -146,4 +190,5 @@ Teacher pilot should be framed as supervised product validation, not launch:
 - collect qualitative trust/usability feedback
 - capture finalized review deltas only when engagement is real
 - monitor cohort confidence, override rate, rank moves, and feedback edits
-- stop and refine only if the pilot or broad corpus exposes a concrete failure
+- stop and refine only if the pilot or a new validation packet exposes a
+  concrete failure

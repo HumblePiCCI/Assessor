@@ -47,9 +47,50 @@ The 2026-04-27 source-family ranking slice was verified on branch
 The focused live benchmark artifact is
 `outputs/source_family_ranking_challenge/source_family_20260426T_focused_runs1_final2/`.
 It reports exact `1.0`, Kendall `1.0`, pairwise `1.0`, and score-band MAE
-`0.0` for the four targeted source-family datasets. This is focused
-non-regression evidence, not a substitute for the next broad external-corpus
-packet after merge.
+`0.0` for the four targeted source-family datasets.
+
+The 2026-04-27 source-scale floor preservation slice was verified on branch
+`codex/source-scale-floor-preservation` with:
+
+- `python3 -m pytest -q --no-cov marking_framework/tests/test_boundary_calibrator.py marking_framework/tests/test_aggregate_assessments.py marking_framework/tests/test_rubric_criteria.py marking_framework/tests/test_assessor_context.py marking_framework/tests/test_run_llm_assessors_helpers.py`
+- `python3 -m pytest -q --no-cov` from the repository root
+- `python3 -m pytest -q` from `marking_framework/`
+- `python3 -m pytest --cov=scripts --cov=server --cov-branch --cov-report=term-missing --no-cov-on-fail` from `marking_framework/`
+- `git diff --check`
+- focused live validation over the post-merge regression cluster
+- broad live validation over the full external corpus
+
+The explicit coverage report passes and reports total coverage of `82%`. It
+also emits pre-existing sqlite `ResourceWarning` noise from queue/replay tests;
+those warnings do not fail the suite.
+
+The focused live benchmark artifact is
+`outputs/source_scale_floor_preservation/source_scale_floor_20260427T_negative_cluster_runs3_final/`.
+It reports `0.0000` deltas for exact-level hit rate, within-one-level hit rate,
+score-band MAE, mean rank displacement, Kendall tau, and pairwise order
+agreement across:
+
+- `internet_samples_eqao_orq`
+- `thoughtful_assessment_grade6_8_instructions_hydrochloric`
+- `thoughtful_assessment_grade6_8_persuasive_letter`
+
+The broad live benchmark artifact is
+`outputs/source_scale_floor_preservation/source_scale_floor_20260427T_broad_runs3_final/`.
+It reports:
+
+- datasets: `32`
+- students: `133`
+- exact-level hit delta: `+0.0602`
+- within-one-level hit delta: `+0.0226`
+- score-band MAE delta: `-1.4389`
+- mean rank displacement delta: `-0.0752`
+- Kendall tau delta: `+0.0501`
+- pairwise order agreement delta: `+0.0251`
+- negative dataset clusters: `0`
+
+This is the current broad non-regression evidence for moving from speculative
+calibration refinement to controlled teacher pilot testing. It is not a
+production-launch certificate.
 
 ## Production Readiness References
 
