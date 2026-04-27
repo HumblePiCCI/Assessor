@@ -24,28 +24,34 @@ That is the real gap between "benchmark SOTA" and "teacher-world SOTA."
 
 ## State Of Play
 
-As of 2026-04-27, the repo has moved past the last two targeted engineering
-blockers:
+As of 2026-04-27, the repo has moved past the Ghost committee-withheld blocker
+and the focused source-family branch has landed through PR `#9`:
 
 - Ghost committee decisions now distinguish protected committee evidence from
   `suppress_ambiguous`, `needs_retry`, and `needs_group_read` outcomes.
 - Hard-pair eval treats committee-withheld pairs as explicitly unresolved rather
   than silently trusting stale lower-authority winners.
-- The focused source-family branch now validates speeches, persuasive letters,
-  NAEP ordinal release sets, and UK STA portfolios with perfect focused live
-  metrics on `gpt-5.4-mini`.
+- The focused source-family work validates speeches, persuasive letters, NAEP
+  ordinal release sets, and UK STA portfolios with perfect focused live metrics
+  on `gpt-5.4-mini`.
 
-The remaining product question is no longer "which known targeted seam should
-we refine next?" It is:
+The post-merge broad corpus rerun answered the previous teacher-pilot gate with
+"not yet." The aggregate moved in the right direction, but one true rank/level
+regression and two level-only regressions remain:
 
-1. Does the source-family branch hold up on a full external-corpus rerun after
-   merge?
-2. Do real teachers find the current human-in-the-loop review flow useful,
-   trustworthy, and efficient on their own cohorts?
+- `internet_samples_eqao_orq`: a supported source-scale top anchor is not
+  preserved under the live routed path
+- `thoughtful_assessment_grade6_8_instructions_hydrochloric`: correct order,
+  but one exact-level miss
+- `thoughtful_assessment_grade6_8_persuasive_letter`: correct order, but one
+  exact-level miss
 
-That means the next move is not another speculative refinement slice. The next
-move is a controlled teacher pilot after the merged broad-corpus packet stays
-green or neutral.
+That means the next move is not a broad speculative refinement slice, and it is
+not teacher pilot yet. The next move is a narrow source-scale floor preservation
+challenge, followed by focused and broad reruns. After that evidence is neutral
+or positive, the product question becomes whether real teachers find the
+human-in-the-loop review flow useful, trustworthy, and efficient on their own
+cohorts.
 
 ## Current Live-Cohort Read
 
@@ -167,8 +173,9 @@ As of the current branch state, these foundations have landed in the runtime pat
 
 The active remaining live-cohort quality problem is no longer "can the runtime
 route hard edges?" or "can the known source-family ranking cluster be fixed?"
-Both have targeted green evidence. The active risk is transfer: full-corpus
-non-regression and real teacher usability on unfamiliar cohorts.
+Both have targeted green evidence. The active risk is transfer: source-scale
+floor preservation under live routed evidence, then full-corpus non-regression
+and real teacher usability on unfamiliar cohorts.
 
 Each workstream is designed to integrate with the current repo, not replace it.
 

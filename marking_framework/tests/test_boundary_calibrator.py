@@ -7,6 +7,9 @@ from pathlib import Path
 from scripts.boundary_calibrator import apply_boundary_calibration, load_scope_context
 
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+
+
 def make_config() -> dict:
     return {
         "boundary_calibration": {
@@ -82,7 +85,7 @@ def test_boundary_calibrator_rescues_severe_collapse(tmp_path):
 
 
 def test_boundary_calibrator_promotes_thoughtful_persuasive_letter_top_sample_from_form_profile():
-    config = json.loads(Path("config/marking_config.json").read_text(encoding="utf-8"))
+    config = json.loads((PACKAGE_ROOT / "config/marking_config.json").read_text(encoding="utf-8"))
     scope = {
         "grade_level": 7,
         "genre": "persuasive_letter",
