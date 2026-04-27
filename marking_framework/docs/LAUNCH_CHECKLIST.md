@@ -2,6 +2,11 @@
 
 This checklist is the release handoff for the merged `main` branch after the live release-candidate smoke test on a novel Grade 7 cohort.
 
+For the next controlled teacher pilot, use
+[`TEACHER_PILOT_RUNBOOK.md`](./TEACHER_PILOT_RUNBOOK.md). The teacher pilot is
+supervised product validation with teacher final authority; it is not the
+strict production-launch checklist below.
+
 ## Baseline
 
 - Repo: `/Users/bldt/Desktop/Essays`
