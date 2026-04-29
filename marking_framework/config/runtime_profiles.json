@@ -1,0 +1,84 @@
+{
+  "default_profile": "internal_codex",
+  "profiles": {
+    "internal_codex": {
+      "label": "Internal Codex OAuth",
+      "description": "Internal testing path that uses the local Codex OAuth session instead of a teacher API key.",
+      "enabled": true,
+      "mode": "codex_local",
+      "provider": "openai-codex",
+      "codex_cli_path": "/Applications/Codex.app/Contents/Resources/codex",
+      "codex_cli_interface": "exec",
+      "billing": {
+        "billable": false,
+        "customer_markup_percent": 0.0
+      },
+      "routing_overrides": {
+        "tasks": {
+          "pass1_assessor": {
+            "model": "gpt-5.4-mini"
+          },
+          "pass2_ranker": {
+            "model": "gpt-5.4-mini"
+          },
+          "pairwise_reviewer": {
+            "model": "gpt-5.4-mini"
+          },
+          "pairwise_escalator": {
+            "model": "gpt-5.5",
+            "reasoning": "medium"
+          },
+          "literary_committee": {
+            "model": "gpt-5.4-mini"
+          },
+          "feedback_drafter": {
+            "model": "gpt-5.4-nano"
+          }
+        }
+      }
+    },
+    "teacher_payg_openai": {
+      "label": "Teacher PAYG OpenAI",
+      "description": "Teacher pilot path using an OpenAI API key with customer billing reported as raw API cost plus 10 percent.",
+      "enabled": true,
+      "mode": "openai",
+      "provider": "openai",
+      "api_key_env": "OPENAI_API_KEY",
+      "billing": {
+        "billable": true,
+        "customer_markup_percent": 10.0
+      },
+      "routing_overrides": {}
+    },
+    "openai_compatible_payg": {
+      "label": "OpenAI-compatible PAYG",
+      "description": "Adapter path for providers or self-hosted models that expose a Responses-compatible endpoint.",
+      "enabled": false,
+      "mode": "openai_compatible",
+      "provider": "openai_compatible",
+      "api_key_env": "OPENAI_COMPATIBLE_API_KEY",
+      "base_url_env": "OPENAI_COMPATIBLE_BASE_URL",
+      "responses_endpoint": "/responses",
+      "billing": {
+        "billable": true,
+        "customer_markup_percent": 10.0
+      },
+      "routing_overrides": {}
+    },
+    "anthropic_openai_compatible_payg": {
+      "label": "Anthropic PAYG via adapter",
+      "description": "Future Anthropic path; requires an OpenAI-compatible adapter until a native Anthropic client is implemented.",
+      "enabled": false,
+      "mode": "openai_compatible",
+      "provider": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "base_url_env": "ANTHROPIC_OPENAI_COMPATIBLE_BASE_URL",
+      "responses_endpoint": "/responses",
+      "billing": {
+        "billable": true,
+        "customer_markup_percent": 10.0
+      },
+      "routing_overrides": {}
+    }
+  }
+}

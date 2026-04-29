@@ -95,7 +95,9 @@ def main() -> int:
         if run(cmd) != 0:
             return 1
         if args.pricing_report:
-            run(step_cmd("cost", ["python3", "scripts/usage_pricing.py"]))
+            cost_code = run(step_cmd("cost", ["python3", "scripts/usage_pricing.py"]))
+            if cost_code != 0:
+                return cost_code
 
     # Check assessor outputs exist
     pass1_dir = base / "assessments" / "pass1_individual"

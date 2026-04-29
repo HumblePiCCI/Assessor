@@ -8,9 +8,10 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name=""):
         payload = {
             "mode": mode,
+            "runtime_profile_name": runtime_profile_name,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(item.name for item in submissions_dir.glob("*") if item.is_file()),
@@ -52,6 +53,7 @@ def test_pipeline_run_and_v2_delegate_to_same_queue(monkeypatch):
     assert len(fake.calls) == 2
     assert fake.calls[0] == fake.calls[1]
     assert fake.calls[0]["mode"] == "openai"
+    assert fake.calls[0]["runtime_profile_name"] == ""
     assert fake.calls[0]["subs"] == ["s1.txt", "s2.txt"]
     assert fake.calls[0]["project_id"] == ""
     assert any(path.endswith("config/accuracy_gate.json") for path in fake.calls[0]["extra"])
@@ -87,3 +89,13 @@ def test_pipeline_run_codex_validation(monkeypatch):
     ok = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
     assert ok.status_code == 200
     assert fake.calls[-1]["mode"] == "codex_local"
+
+
+def test_runtime_profiles_endpoint():
+    client = TestClient(app)
+    resp = client.get("/runtime/profiles")
+    assert resp.status_code == 200
+    payload = resp.json()
+    names = {profile["name"] for profile in payload["profiles"]}
+    assert payload["default_profile"] == "internal_codex"
+    assert "teacher_payg_openai" in names

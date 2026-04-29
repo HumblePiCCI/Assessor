@@ -86,3 +86,40 @@ def test_payg_job_llm_pricing_flags(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["pj", "--rubric", str(rubric), "--outline", str(outline), "--submissions", str(subs), "--workdir", str(tmp_path / "job"), "--llm", "--pricing", "--pairs"])
     assert pj.main() == 0
     assert any("--llm-assessors" in c for c in calls[0])
+
+
+def test_payg_job_internal_codex_profile_strips_openai_api_key(tmp_path, monkeypatch):
+    rubric = tmp_path / "rubric.md"
+    outline = tmp_path / "outline.md"
+    subs = tmp_path / "subs"
+    subs.mkdir()
+    (subs / "s1.txt").write_text("text", encoding="utf-8")
+    rubric.write_text("rubric", encoding="utf-8")
+    outline.write_text("outline", encoding="utf-8")
+    captured = {}
+
+    def fake_run(cmd, cwd=None, env=None):
+        captured["env"] = env
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "should-not-pass")
+    monkeypatch.setattr(pj.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pj",
+            "--profile",
+            "internal_codex",
+            "--rubric",
+            str(rubric),
+            "--outline",
+            str(outline),
+            "--submissions",
+            str(subs),
+            "--workdir",
+            str(tmp_path / "job"),
+        ],
+    )
+    assert pj.main() == 0
+    assert captured["env"]["LLM_MODE"] == "codex_local"
+    assert "OPENAI_API_KEY" not in captured["env"]

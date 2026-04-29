@@ -16,6 +16,7 @@ from scripts.calibration_contract import build_run_scope, calibration_manifest_p
 from scripts.apply_anchor_calibration import normalize_teacher_scores
 from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
 from scripts.assessor_utils import resolve_input_path
+from scripts.runtime_profiles import apply_runtime_profile_to_routing, billing_policy, profile_artifact, resolve_runtime_profile, write_runtime_profile_artifact
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
 from server.runtime_context import identity_can_access, identity_token, launch_contract, strict_auth_enabled
 from server.step_runner import (
@@ -39,6 +40,7 @@ CORE_CONFIG_PATHS = (
     "config/marking_config.json",
     "config/pricing.json",
     "config/rubric_criteria.json",
+    "config/runtime_profiles.json",
     "config/sota_gate.json",
 )
 RUBRIC_CRITERIA_CONFIG = "config/rubric_criteria.json"
@@ -64,6 +66,7 @@ COHORT_CONFIDENCE_ARTIFACT = "outputs/cohort_confidence.json"
 ANCHOR_PACKET_ARTIFACT = "outputs/teacher_anchor_packet.json"
 CONSISTENCY_REPORT_ARTIFACT = "outputs/consistency_report.json"
 FINAL_ORDER_ARTIFACT = "outputs/final_order.csv"
+RUNTIME_AUTH_AUDIT_ARTIFACT = "outputs/runtime_auth_audit.json"
 
 
 def now_iso() -> str:
@@ -221,8 +224,7 @@ def _git_dirty(root: Path) -> bool | None:
     return bool((result.stdout or "").strip())
 
 
-def _routing_summary(path: Path) -> dict:
-    payload = _load_json(path)
+def _routing_summary_payload(path: Path, payload: dict) -> dict:
     tasks = payload.get("tasks", {})
     task_models = {}
     task_settings = {}
@@ -242,12 +244,19 @@ def _routing_summary(path: Path) -> dict:
         "sha256": _file_sha256(path),
         "profile_hash": _file_sha256(path),
         "mode": payload.get("mode"),
+        "provider": payload.get("provider", "openai"),
+        "api_key_env": payload.get("api_key_env", ""),
+        "base_url_env": payload.get("base_url_env", ""),
         "task_models": task_models,
         "task_settings": task_settings,
         "quality_gates": payload.get("quality_gates", {}),
         "pass1_guard": payload.get("pass1_guard", {}),
         "calibration_gate": payload.get("calibration_gate", {}),
     }
+
+
+def _routing_summary(path: Path) -> dict:
+    return _routing_summary_payload(path, _load_json(path))
 
 
 def _config_hashes(root: Path, extra_paths: list[Path]) -> tuple[dict, dict]:
@@ -292,6 +301,8 @@ def build_pipeline_manifest(
     submissions_dir: Path,
     extra_paths: list[Path] | None = None,
     rubric_artifacts: dict | None = None,
+    runtime_profile: dict | None = None,
+    effective_routing: dict | None = None,
 ) -> dict:
     root = root.resolve()
     extra_paths = extra_paths or []
@@ -318,7 +329,7 @@ def build_pipeline_manifest(
                 "required": bool(step.get("required", True)),
             }
         )
-    routing_payload = load_contract_json(root / "config" / "llm_routing.json")
+    routing_payload = effective_routing if isinstance(effective_routing, dict) else load_contract_json(root / "config" / "llm_routing.json")
     class_metadata_payload = load_contract_json(root / CLASS_METADATA_ARTIFACT)
     rubric_artifacts = rubric_artifacts or {}
     rubric_manifest_payload = rubric_artifacts.get("rubric_manifest", {}) if isinstance(rubric_artifacts.get("rubric_manifest", {}), dict) else {}
@@ -332,6 +343,8 @@ def build_pipeline_manifest(
         "manifest_version": PIPELINE_MANIFEST_VERSION,
         "execution_engine": "pipeline_queue",
         "execution_mode": mode,
+        "runtime_profile": profile_artifact(runtime_profile, routing_payload),
+        "billing_policy": billing_policy(runtime_profile),
         "git": {
             "sha": _git_sha(root),
             "dirty": _git_dirty(root),
@@ -358,7 +371,7 @@ def build_pipeline_manifest(
         "exemplar_tree": exemplar_manifest,
         "calibration_artifact": _file_manifest(root / CALIBRATION_ARTIFACT, CALIBRATION_ARTIFACT),
         "calibration_manifest": _file_manifest(root / CALIBRATION_MANIFEST_ARTIFACT, CALIBRATION_MANIFEST_ARTIFACT),
-        "model_routing": _routing_summary(root / "config" / "llm_routing.json"),
+        "model_routing": _routing_summary_payload(root / "config" / "llm_routing.json", routing_payload),
         "grade_profile": _file_manifest(root / "config" / "grade_level_profiles.json", "config/grade_level_profiles.json"),
         "gate_threshold_hashes": gate_hashes,
         "runtime_assets": {
@@ -517,6 +530,65 @@ class PipelineQueue:
     def _write_rubric_artifacts(self, root: Path, artifacts: dict):
         for key, path in self._rubric_output_paths(root).items():
             self._write_json(path, artifacts.get(key, {}) if isinstance(artifacts.get(key, {}), dict) else {})
+
+    def _resolve_runtime_profile(self, profile_name: str | None) -> tuple[dict | None, dict | None]:
+        name = str(profile_name or "").strip()
+        if not name:
+            return None, None
+        profile = resolve_runtime_profile(name, self.root / "config" / "runtime_profiles.json")
+        routing = apply_runtime_profile_to_routing(_load_json(self.root / "config" / "llm_routing.json"), profile)
+        return profile, routing
+
+    def _apply_runtime_profile_to_workspace(self, root: Path, profile: dict | None, effective_routing: dict | None):
+        if not profile or not effective_routing:
+            return
+        self._write_json(root / "config" / "llm_routing.json", effective_routing)
+        write_runtime_profile_artifact(profile, effective_routing, root / "outputs" / "runtime_profile.json")
+
+    def _runtime_env(self, env: dict, profile: dict | None):
+        if not profile:
+            return
+        policy = billing_policy(profile)
+        env["LLM_RUNTIME_PROFILE"] = str(profile.get("name", "") or "")
+        env["LLM_PROVIDER"] = str(profile.get("provider", "") or "")
+        env["BILLING_BILLABLE"] = "1" if policy.get("billable") else "0"
+        env["BILLING_CUSTOMER_MARKUP_PERCENT"] = str(policy.get("customer_markup_percent", 0.0))
+        if str(profile.get("mode") or "").strip() == "codex_local":
+            if profile.get("codex_cli_path"):
+                env["CODEX_CLI_PATH"] = str(profile.get("codex_cli_path"))
+            if profile.get("codex_cli_interface"):
+                env["CODEX_CLI_INTERFACE"] = str(profile.get("codex_cli_interface"))
+
+    def _apply_runtime_auth_env(self, env: dict, mode: str, profile: dict | None) -> dict:
+        runtime_mode = str((profile or {}).get("mode") or mode or "").strip()
+        provider = str((profile or {}).get("provider") or ("openai" if runtime_mode == "openai" else "")).strip()
+        api_key_env = str((profile or {}).get("api_key_env") or ("OPENAI_API_KEY" if provider == "openai" else "")).strip()
+        audit = {
+            "runtime_profile": str((profile or {}).get("name", "") or ""),
+            "llm_mode": runtime_mode,
+            "provider": provider,
+            "api_key_env": api_key_env,
+            "codex_cli_path": str((profile or {}).get("codex_cli_path", "") or ""),
+            "codex_cli_interface": str((profile or {}).get("codex_cli_interface", "") or ""),
+            "auth_funding_source": "codex_oauth" if runtime_mode == "codex_local" else "provider_api_key",
+            "openai_api_key_injected": False,
+            "openai_api_key_visible_to_job": False,
+        }
+        if runtime_mode == "codex_local":
+            env.pop("OPENAI_API_KEY", None)
+        elif api_key_env == "OPENAI_API_KEY" or (not profile and runtime_mode == "openai"):
+            api_key = self.get_api_key()
+            if api_key:
+                env["OPENAI_API_KEY"] = api_key
+                audit["openai_api_key_injected"] = True
+        elif profile:
+            env.pop("OPENAI_API_KEY", None)
+        audit["openai_api_key_visible_to_job"] = "OPENAI_API_KEY" in env
+        return audit
+
+    def _write_runtime_auth_audit(self, job_dir: Path, workspace_dir: Path, audit: dict):
+        self._write_json(workspace_dir / RUNTIME_AUTH_AUDIT_ARTIFACT, audit)
+        self._write_json(job_dir / RUNTIME_AUTH_AUDIT_ARTIFACT, audit)
 
     def _input_paths_from_root(self, root: Path) -> tuple[Path, Path, Path]:
         inputs_dir = root / "inputs"
@@ -953,6 +1025,8 @@ class PipelineQueue:
         outline_path: Path,
         submissions_dir: Path,
         rubric_artifacts: dict,
+        runtime_profile: dict | None = None,
+        effective_routing: dict | None = None,
     ):
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         if workspace_dir.exists():
@@ -976,6 +1050,9 @@ class PipelineQueue:
             calibration_manifest_dst = workspace_dir / CALIBRATION_MANIFEST_ARTIFACT
             calibration_manifest_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(calibration_manifest_src, calibration_manifest_dst)
+        self._apply_runtime_profile_to_workspace(workspace_dir, runtime_profile, effective_routing)
+        if runtime_profile and effective_routing:
+            write_runtime_profile_artifact(runtime_profile, effective_routing, job_dir / "outputs" / "runtime_profile.json")
         self._write_rubric_artifacts(workspace_dir, rubric_artifacts)
         self._write_rubric_artifacts(job_dir, rubric_artifacts)
         self._write_json(self._manifest_path(job_dir), manifest)
@@ -991,10 +1068,14 @@ class PipelineQueue:
         *,
         identity: dict | None = None,
         project_id: str = "",
+        runtime_profile_name: str = "",
     ) -> dict:
         identity = dict(identity or {})
         tenant_id = str(identity.get("tenant_id", "") or "local-dev-tenant")
         teacher_id = str(identity.get("teacher_id", "") or "local-dev-teacher")
+        runtime_profile, effective_routing = self._resolve_runtime_profile(runtime_profile_name)
+        if runtime_profile:
+            mode = str(runtime_profile.get("mode") or mode)
         rubric_artifacts = self._build_rubric_artifacts(rubric_path, outline_path)
         manifest = build_pipeline_manifest(
             root=self.root,
@@ -1004,6 +1085,8 @@ class PipelineQueue:
             submissions_dir=submissions_dir,
             extra_paths=extra_paths,
             rubric_artifacts=rubric_artifacts,
+            runtime_profile=runtime_profile,
+            effective_routing=effective_routing,
         )
         snap = manifest["manifest_hash"]
         requires_confirmation = bool((rubric_artifacts.get("rubric_verification", {}) or {}).get("required_confirmation", False))
@@ -1022,6 +1105,7 @@ class PipelineQueue:
                     "cached": True,
                     "snapshot_hash": snap,
                     "manifest_hash": snap,
+                    "runtime_profile": profile_artifact(runtime_profile, effective_routing),
                     "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
                 }
         self._update_ops_state(lambda payload: payload.__setitem__("cache_misses", int(payload.get("cache_misses", 0) or 0) + 1))
@@ -1029,7 +1113,18 @@ class PipelineQueue:
         job_dir = self._job_dir(job_id, tenant_id)
         job_dir.mkdir(parents=True, exist_ok=True)
         self._event_path(job_dir).touch()
-        self._stage_workspace(job_id, tenant_id, job_dir, manifest, rubric_path, outline_path, submissions_dir, rubric_artifacts)
+        self._stage_workspace(
+            job_id,
+            tenant_id,
+            job_dir,
+            manifest,
+            rubric_path,
+            outline_path,
+            submissions_dir,
+            rubric_artifacts,
+            runtime_profile=runtime_profile,
+            effective_routing=effective_routing,
+        )
         initial_status = "awaiting_rubric_confirmation" if requires_confirmation else "queued"
         self._insert_job(
             job_id,
@@ -1064,6 +1159,7 @@ class PipelineQueue:
             "cached": False,
             "snapshot_hash": snap,
             "manifest_hash": snap,
+            "runtime_profile": profile_artifact(runtime_profile, effective_routing),
             "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
         }
 
@@ -1119,6 +1215,8 @@ class PipelineQueue:
         }
         self._write_json(job_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)
         self._write_json(workspace_dir / ANCHOR_SCORES_ARTIFACT, scores_payload)
+        manifest = _load_json(self._manifest_path(job_dir))
+        runtime_profile = (manifest.get("runtime_profile", {}) or {}) if isinstance(manifest.get("runtime_profile", {}), dict) else {}
         env = os.environ.copy()
         env["LLM_MODE"] = str(job.get("mode", "") or "")
         env["PYTHONUNBUFFERED"] = "1"
@@ -1131,9 +1229,9 @@ class PipelineQueue:
         if existing_pythonpath:
             pythonpath_parts.append(existing_pythonpath)
         env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
-        api_key = self.get_api_key()
-        if api_key:
-            env["OPENAI_API_KEY"] = api_key
+        audit = self._apply_runtime_auth_env(env, str(job.get("mode", "") or ""), runtime_profile if runtime_profile else None)
+        self._runtime_env(env, runtime_profile if runtime_profile else None)
+        self._write_runtime_auth_audit(job_dir, workspace_dir, audit)
         self._append_event(job_dir, "anchor_resume", "Teacher anchor scores received", event="message")
         self._update_job(job_id, "running", stage="anchor_resume", message="Applying anchor calibration", completed_at="")
         apply_step = {
@@ -1203,6 +1301,9 @@ class PipelineQueue:
         workspace_dir = self._workspace_dir(job_id, job.get("tenant_id", ""))
         rubric_path, outline_path, submissions_dir = self._input_paths_from_root(job_dir)
         existing_verification = self._load_rubric_artifacts_from_root(workspace_dir).get("rubric_verification", {})
+        existing_manifest = _load_json(self._manifest_path(job_dir))
+        runtime_profile = (existing_manifest.get("runtime_profile", {}) or {}) if isinstance(existing_manifest.get("runtime_profile", {}), dict) else {}
+        effective_routing = _load_json(workspace_dir / "config" / "llm_routing.json") if runtime_profile else None
         if action == "reject":
             self._append_event(job_dir, "rubric", "Teacher rejected rubric interpretation", level="error", event="failed")
             self._update_job(
@@ -1230,10 +1331,14 @@ class PipelineQueue:
             submissions_dir=submissions_dir,
             extra_paths=[],
             rubric_artifacts=rubric_artifacts,
+            runtime_profile=runtime_profile,
+            effective_routing=effective_routing,
         )
         snap = manifest["manifest_hash"]
         self._write_rubric_artifacts(job_dir, rubric_artifacts)
         self._write_rubric_artifacts(workspace_dir, rubric_artifacts)
+        if runtime_profile and effective_routing:
+            write_runtime_profile_artifact(runtime_profile, effective_routing, job_dir / "outputs" / "runtime_profile.json")
         self._write_json(self._manifest_path(job_dir), manifest)
         self._write_json(workspace_dir / "pipeline_manifest.json", manifest)
         with self._conn() as conn:
@@ -1623,6 +1728,7 @@ class PipelineQueue:
         tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         manifest = _load_json(self._manifest_path(job_dir))
+        runtime_profile = (manifest.get("runtime_profile", {}) or {}) if isinstance(manifest.get("runtime_profile", {}), dict) else {}
         steps = pipeline_steps()
         self._update_job(
             job_id,
@@ -1675,9 +1781,9 @@ class PipelineQueue:
             if existing_pythonpath:
                 pythonpath_parts.append(existing_pythonpath)
             env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
-            api_key = self.get_api_key()
-            if api_key:
-                env["OPENAI_API_KEY"] = api_key
+            audit = self._apply_runtime_auth_env(env, mode, runtime_profile if runtime_profile else None)
+            self._runtime_env(env, runtime_profile if runtime_profile else None)
+            self._write_runtime_auth_audit(job_dir, workspace_dir, audit)
 
             if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, steps, start_completed=0, tenant_id=tenant_id):
                 return

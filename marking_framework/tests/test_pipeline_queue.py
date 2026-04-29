@@ -49,6 +49,30 @@ def _seed_runtime(root: Path):
     _write_json(root / "config" / "calibration_set.json", {"samples": []})
     _write_json(root / "config" / "cost_limits.json", {"hard_cap": 1.0})
     _write_json(root / "config" / "pricing.json", {"models": {}})
+    _write_json(
+        root / "config" / "runtime_profiles.json",
+        {
+            "default_profile": "internal_codex",
+            "profiles": {
+                "internal_codex": {
+                    "enabled": True,
+                    "mode": "codex_local",
+                    "provider": "openai-codex",
+                    "codex_cli_path": "/tmp/codex-app-cli",
+                    "codex_cli_interface": "exec",
+                    "billing": {"billable": False, "customer_markup_percent": 0.0},
+                    "routing_overrides": {"tasks": {"pairwise_reviewer": {"model": "gpt-5.5"}}},
+                },
+                "teacher_payg_openai": {
+                    "enabled": True,
+                    "mode": "openai",
+                    "provider": "openai",
+                    "billing": {"billable": True, "customer_markup_percent": 10.0},
+                    "routing_overrides": {},
+                },
+            },
+        },
+    )
     _write_json(root / "outputs" / "calibration_bias.json", {"bias": 0.0, "generated_at": "2026-01-01T00:00:00+00:00"})
 
 
@@ -238,6 +262,70 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert (artifact_dir / "outputs" / "dashboard_data.json").exists()
     data_json = queue.load_dashboard_data(result["job_id"])
     assert data_json["students"][0]["student_id"] == "s1"
+
+
+def test_submit_runtime_profile_applies_effective_routing_and_billing_env(tmp_path):
+    calls = {}
+
+    def run_ok(_cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        calls["env"] = env
+        calls["routing"] = json.loads((workspace / "config" / "llm_routing.json").read_text(encoding="utf-8"))
+        calls["profile"] = json.loads((workspace / "outputs" / "runtime_profile.json").read_text(encoding="utf-8"))
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+        (out / "consistency_adjusted.csv").write_text("student_id\ns1\n", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_ok)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    result = queue.submit("openai", rubric, outline, subs, _extra_paths(root), runtime_profile_name="internal_codex")
+    assert result["runtime_profile"]["name"] == "internal_codex"
+    queue._process_job(result["job_id"])
+    manifest = json.loads((Path(queue.get_job(result["job_id"])["workspace_dir"]) / "pipeline_manifest.json").read_text(encoding="utf-8"))
+    assert calls["env"]["LLM_MODE"] == "codex_local"
+    assert calls["env"]["LLM_RUNTIME_PROFILE"] == "internal_codex"
+    assert calls["env"]["BILLING_BILLABLE"] == "0"
+    assert calls["env"]["CODEX_CLI_PATH"] == "/tmp/codex-app-cli"
+    assert calls["env"]["CODEX_CLI_INTERFACE"] == "exec"
+    assert calls["routing"]["mode"] == "codex_local"
+    assert calls["routing"]["codex_cli_path"] == "/tmp/codex-app-cli"
+    assert calls["routing"]["codex_cli_interface"] == "exec"
+    assert calls["routing"]["tasks"]["pairwise_reviewer"]["model"] == "gpt-5.5"
+    assert calls["profile"]["billing"]["billable"] is False
+    assert manifest["runtime_profile"]["name"] == "internal_codex"
+    assert manifest["model_routing"]["task_models"]["pairwise_reviewer"] == "gpt-5.5"
+
+
+def test_internal_codex_profile_strips_openai_api_key_and_writes_auth_audit(tmp_path, monkeypatch):
+    calls = {}
+
+    def run_ok(_cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        calls["env"] = env
+        calls["audit"] = json.loads((workspace / "outputs" / "runtime_auth_audit.json").read_text(encoding="utf-8"))
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+        (out / "consistency_adjusted.csv").write_text("student_id\ns1\n", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "should-not-reach-job")
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_ok)
+    queue.get_api_key = lambda: "override-should-not-reach-job"
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    result = queue.submit("openai", rubric, outline, subs, _extra_paths(root), runtime_profile_name="internal_codex")
+    queue._process_job(result["job_id"])
+    assert calls["env"]["LLM_MODE"] == "codex_local"
+    assert "OPENAI_API_KEY" not in calls["env"]
+    assert calls["audit"]["auth_funding_source"] == "codex_oauth"
+    assert calls["audit"]["codex_cli_path"] == "/tmp/codex-app-cli"
+    assert calls["audit"]["codex_cli_interface"] == "exec"
+    assert calls["audit"]["openai_api_key_injected"] is False
+    assert calls["audit"]["openai_api_key_visible_to_job"] is False
 
 
 def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):

@@ -162,10 +162,12 @@ def test_create_job_missing_key(tmp_path, monkeypatch):
 
 def test_codex_status_unavailable(monkeypatch):
     client = TestClient(app)
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: None)
+    monkeypatch.setattr(appmod, "CODEX_APP_CLI_PATH", Path("/tmp/missing-codex-app-cli"))
     resp = client.get("/codex/status")
     assert resp.status_code == 200
-    assert resp.json() == {"available": False, "connected": False}
+    assert resp.json() == {"available": False, "connected": False, "cli_path": ""}
 
 
 def test_codex_status_connected(tmp_path, monkeypatch):
@@ -173,12 +175,14 @@ def test_codex_status_connected(tmp_path, monkeypatch):
     codex_home.mkdir()
     (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     client = TestClient(app)
     resp = client.get("/codex/status")
     assert resp.status_code == 200
     assert resp.json()["available"] is True
     assert resp.json()["connected"] is True
+    assert resp.json()["cli_path"] == "/usr/bin/codex"
 
 
 def test_codex_status_bad_json(tmp_path, monkeypatch):
@@ -186,6 +190,7 @@ def test_codex_status_bad_json(tmp_path, monkeypatch):
     codex_home.mkdir()
     (codex_home / "auth.json").write_text("{", encoding="utf-8")
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     client = TestClient(app)
     resp = client.get("/codex/status")
@@ -197,6 +202,7 @@ def test_codex_status_missing_auth_file(tmp_path, monkeypatch):
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     client = TestClient(app)
     resp = client.get("/codex/status")
@@ -206,6 +212,7 @@ def test_codex_status_missing_auth_file(tmp_path, monkeypatch):
 
 def test_codex_login_starts(monkeypatch):
     client = TestClient(app)
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False})
     monkeypatch.setattr(appmod, "codex_login_supported", lambda: True)
@@ -219,19 +226,22 @@ def test_codex_login_starts(monkeypatch):
     resp = client.post("/codex/login")
     assert resp.status_code == 200
     assert resp.json()["status"] == "started"
-    assert started["cmd"][0] == "codex"
+    assert started["cmd"][0] == "/usr/bin/codex"
     assert started["cmd"][1] == "login"
 
 
 def test_codex_login_missing(monkeypatch):
     client = TestClient(app)
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: None)
+    monkeypatch.setattr(appmod, "CODEX_APP_CLI_PATH", Path("/tmp/missing-codex-app-cli"))
     resp = client.post("/codex/login")
     assert resp.status_code == 400
 
 
 def test_codex_login_unsupported(monkeypatch):
     client = TestClient(app)
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False})
     monkeypatch.setattr(appmod, "codex_login_supported", lambda: False)
@@ -241,6 +251,7 @@ def test_codex_login_unsupported(monkeypatch):
 
 def test_codex_login_already_connected(monkeypatch):
     client = TestClient(app)
+    monkeypatch.setattr(appmod, "configured_codex_cli_path", lambda: "")
     monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
     monkeypatch.setattr(appmod, "codex_login_supported", lambda: False)

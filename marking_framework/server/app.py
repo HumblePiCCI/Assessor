@@ -16,6 +16,12 @@ from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
 import server.projects as projectsmod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
+from scripts.runtime_profiles import (
+    apply_runtime_profile_to_routing,
+    missing_priced_models,
+    public_profiles_payload,
+    resolve_runtime_profile,
+)
 app = FastAPI()
 app.include_router(projects_router)
 app.add_middleware(
@@ -36,7 +42,9 @@ PIPELINE_EXTRA_PATHS = (
     "config/rubric_criteria.json",
     "config/accuracy_gate.json",
     "config/sota_gate.json",
+    "config/runtime_profiles.json",
 )
+CODEX_APP_CLI_PATH = Path("/Applications/Codex.app/Contents/Resources/codex")
 class AuthPayload(BaseModel):
     api_key: str
 
@@ -60,6 +68,21 @@ def workspace_root() -> Path:
     return BASE_DIR.parent
 def current_api_key() -> str | None:
     return API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
+
+
+def load_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def provider_api_key_available(profile: dict) -> bool:
+    if profile.get("provider") == "openai":
+        return bool(current_api_key())
+    api_key_env = str(profile.get("api_key_env") or "").strip()
+    return bool(api_key_env and os.environ.get(api_key_env))
 
 
 def request_identity(request: Request | None) -> dict:
@@ -106,8 +129,26 @@ def codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
 def codex_auth_path() -> Path:
     return codex_home() / "auth.json"
+def configured_codex_cli_path() -> str:
+    payload = load_json(workspace_root() / "config" / "runtime_profiles.json")
+    profiles = payload.get("profiles", {}) if isinstance(payload.get("profiles", {}), dict) else {}
+    default_name = str(payload.get("default_profile") or "internal_codex").strip()
+    profile = profiles.get(default_name, {}) if isinstance(profiles.get(default_name, {}), dict) else {}
+    if profile.get("mode") == "codex_local" and profile.get("codex_cli_path"):
+        return str(profile.get("codex_cli_path"))
+    return ""
+def codex_cli_path() -> str:
+    configured = str(configured_codex_cli_path() or os.environ.get("CODEX_CLI_PATH") or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        return str(path) if path.exists() else ""
+    found = shutil.which("codex")
+    if found:
+        return found
+    return str(CODEX_APP_CLI_PATH) if CODEX_APP_CLI_PATH.exists() else ""
 def codex_status_payload() -> dict:
-    available = bool(shutil.which("codex"))
+    cli_path = codex_cli_path()
+    available = bool(cli_path)
     connected = False
     if available:
         auth_path = codex_auth_path()
@@ -117,14 +158,15 @@ def codex_status_payload() -> dict:
                 connected = bool(data.get("OPENAI_API_KEY") or data.get("tokens"))
             except json.JSONDecodeError:
                 connected = False
-    return {"available": available, "connected": connected}
+    return {"available": available, "connected": connected, "cli_path": cli_path}
 
 
 def codex_login_supported() -> bool:
-    if not shutil.which("codex"):
+    cli_path = codex_cli_path()
+    if not cli_path:
         return False
     try:
-        result = run(["codex", "--help"], capture_output=True, text=True)
+        result = run([cli_path, "--help"], capture_output=True, text=True)
     except Exception:
         return False
     text = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
@@ -161,6 +203,13 @@ async def auth_context(request: Request):
         "runtime_mode": identity.get("auth_mode", "development"),
         "strict_auth": bool(identity.get("strict_auth", False)),
     }
+
+
+@app.get("/runtime/profiles")
+async def runtime_profiles():
+    return public_profiles_payload(workspace_root() / "config" / "runtime_profiles.json")
+
+
 def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
@@ -201,7 +250,8 @@ async def codex_status():
     return codex_status_payload()
 @app.post("/codex/login")
 async def codex_login():
-    if not shutil.which("codex"):
+    cli_path = codex_cli_path()
+    if not cli_path:
         raise HTTPException(status_code=400, detail="Codex CLI not found")
     # Some local Codex CLIs are already authenticated but do not expose a browser login subcommand.
     status = codex_status_payload()
@@ -212,13 +262,13 @@ async def codex_login():
             status_code=400,
             detail="Installed Codex CLI does not support browser login. Use API key connect or upgrade Codex CLI.",
         )
-    Popen(["codex", "login"], stdout=DEVNULL, stderr=DEVNULL)
+    Popen([cli_path, "login"], stdout=DEVNULL, stderr=DEVNULL)
     return {"status": "started"}
 
 
 def validate_pipeline_mode(mode: str) -> str:
     normalized = mode.strip().lower()
-    if normalized not in {"codex_local", "openai"}:
+    if normalized not in {"codex_local", "openai", "openai_compatible"}:
         raise HTTPException(status_code=400, detail="Invalid mode")
     if normalized == "codex_local":
         status = codex_status_payload()
@@ -228,7 +278,46 @@ def validate_pipeline_mode(mode: str) -> str:
             raise HTTPException(status_code=400, detail="Codex not connected")
     if normalized == "openai" and not current_api_key():
         raise HTTPException(status_code=400, detail="OpenAI API key not configured")
+    if normalized == "openai_compatible":
+        raise HTTPException(status_code=400, detail="Select an enabled runtime profile for OpenAI-compatible providers")
     return normalized
+
+
+def validate_runtime_selection(mode: str, profile_name: str = "") -> tuple[str, str]:
+    profile_name = str(profile_name or "").strip()
+    if not profile_name:
+        return validate_pipeline_mode(mode), ""
+    try:
+        profile = resolve_runtime_profile(profile_name, workspace_root() / "config" / "runtime_profiles.json")
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not profile.get("enabled", True):
+        raise HTTPException(status_code=400, detail=f"Runtime profile is disabled: {profile_name}")
+    selected_mode = str(profile.get("mode") or "").strip().lower()
+    if selected_mode == "codex_local":
+        status = codex_status_payload()
+        if not status["available"]:
+            raise HTTPException(status_code=400, detail="Codex CLI not found")
+        if not status["connected"]:
+            raise HTTPException(status_code=400, detail="Codex not connected")
+    elif selected_mode in {"openai", "openai_compatible"}:
+        if not provider_api_key_available(profile):
+            env_name = str(profile.get("api_key_env") or "OPENAI_API_KEY")
+            raise HTTPException(status_code=400, detail=f"{env_name} is not configured")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported runtime mode: {selected_mode}")
+    billing = profile.get("billing", {}) if isinstance(profile.get("billing", {}), dict) else {}
+    if billing.get("billable", False):
+        base_routing = load_json(workspace_root() / "config" / "llm_routing.json")
+        effective_routing = apply_runtime_profile_to_routing(base_routing, profile)
+        pricing = load_json(workspace_root() / "config" / "pricing.json")
+        missing = missing_priced_models(effective_routing, pricing)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Billable runtime profile has missing model prices: {', '.join(sorted(missing))}",
+            )
+    return selected_mode, profile_name
 
 
 def submit_pipeline_job(
@@ -237,11 +326,12 @@ def submit_pipeline_job(
     outline: UploadFile,
     submissions: Optional[List[UploadFile]],
     mode: str,
+    profile: str = "",
     project_id: str = "",
 ):
     if not submissions:
         raise HTTPException(status_code=400, detail="No submissions provided")
-    mode = validate_pipeline_mode(mode)
+    mode, runtime_profile_name = validate_runtime_selection(mode, profile)
     identity = request_identity(request)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -262,6 +352,7 @@ def submit_pipeline_job(
             extra_paths=[root / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
             identity=identity,
             project_id=project_id,
+            runtime_profile_name=runtime_profile_name,
         )
 
 
@@ -272,9 +363,10 @@ async def run_pipeline(
     outline: UploadFile = File(...),
     submissions: Optional[List[UploadFile]] = File(None),
     mode: str = Form("codex_local"),
+    profile: str = Form(""),
     project_id: str = Form(""),
 ):
-    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, project_id=project_id)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id)
 
 
 @app.post("/pipeline/v2/run")
@@ -284,9 +376,10 @@ async def run_pipeline_v2(
     outline: UploadFile = File(...),
     submissions: Optional[List[UploadFile]] = File(None),
     mode: str = Form("codex_local"),
+    profile: str = Form(""),
     project_id: str = Form(""),
 ):
-    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, project_id=project_id)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id)
 @app.get("/pipeline/v2/jobs/{job_id}")
 async def pipeline_v2_status(job_id: str, request: Request):
     job = PIPELINE_QUEUE.get_job(job_id, identity=request_identity(request))

@@ -16,9 +16,10 @@ class FakeQueue:
         self.confirmed = None
         self.anchor = None
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name=""):
         self.submitted = {
             "mode": mode,
+            "runtime_profile_name": runtime_profile_name,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(p.name for p in submissions_dir.glob("*")),
@@ -86,6 +87,17 @@ def test_pipeline_v2_run_success_openai(monkeypatch):
     assert resp.json()["job_id"] == "j1"
     assert fake.submitted["mode"] == "openai"
     assert fake.submitted["subs"] == ["s1.txt"]
+
+
+def test_pipeline_v2_run_success_runtime_profile(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
+    client = TestClient(app)
+    resp = client.post("/pipeline/v2/run", data={"mode": "openai", "profile": "internal_codex"}, files=_files())
+    assert resp.status_code == 200
+    assert fake.submitted["mode"] == "codex_local"
+    assert fake.submitted["runtime_profile_name"] == "internal_codex"
 
 
 def test_pipeline_v2_run_validation(monkeypatch):

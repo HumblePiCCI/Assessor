@@ -1,10 +1,12 @@
 LLM Routing
 
 Config file: `config/llm_routing.json`
+Runtime profile file: `config/runtime_profiles.json`
 
 Purpose
 - Define which model to use for each LLM task.
-- Centralize defaults so the pipeline is consistent across CLI, queue, and hero-path runs.
+- Centralize base defaults so the pipeline is consistent across CLI, queue, and hero-path runs.
+- Allow runtime profiles to overlay auth/provider/billing choices without editing every script.
 - Keep cheap broad screening separate from routed teacher-grade adjudication.
 
 Current Tasks
@@ -26,5 +28,7 @@ Committee-Edge Routing Notes
 
 Operational Notes
 - `OPENAI_API_KEY` is required for API calls.
-- Update `config/llm_routing.json`, not individual scripts, to change models or reasoning levels.
+- Update `config/llm_routing.json`, not individual scripts, to change base models or reasoning levels.
+- Use `config/runtime_profiles.json` for product-level switches such as internal Codex OAuth, teacher PAYG, or OpenAI-compatible provider adapters.
 - Keep task additions explicit in this doc whenever a new route is introduced; otherwise queue, hero-path, and local runs become hard to compare.
+- Billable profiles must have prices for every effective task model in `config/pricing.json`; the server rejects billable runs with missing model prices.
