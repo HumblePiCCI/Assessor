@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -171,6 +172,12 @@ def codex_login_supported() -> bool:
         return False
     text = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
     return "codex login" in text or "\n    login " in text
+
+
+def running_under_pytest() -> bool:
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 PIPELINE_QUEUE = PipelineQueue(
     root=workspace_root(),
     data_dir=DATA_DIR,
@@ -178,6 +185,8 @@ PIPELINE_QUEUE = PipelineQueue(
     run_fn=run,
     log_fn=log_pipeline,
     api_key_fn=current_api_key,
+    recover_interrupted_on_startup=not running_under_pytest(),
+    use_process_lock=True,
 )
 @app.get("/auth/status")
 async def auth_status(request: Request):
@@ -214,7 +223,7 @@ def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="UI asset not found")
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
 @app.get("/data.json")
 async def ui_data_json(request: Request):
     data_path = dashboard_data_path_for_identity(request_identity(request))
@@ -380,6 +389,16 @@ async def run_pipeline_v2(
     project_id: str = Form(""),
 ):
     return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id)
+
+
+@app.get("/pipeline/v2/jobs/latest")
+async def pipeline_v2_latest_job(request: Request):
+    job = PIPELINE_QUEUE.latest_active_job(identity=request_identity(request))
+    if not job:
+        raise HTTPException(status_code=404, detail="No active job")
+    return job
+
+
 @app.get("/pipeline/v2/jobs/{job_id}")
 async def pipeline_v2_status(job_id: str, request: Request):
     job = PIPELINE_QUEUE.get_job(job_id, identity=request_identity(request))

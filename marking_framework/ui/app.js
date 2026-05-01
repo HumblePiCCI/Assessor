@@ -1189,6 +1189,53 @@ function updatePreviewFromUploads() {
 }
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function waitForJob(jobId) { while (true) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } }
+async function resumeLatestPipelineJob() {
+  if (activeJobId || running) return;
+  let latest = null;
+  try {
+    const res = await fetch(apiUrl('/pipeline/v2/jobs/latest'), { cache: 'no-store' });
+    if (!res.ok) return;
+    latest = await res.json();
+  } catch (_) {
+    return;
+  }
+  if (!latest || !latest.id || latest.status === 'completed' || latest.status === 'failed') return;
+  activeJobId = latest.id;
+  setPipelineStatus(`Reconnected • ${latest.progress_message || latest.progress_stage || 'Running'}`, 'running');
+  setRunning(true);
+  startPipelineNarrative();
+  pipelineLog(`Reconnected to active run ${activeJobId.slice(0, 8)}.`);
+  try {
+    const job = await waitForJob(activeJobId);
+    if (job.status === 'awaiting_rubric_confirmation') {
+      setPipelineStatus('Rubric confirmation needed', 'warn');
+      stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.');
+      await fetchRubricReview(activeJobId);
+      return;
+    }
+    if (job.status === 'awaiting_anchor_scores') {
+      setPipelineStatus('Anchor calibration needed', 'warn');
+      stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.');
+      const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
+      if (dataRes.ok) {
+        previewStudents = [];
+        await boot(await dataRes.json());
+      }
+      await fetchAnchorReview(activeJobId);
+      return;
+    }
+    const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
+    if (!dataRes.ok) throw new Error('Dashboard data unavailable');
+    previewStudents = [];
+    await boot(await dataRes.json());
+    setPipelineStatus('Complete', 'ready');
+    stopPipelineNarrative('Done. Review is ready.');
+  } catch (err) {
+    const msg = `Run failed: ${err.message || 'connection lost'}`;
+    setPipelineStatus(msg, 'danger');
+    stopPipelineNarrative(msg);
+  }
+}
 async function runPipeline() {
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
   if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { setPipelineStatus('Add essays, rubric, outline', 'warn'); return; }
@@ -1373,5 +1420,5 @@ async function boot(payload) {
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })
   .then(res => res.ok ? res.text() : '')
   .then(text => { try { return text ? JSON.parse(text) : { students: [] }; } catch (_) { return { students: [] }; } })
-  .then(payload => boot(payload))
+  .then(async payload => { await boot(payload); await resumeLatestPipelineJob(); })
   .catch(err => { console.error(err); return boot({ students: [] }); });

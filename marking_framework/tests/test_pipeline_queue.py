@@ -694,6 +694,22 @@ def test_get_events_returns_none_for_missing_job(tmp_path):
     assert queue.get_events("missing") is None
 
 
+def test_latest_active_job_returns_newest_accessible_active_job(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    first = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    (subs / "s2.txt").write_text("essay two", encoding="utf-8")
+    second = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._update_job(first["job_id"], "failed", completed_at=pqmod.now_iso())
+    queue._update_job(second["job_id"], "running", stage="consistency", message="Collecting pairwise consistency evidence")
+
+    latest = queue.latest_active_job()
+    assert latest["id"] == second["job_id"]
+    assert latest["status"] == "running"
+    assert latest["progress_stage"] == "consistency"
+
+
 def test_startup_recovery_marks_abandoned_jobs_failed(tmp_path):
     queue, root, data, _logs, _resets = _make_queue(tmp_path)
     rubric, outline, subs = _write_inputs(tmp_path / "inputs")

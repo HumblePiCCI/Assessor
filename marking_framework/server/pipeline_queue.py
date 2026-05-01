@@ -12,6 +12,11 @@ import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
+
 from scripts.calibration_contract import build_run_scope, calibration_manifest_path, canonical_json_hash, load_json as load_contract_json
 from scripts.apply_anchor_calibration import normalize_teacher_scores
 from scripts.rubric_contract import RUBRIC_ARTIFACTS, build_rubric_artifacts, rubric_contract_summary, stable_contract_hash
@@ -433,7 +438,18 @@ def snapshot_hash(
 
 
 class PipelineQueue:
-    def __init__(self, root: Path, data_dir: Path, reset_workspace_fn, run_fn, log_fn, api_key_fn):
+    def __init__(
+        self,
+        root: Path,
+        data_dir: Path,
+        reset_workspace_fn,
+        run_fn,
+        log_fn,
+        api_key_fn,
+        *,
+        recover_interrupted_on_startup: bool = True,
+        use_process_lock: bool = False,
+    ):
         self.root = root
         self.data_dir = data_dir
         self.jobs_dir = data_dir / "pipeline_jobs"
@@ -452,6 +468,8 @@ class PipelineQueue:
         self._queue = queue.Queue()
         self._thread = None
         self._lock = threading.Lock()
+        self._process_lock_handle = None
+        self._process_lock_acquired = self._acquire_process_lock() if use_process_lock else True
         if not self.ops_path.exists():
             self._write_json(
                 self.ops_path,
@@ -464,10 +482,24 @@ class PipelineQueue:
                     "last_retention_report": {},
                 },
             )
-        self._recover_interrupted_jobs_on_startup()
+        if recover_interrupted_on_startup and self._process_lock_acquired:
+            self._recover_interrupted_jobs_on_startup()
 
     def _conn(self):
         return sqlite3.connect(self.db_path)
+
+    def _acquire_process_lock(self) -> bool:
+        if fcntl is None:
+            return True
+        lock_path = self.data_dir / "pipeline_queue.lock"
+        handle = lock_path.open("a+")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            return False
+        self._process_lock_handle = handle
+        return True
 
     def _ensure_columns(self, conn):
         required = {
@@ -1017,6 +1049,24 @@ class PipelineQueue:
         except json.JSONDecodeError:
             payload["gate_summary"] = {}
         return payload
+
+    def latest_active_job(self, identity: dict | None = None) -> dict | None:
+        active_statuses = ("queued", "running", "awaiting_rubric_confirmation", "awaiting_anchor_scores")
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id FROM jobs
+                WHERE status IN ({",".join("?" for _ in active_statuses)})
+                ORDER BY updated_at DESC
+                LIMIT 20
+                """,
+                active_statuses,
+            ).fetchall()
+        for row in rows:
+            job = self.get_job(str(row[0]), identity=identity)
+            if job:
+                return job
+        return None
 
     def get_events(self, job_id: str, identity: dict | None = None, after: int = -1, limit: int = 200) -> dict | None:
         job = self.get_job(job_id, identity=identity)

@@ -34,6 +34,9 @@ class FakeQueue:
             return self.job
         return None
 
+    def latest_active_job(self, identity=None):
+        return self.job
+
     def load_dashboard_data(self, job_id, identity=None):
         if self.data and job_id == "j1":
             return self.data
@@ -148,6 +151,19 @@ def test_pipeline_v2_status_and_data(monkeypatch):
     assert no_data.status_code == 404
 
 
+def test_pipeline_v2_latest_active_job(monkeypatch):
+    fake = FakeQueue()
+    fake.job = {"id": "j1", "status": "running", "progress_stage": "consistency"}
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    client = TestClient(app)
+    latest = client.get("/pipeline/v2/jobs/latest")
+    assert latest.status_code == 200
+    assert latest.json()["id"] == "j1"
+    fake.job = None
+    missing = client.get("/pipeline/v2/jobs/latest")
+    assert missing.status_code == 404
+
+
 def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     fake = FakeQueue()
     fake.events = {"events": [{"index": 0, "message": "ok"}], "next_after": 0, "done": True, "status": "completed"}
@@ -160,6 +176,7 @@ def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     assert missing.status_code == 404
     asset = client.get("/progress_stream.js")
     assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "no-store"
     assert "Run timed out" not in asset.text
     assert "while (true)" in asset.text
     assert "awaiting_anchor_scores" in asset.text
