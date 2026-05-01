@@ -694,6 +694,13 @@ def test_get_events_returns_none_for_missing_job(tmp_path):
     assert queue.get_events("missing") is None
 
 
+def test_pipeline_progress_message_includes_counts():
+    message = pqmod._pipeline_progress_message(
+        'PIPELINE_PROGRESS {"message":"Pairwise consistency comparison complete","completed":"7","total":"236","status":"completed"}'
+    )
+    assert message == "Pairwise consistency comparison complete • 7/236"
+
+
 def test_latest_active_job_returns_newest_accessible_active_job(tmp_path):
     queue, root, _data, _logs, _resets = _make_queue(tmp_path)
     rubric, outline, subs = _write_inputs(tmp_path / "inputs")

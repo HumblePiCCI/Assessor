@@ -217,10 +217,14 @@ def _pipeline_progress_message(text: str) -> str | None:
         return None
     model = str(payload.get("model", "") or "").strip()
     status = str(payload.get("status", "") or "").strip()
+    completed = str(payload.get("completed", "") or "").strip()
+    total = str(payload.get("total", "") or "").strip()
     parts = [message]
+    if completed and total:
+        parts.append(f"{completed}/{total}")
     if model:
         parts.append(model)
-    if status and status not in message.lower():
+    if status and not (completed and total) and status not in message.lower():
         parts.append(status)
     return " • ".join(parts)
 
