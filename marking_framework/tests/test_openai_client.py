@@ -351,7 +351,7 @@ def test_responses_create_writes_cache_codex(tmp_path, monkeypatch):
     assert cache_path.exists()
 
 
-def test_responses_create_codex_exec_uses_output_last_message(tmp_path, monkeypatch):
+def test_responses_create_codex_exec_uses_output_last_message(tmp_path, monkeypatch, capsys):
     cli = tmp_path / "codex"
     cli.write_text("#!/bin/sh\n", encoding="utf-8")
     routing = {"mode": "codex_local", "codex_cli_path": str(cli), "codex_cli_interface": "exec"}
@@ -374,6 +374,10 @@ def test_responses_create_codex_exec_uses_output_last_message(tmp_path, monkeypa
     assert captured["cmd"][-1] == "-"
     assert "--output-last-message" in captured["cmd"]
     assert "USER: hi" in captured["input"]
+    progress = capsys.readouterr().err
+    assert "PIPELINE_PROGRESS" in progress
+    assert "Codex OAuth call started" in progress
+    assert "USER: hi" not in progress
 
 
 def test_responses_create_codex_success(tmp_path, monkeypatch):

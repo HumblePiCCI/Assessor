@@ -135,26 +135,50 @@
 
   waitForJob = async function waitForJobReal(jobId) {
     const start = Date.now();
-    while (Date.now() - start < 45 * 60 * 1000) {
-      const statusRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`), { cache: 'no-store' });
-      if (!statusRes.ok) throw new Error('Run status unavailable');
-      const job = await statusRes.json();
-      setPipelineStatus(statusText(job));
-      await fetchEvents(jobId);
-      if (job.status === 'completed') {
-        const elapsed = elapsedText(job);
-        setPipelineStatus(elapsed ? `Complete • ${elapsed}${latestCost ? ` • ${latestCost}` : ''}` : 'Complete');
+    let lastReachableAt = Date.now();
+    let connectionLogged = false;
+    let longRunLogged = false;
+    while (true) {
+      try {
+        const statusRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`), { cache: 'no-store' });
+        if (!statusRes.ok) throw new Error('Run status unavailable');
+        lastReachableAt = Date.now();
+        connectionLogged = false;
+        const job = await statusRes.json();
+        setPipelineStatus(statusText(job));
         await fetchEvents(jobId);
-        return job;
-      }
-      if (job.status === 'failed') {
-        setPipelineStatus(`Run failed • ${stageText(job)}`);
-        await fetchEvents(jobId);
-        throw new Error(job.error || 'Run failed');
+        if (!longRunLogged && Date.now() - start > 45 * 60 * 1000) {
+          longRunLogged = true;
+          appendLine('This cohort is still running. Long consistency checks can take more than 45 minutes on local OAuth.');
+        }
+        if (job.status === 'completed') {
+          const elapsed = elapsedText(job);
+          setPipelineStatus(elapsed ? `Complete • ${elapsed}${latestCost ? ` • ${latestCost}` : ''}` : 'Complete');
+          await fetchEvents(jobId);
+          return job;
+        }
+        if (job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') {
+          await fetchEvents(jobId);
+          return job;
+        }
+        if (job.status === 'failed') {
+          setPipelineStatus(`Run failed • ${stageText(job)}`);
+          await fetchEvents(jobId);
+          const terminal = new Error(job.error || 'Run failed');
+          terminal.pipelineTerminal = true;
+          throw terminal;
+        }
+      } catch (err) {
+        if (err && err.pipelineTerminal) throw err;
+        const offlineSeconds = Math.max(0, Math.round((Date.now() - lastReachableAt) / 1000));
+        setPipelineStatus(`Connection interrupted • retrying ${offlineSeconds}s`);
+        if (!connectionLogged) {
+          connectionLogged = true;
+          appendLine('Connection to the local server was interrupted. Keeping this run open and retrying status checks.');
+        }
       }
       if (typeof sleep === 'function') await sleep(900);
       else await new Promise(resolve => setTimeout(resolve, 900));
     }
-    throw new Error('Run timed out');
   };
 })();

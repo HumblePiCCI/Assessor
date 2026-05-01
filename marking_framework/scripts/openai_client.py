@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -12,10 +13,19 @@ from pathlib import Path
 
 
 CODEX_APP_CLI_PATH = Path("/Applications/Codex.app/Contents/Resources/codex")
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS "
 
 
 def load_routing(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _emit_pipeline_progress(message: str, **fields):
+    payload = {"message": str(message)}
+    for key, value in fields.items():
+        if value is not None:
+            payload[str(key)] = str(value)
+    print(f"{PIPELINE_PROGRESS_PREFIX}{json.dumps(payload, ensure_ascii=True, sort_keys=True)}", file=sys.stderr, flush=True)
 
 def _timeout_seconds() -> float:
     # Conservative default: avoid hanging the UI/pipeline indefinitely.
@@ -370,21 +380,32 @@ def _codex_response(model: str, messages: list, routing: dict, text_format: dict
         cache_key = _cache_key(_codex_cache_payload(cli_path, cli_interface, model, prompt, normalized_format))
         cached = _cache_get(cache_key)
         if cached is not None:
+            _emit_pipeline_progress("Reused cached Codex OAuth response", model=model, interface=cli_interface, status="cache_hit")
             return cached
     last_error = None
     last_stdout = ""
     max_attempts = 3 if text_format else 2
-    for _ in range(max_attempts):
+    for attempt_index in range(max_attempts):
+        _emit_pipeline_progress(
+            "Codex OAuth call started",
+            model=model,
+            interface=cli_interface,
+            status="started",
+            attempt=attempt_index + 1,
+        )
         try:
             if cli_interface == "exec":
                 result, last_stdout = _run_codex_exec(cli_path, model, prompt)
             else:
                 result, last_stdout = _run_codex_legacy(cli_path, model, prompt)
         except subprocess.TimeoutExpired as exc:
+            _emit_pipeline_progress("Codex OAuth call timed out", model=model, interface=cli_interface, status="timeout", attempt=attempt_index + 1)
             raise RuntimeError(f"Codex CLI timed out after {_timeout_seconds():.0f}s") from exc
         if result.returncode != 0:
             detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "").strip()
+            _emit_pipeline_progress("Codex OAuth call failed", model=model, interface=cli_interface, status="failed", attempt=attempt_index + 1)
             raise RuntimeError(f"Codex CLI failed ({cli_interface} at {cli_path}): {detail or 'unknown error'}")
+        _emit_pipeline_progress("Codex OAuth response received", model=model, interface=cli_interface, status="received", attempt=attempt_index + 1)
         structured_text = _coerce_structured_text(last_stdout, normalized_format)
         if structured_text:
             text = structured_text
@@ -400,6 +421,7 @@ def _codex_response(model: str, messages: list, routing: dict, text_format: dict
                 if text:
                     break
                 last_error = ValueError("Codex structured output invalid.")
+                _emit_pipeline_progress("Codex OAuth structured output retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
                 prompt = _build_codex_prompt(messages, normalized_format, extracted)
                 continue
             last_error = ValueError("Codex output empty.")
@@ -407,6 +429,7 @@ def _codex_response(model: str, messages: list, routing: dict, text_format: dict
         except ValueError as exc:
             last_error = exc
             if normalized_format:
+                _emit_pipeline_progress("Codex OAuth structured output retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
                 prompt = _build_codex_prompt(messages, normalized_format, last_stdout)
             text = None
     if text is None:

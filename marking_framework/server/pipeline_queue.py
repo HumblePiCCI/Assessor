@@ -67,6 +67,8 @@ ANCHOR_PACKET_ARTIFACT = "outputs/teacher_anchor_packet.json"
 CONSISTENCY_REPORT_ARTIFACT = "outputs/consistency_report.json"
 FINAL_ORDER_ARTIFACT = "outputs/final_order.csv"
 RUNTIME_AUTH_AUDIT_ARTIFACT = "outputs/runtime_auth_audit.json"
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS "
+INTERRUPTED_STARTUP_STATUSES = ("queued", "running")
 
 
 def now_iso() -> str:
@@ -192,6 +194,30 @@ def _load_json(path: Path) -> dict:
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _pipeline_progress_message(text: str) -> str | None:
+    raw = str(text or "").strip()
+    if not raw.startswith(PIPELINE_PROGRESS_PREFIX):
+        return None
+    payload_text = raw[len(PIPELINE_PROGRESS_PREFIX) :].strip()
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return payload_text or None
+    if not isinstance(payload, dict):
+        return None
+    message = str(payload.get("message", "") or "").strip()
+    if not message:
+        return None
+    model = str(payload.get("model", "") or "").strip()
+    status = str(payload.get("status", "") or "").strip()
+    parts = [message]
+    if model:
+        parts.append(model)
+    if status and status not in message.lower():
+        parts.append(status)
+    return " • ".join(parts)
 
 
 def _git_sha(root: Path) -> str | None:
@@ -438,6 +464,7 @@ class PipelineQueue:
                     "last_retention_report": {},
                 },
             )
+        self._recover_interrupted_jobs_on_startup()
 
     def _conn(self):
         return sqlite3.connect(self.db_path)
@@ -482,6 +509,43 @@ class PipelineQueue:
             self._ensure_columns(conn)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_snapshot_status ON jobs(snapshot_hash, status)")
             conn.commit()
+
+    def _recover_interrupted_jobs_on_startup(self):
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, status, job_dir, progress_stage, progress_message, tenant_id
+                FROM jobs
+                WHERE status IN (?, ?)
+                """,
+                INTERRUPTED_STARTUP_STATUSES,
+            ).fetchall()
+        for job_id, status, job_dir, progress_stage, progress_message, tenant_id in rows:
+            stage = str(progress_stage or "interrupted")
+            label = str(progress_message or progress_stage or "the pipeline")
+            message = (
+                f"Run interrupted while {label}. "
+                "The server stopped before this job finished; rerun the assessment."
+            )
+            path = Path(str(job_dir))
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                self._append_event(path, stage, message, level="error", event="failed")
+            except OSError:
+                pass
+            self._record_incident(
+                "job_interrupted_on_startup",
+                f"Job {job_id} was {status} when the server started",
+                extra={"job_id": str(job_id), "stage": stage, "tenant_id": str(tenant_id or "")},
+            )
+            self._update_job(
+                str(job_id),
+                "failed",
+                error=message[:500],
+                stage=stage,
+                message=f"Failed: interrupted while {label}",
+                completed_at=now_iso(),
+            )
 
     def _event_path(self, job_dir: Path) -> Path:
         return job_dir / "events.jsonl"
@@ -1542,6 +1606,30 @@ class PipelineQueue:
             before = self._artifact_snapshot(workspace_dir)
 
             def on_output(source, text):
+                progress_message = _pipeline_progress_message(text)
+                if progress_message:
+                    self._update_job(job_id, "running", current=index - 1, total=total, stage=stage, message=progress_message)
+                    self._append_event(
+                        job_dir,
+                        stage,
+                        progress_message,
+                        source="system",
+                        level="info",
+                        event="heartbeat",
+                    )
+                    return
+                if source == "heartbeat":
+                    message = f"Still working: {label}"
+                    self._update_job(job_id, "running", current=index - 1, total=total, stage=stage, message=message)
+                    self._append_event(
+                        job_dir,
+                        stage,
+                        message,
+                        source="system",
+                        level="info",
+                        event="heartbeat",
+                    )
+                    return
                 self._append_event(
                     job_dir,
                     stage,

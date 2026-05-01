@@ -214,6 +214,15 @@ def _can_stream_subprocess(run_fn) -> bool:
     return getattr(run_fn, "__module__", "") == "subprocess" and getattr(run_fn, "__name__", "") == "run"
 
 
+def _heartbeat_seconds() -> float:
+    raw = os.environ.get("PIPELINE_STEP_HEARTBEAT_SECONDS", "60").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 60.0
+    return value if value > 0 else 60.0
+
+
 def _run_capture(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
     result = run_fn(cmd, env=env, cwd=str(cwd), capture_output=True, text=True)
     stdout = str(getattr(result, "stdout", "") or "")
@@ -230,6 +239,7 @@ def _run_capture(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tup
 def _run_stream(cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
     proc = subprocess.Popen(cmd, env=env, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     lines = queue.Queue()
+    heartbeat_seconds = _heartbeat_seconds()
 
     def pump(stream, source):
         for line in iter(stream.readline, ""):
@@ -244,7 +254,12 @@ def _run_stream(cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, s
     closed = 0
     out_lines, err_lines = [], []
     while closed < 2:
-        source, line = lines.get()
+        try:
+            source, line = lines.get(timeout=heartbeat_seconds)
+        except queue.Empty:
+            if proc.poll() is None:
+                on_output("heartbeat", "Still running")
+            continue
         if line is None:
             closed += 1
             continue

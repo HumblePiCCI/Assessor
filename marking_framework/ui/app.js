@@ -1188,7 +1188,7 @@ function updatePreviewFromUploads() {
   updateWorkflowState();
 }
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
+async function waitForJob(jobId) { while (true) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } }
 async function runPipeline() {
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
   if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { setPipelineStatus('Add essays, rubric, outline', 'warn'); return; }

@@ -694,6 +694,38 @@ def test_get_events_returns_none_for_missing_job(tmp_path):
     assert queue.get_events("missing") is None
 
 
+def test_startup_recovery_marks_abandoned_jobs_failed(tmp_path):
+    queue, root, data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    job_id = submitted["job_id"]
+    queue._update_job(
+        job_id,
+        "running",
+        current=10,
+        total=22,
+        stage="consistency",
+        message="Collecting pairwise consistency evidence",
+    )
+
+    recovered = PipelineQueue(
+        root=root,
+        data_dir=data,
+        reset_workspace_fn=queue.reset_workspace,
+        run_fn=queue.run,
+        log_fn=queue.log,
+        api_key_fn=queue.get_api_key,
+    )
+
+    job = recovered.get_job(job_id)
+    assert job["status"] == "failed"
+    assert "interrupted while Collecting pairwise consistency evidence" in job["progress_message"]
+    assert "server stopped before this job finished" in job["error"]
+    events = recovered.get_events(job_id, after=-1, limit=50)["events"]
+    assert any(item.get("event") == "failed" and "server stopped before this job finished" in item.get("message", "") for item in events)
+
+
 def test_standardized_events_include_start_output_artifacts_and_complete(tmp_path, monkeypatch):
     steps = [{"id": "single", "label": "Single", "cmd": ["single"]}]
     monkeypatch.setattr(pqmod, "pipeline_steps", lambda: steps)
@@ -718,6 +750,29 @@ def test_standardized_events_include_start_output_artifacts_and_complete(tmp_pat
     assert "complete" in event_types
     artifact_events = [item for item in events if item.get("event") == "artifact"]
     assert any("outputs/step_output.txt" in item.get("artifacts", []) for item in artifact_events)
+
+
+def test_pipeline_progress_marker_becomes_heartbeat_event(tmp_path, monkeypatch):
+    steps = [{"id": "consistency", "label": "Collecting pairwise consistency evidence", "cmd": ["consistency"]}]
+    monkeypatch.setattr(pqmod, "pipeline_steps", lambda: steps)
+    marker = 'PIPELINE_PROGRESS {"message":"Codex OAuth call started","model":"gpt-5.4-mini","status":"started"}'
+
+    def run_fn(_cmd, env=None, cwd=None, **kwargs):
+        out = Path(cwd) / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text("{}", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr=f"{marker}\n")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_fn)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._process_job(submitted["job_id"])
+
+    events = queue.get_events(submitted["job_id"], after=-1, limit=100)["events"]
+    heartbeat_events = [item for item in events if item.get("event") == "heartbeat"]
+    assert any("Codex OAuth call started" in item.get("message", "") for item in heartbeat_events)
+    assert any("gpt-5.4-mini" in item.get("message", "") for item in heartbeat_events)
 
 
 def test_non_blocking_step_failure_continues(tmp_path, monkeypatch):

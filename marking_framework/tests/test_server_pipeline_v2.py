@@ -160,6 +160,9 @@ def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     assert missing.status_code == 404
     asset = client.get("/progress_stream.js")
     assert asset.status_code == 200
+    assert "Run timed out" not in asset.text
+    assert "while (true)" in asset.text
+    assert "awaiting_anchor_scores" in asset.text
 
 
 def test_pipeline_v2_rubric_endpoints(monkeypatch):

@@ -117,6 +117,22 @@ def test_run_stream_skips_blank_lines(tmp_path):
     assert seen == [("stdout", "ok")]
 
 
+def test_run_stream_emits_heartbeat_for_quiet_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPELINE_STEP_HEARTBEAT_SECONDS", "0.05")
+    cmd = ["python3", "-c", "import time; time.sleep(0.12); print('done')"]
+    seen = []
+    code, stdout, stderr = step_runner._run_stream(
+        cmd,
+        os.environ.copy(),
+        tmp_path,
+        lambda source, text: seen.append((source, text)),
+    )
+    assert code == 0
+    assert "done" in stdout
+    assert stderr == ""
+    assert ("heartbeat", "Still running") in seen
+
+
 def test_run_step_routes_by_runner_type(tmp_path):
     capture_seen = []
 
