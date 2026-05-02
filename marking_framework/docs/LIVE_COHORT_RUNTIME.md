@@ -14,8 +14,29 @@ Core additions:
 - anchor-calibration pause/resume workflow
 - live rerank stability metrics in `consistency_report.json`
 - committee-consensus reporting from the existing multi-assessor panel
-- routed pairwise escalation, evidence mapping, committee-edge resolution, and hard-pair eval before final grade/dashboard output
+- profile-aware queue execution:
+  - `teacher_review` publishes a review-ready dashboard after consensus scoring, pairwise review prep, grading, and dashboard build
+  - `full_validation` keeps the full routed pairwise escalation, evidence mapping, committee-edge resolution, rerank, hard-pair eval, quality gates, and cohort-confidence chain
+- bounded concurrent Pass 1 scoring via `scripts/run_llm_assessors.py --parallelism` or `ASSESSOR_PARALLELISM`
 - engagement-gated aggregate-learning retention
+
+## Runtime Profiles
+
+The browser-submitted teacher workflow now uses `pipeline_profile=teacher_review`
+by default. That profile is the low-latency product path for a live classroom:
+
+1. Normalize rubric and ground scope.
+2. Extract text and scan conventions.
+3. Run the multi-assessor panel with bounded Pass 1 concurrency.
+4. Build `outputs/consensus_scores.csv`.
+5. Generate review prep, grades, and `outputs/dashboard_data.json`.
+
+The full audit path remains available as `pipeline_profile=full_validation`.
+It runs the expensive boundary, band-seam, pairwise-consistency,
+pairwise-escalation, committee-edge, rerank, eval, quality-gate, SOTA-gate, and
+cohort-confidence steps before the final dashboard. That path is still the
+validation path for benchmark work, post-run audits, and research calibration;
+it should not block the first teacher-facing dashboard in a classroom workflow.
 
 ## Teacher Pilot Boundary
 
@@ -75,7 +96,7 @@ Statuses:
 - `failed`
 
 Anchor flow:
-1. Full run completes normally through dashboard build.
+1. A validation run completes normally through dashboard build.
 2. `cohort_confidence.json` is inspected.
 3. If blocking is enabled and the effective state is `anchor_calibration_required`, the queue:
    - stores a pre-anchor snapshot

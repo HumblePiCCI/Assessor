@@ -16,10 +16,11 @@ class FakeQueue:
         self.confirmed = None
         self.anchor = None
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name="", pipeline_profile=""):
         self.submitted = {
             "mode": mode,
             "runtime_profile_name": runtime_profile_name,
+            "pipeline_profile": pipeline_profile,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(p.name for p in submissions_dir.glob("*")),
@@ -89,6 +90,7 @@ def test_pipeline_v2_run_success_openai(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "j1"
     assert fake.submitted["mode"] == "openai"
+    assert fake.submitted["pipeline_profile"] == "teacher_review"
     assert fake.submitted["subs"] == ["s1.txt"]
 
 
@@ -101,6 +103,16 @@ def test_pipeline_v2_run_success_runtime_profile(monkeypatch):
     assert resp.status_code == 200
     assert fake.submitted["mode"] == "codex_local"
     assert fake.submitted["runtime_profile_name"] == "internal_codex"
+
+
+def test_pipeline_v2_run_can_request_full_validation(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+    client = TestClient(app)
+    resp = client.post("/pipeline/v2/run", data={"mode": "openai", "pipeline_profile": "full_validation"}, files=_files())
+    assert resp.status_code == 200
+    assert fake.submitted["pipeline_profile"] == "full_validation"
 
 
 def test_pipeline_v2_run_validation(monkeypatch):

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
+from server.step_runner import DEFAULT_PIPELINE_PROFILE, normalize_pipeline_profile
 import server.projects as projectsmod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
 from scripts.runtime_profiles import (
@@ -337,10 +338,15 @@ def submit_pipeline_job(
     mode: str,
     profile: str = "",
     project_id: str = "",
+    pipeline_profile: str = DEFAULT_PIPELINE_PROFILE,
 ):
     if not submissions:
         raise HTTPException(status_code=400, detail="No submissions provided")
     mode, runtime_profile_name = validate_runtime_selection(mode, profile)
+    try:
+        selected_pipeline_profile = normalize_pipeline_profile(pipeline_profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     identity = request_identity(request)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -362,6 +368,7 @@ def submit_pipeline_job(
             identity=identity,
             project_id=project_id,
             runtime_profile_name=runtime_profile_name,
+            pipeline_profile=selected_pipeline_profile,
         )
 
 
@@ -374,8 +381,9 @@ async def run_pipeline(
     mode: str = Form("codex_local"),
     profile: str = Form(""),
     project_id: str = Form(""),
+    pipeline_profile: str = Form(DEFAULT_PIPELINE_PROFILE),
 ):
-    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id, pipeline_profile=pipeline_profile)
 
 
 @app.post("/pipeline/v2/run")
@@ -387,8 +395,9 @@ async def run_pipeline_v2(
     mode: str = Form("codex_local"),
     profile: str = Form(""),
     project_id: str = Form(""),
+    pipeline_profile: str = Form(DEFAULT_PIPELINE_PROFILE),
 ):
-    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id)
+    return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, profile=profile, project_id=project_id, pipeline_profile=pipeline_profile)
 
 
 @app.get("/pipeline/v2/jobs/latest")

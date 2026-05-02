@@ -158,11 +158,27 @@ def test_snapshot_hash_changes_with_inputs_and_manifest_round_trip(tmp_path):
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest_hash(loaded) == manifest["manifest_hash"]
+    assert manifest["pipeline_profile"] == "full_validation"
     assert manifest["run_scope"]["grade_band"] == "grade_6_7"
     assert "calibration_manifest" in manifest
     (subs / "s1.txt").write_text("essay changed", encoding="utf-8")
     changed = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
     assert changed != first
+
+
+def test_teacher_review_manifest_uses_fast_step_graph(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _seed_runtime(root)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    full = build_pipeline_manifest(root, "openai", rubric, outline, subs, _extra_paths(root), pipeline_profile="full_validation")
+    teacher = build_pipeline_manifest(root, "openai", rubric, outline, subs, _extra_paths(root), pipeline_profile="teacher_review")
+    teacher_ids = [step["id"] for step in teacher["step_graph"]["steps"]]
+    assert teacher["pipeline_profile"] == "teacher_review"
+    assert teacher_ids[-3:] == ["pairwise", "grade", "dashboard"]
+    assert "consistency" not in teacher_ids
+    assert "pairwise_escalation" not in teacher_ids
+    assert teacher["manifest_hash"] != full["manifest_hash"]
 
 
 def test_snapshot_hash_missing_paths_and_non_file_entries(tmp_path):

@@ -25,10 +25,13 @@ from scripts.runtime_profiles import apply_runtime_profile_to_routing, billing_p
 from server.bootstrap import ensure_bootstrap_calibration, ensure_class_metadata
 from server.runtime_context import identity_can_access, identity_token, launch_contract, strict_auth_enabled
 from server.step_runner import (
+    FULL_VALIDATION_PROFILE,
     anchor_resume_steps,
     artifact_watch_roots,
+    normalize_pipeline_profile,
     pipeline_step_graph_hash,
     pipeline_steps,
+    pipeline_steps_for_profile,
     run_step,
     workspace_asset_dirs,
 )
@@ -328,6 +331,13 @@ def _infer_root(rubric_path: Path, outline_path: Path, submissions_dir: Path, ex
     return Path(common)
 
 
+def _pipeline_steps_for_profile(profile: str | None) -> list[dict]:
+    normalized = normalize_pipeline_profile(profile or FULL_VALIDATION_PROFILE)
+    if normalized == FULL_VALIDATION_PROFILE:
+        return pipeline_steps()
+    return pipeline_steps_for_profile(normalized)
+
+
 def build_pipeline_manifest(
     root: Path,
     mode: str,
@@ -338,8 +348,10 @@ def build_pipeline_manifest(
     rubric_artifacts: dict | None = None,
     runtime_profile: dict | None = None,
     effective_routing: dict | None = None,
+    pipeline_profile: str = FULL_VALIDATION_PROFILE,
 ) -> dict:
     root = root.resolve()
+    normalized_pipeline_profile = normalize_pipeline_profile(pipeline_profile)
     extra_paths = extra_paths or []
     config_hashes, extra_hashes = _config_hashes(root, extra_paths)
     gate_hashes = {
@@ -355,7 +367,8 @@ def build_pipeline_manifest(
     for rel_path in RUNTIME_SOURCE_PATHS:
         runtime_source_hashes[rel_path] = _file_manifest(root / rel_path, rel_path)
     step_graph_steps = []
-    for step in pipeline_steps():
+    selected_steps = _pipeline_steps_for_profile(normalized_pipeline_profile)
+    for step in selected_steps:
         step_graph_steps.append(
             {
                 "id": step["id"],
@@ -378,6 +391,7 @@ def build_pipeline_manifest(
         "manifest_version": PIPELINE_MANIFEST_VERSION,
         "execution_engine": "pipeline_queue",
         "execution_mode": mode,
+        "pipeline_profile": normalized_pipeline_profile,
         "runtime_profile": profile_artifact(runtime_profile, routing_payload),
         "billing_policy": billing_policy(runtime_profile),
         "git": {
@@ -385,7 +399,7 @@ def build_pipeline_manifest(
             "dirty": _git_dirty(root),
         },
         "step_graph": {
-            "hash": pipeline_step_graph_hash(),
+            "hash": pipeline_step_graph_hash(normalized_pipeline_profile),
             "steps": step_graph_steps,
         },
         "uploaded_inputs": _collect_input_files(root, rubric_path, outline_path, submissions_dir),
@@ -428,6 +442,7 @@ def snapshot_hash(
     extra_paths: list[Path],
     root: Path | None = None,
     rubric_artifacts: dict | None = None,
+    pipeline_profile: str = FULL_VALIDATION_PROFILE,
 ) -> str:
     manifest = build_pipeline_manifest(
         root=(root or _infer_root(rubric_path, outline_path, submissions_dir, extra_paths)),
@@ -437,6 +452,7 @@ def snapshot_hash(
         submissions_dir=submissions_dir,
         extra_paths=extra_paths,
         rubric_artifacts=rubric_artifacts,
+        pipeline_profile=pipeline_profile,
     )
     return manifest["manifest_hash"]
 
@@ -1187,11 +1203,13 @@ class PipelineQueue:
         identity: dict | None = None,
         project_id: str = "",
         runtime_profile_name: str = "",
+        pipeline_profile: str = FULL_VALIDATION_PROFILE,
     ) -> dict:
         identity = dict(identity or {})
         tenant_id = str(identity.get("tenant_id", "") or "local-dev-tenant")
         teacher_id = str(identity.get("teacher_id", "") or "local-dev-teacher")
         runtime_profile, effective_routing = self._resolve_runtime_profile(runtime_profile_name)
+        normalized_pipeline_profile = normalize_pipeline_profile(pipeline_profile)
         if runtime_profile:
             mode = str(runtime_profile.get("mode") or mode)
         rubric_artifacts = self._build_rubric_artifacts(rubric_path, outline_path)
@@ -1205,6 +1223,7 @@ class PipelineQueue:
             rubric_artifacts=rubric_artifacts,
             runtime_profile=runtime_profile,
             effective_routing=effective_routing,
+            pipeline_profile=normalized_pipeline_profile,
         )
         snap = manifest["manifest_hash"]
         requires_confirmation = bool((rubric_artifacts.get("rubric_verification", {}) or {}).get("required_confirmation", False))
@@ -1224,6 +1243,7 @@ class PipelineQueue:
                     "snapshot_hash": snap,
                     "manifest_hash": snap,
                     "runtime_profile": profile_artifact(runtime_profile, effective_routing),
+                    "pipeline_profile": normalized_pipeline_profile,
                     "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
                 }
         self._update_ops_state(lambda payload: payload.__setitem__("cache_misses", int(payload.get("cache_misses", 0) or 0) + 1))
@@ -1278,6 +1298,7 @@ class PipelineQueue:
             "snapshot_hash": snap,
             "manifest_hash": snap,
             "runtime_profile": profile_artifact(runtime_profile, effective_routing),
+            "pipeline_profile": normalized_pipeline_profile,
             "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
         }
 
@@ -1421,6 +1442,7 @@ class PipelineQueue:
         existing_verification = self._load_rubric_artifacts_from_root(workspace_dir).get("rubric_verification", {})
         existing_manifest = _load_json(self._manifest_path(job_dir))
         runtime_profile = (existing_manifest.get("runtime_profile", {}) or {}) if isinstance(existing_manifest.get("runtime_profile", {}), dict) else {}
+        pipeline_profile = normalize_pipeline_profile(existing_manifest.get("pipeline_profile") or FULL_VALIDATION_PROFILE)
         effective_routing = _load_json(workspace_dir / "config" / "llm_routing.json") if runtime_profile else None
         if action == "reject":
             self._append_event(job_dir, "rubric", "Teacher rejected rubric interpretation", level="error", event="failed")
@@ -1451,8 +1473,10 @@ class PipelineQueue:
             rubric_artifacts=rubric_artifacts,
             runtime_profile=runtime_profile,
             effective_routing=effective_routing,
+            pipeline_profile=pipeline_profile,
         )
         snap = manifest["manifest_hash"]
+        selected_steps = _pipeline_steps_for_profile(pipeline_profile)
         self._write_rubric_artifacts(job_dir, rubric_artifacts)
         self._write_rubric_artifacts(workspace_dir, rubric_artifacts)
         if runtime_profile and effective_routing:
@@ -1469,8 +1493,8 @@ class PipelineQueue:
                 job_id,
                 "completed",
                 artifact=artifact,
-                current=len(pipeline_steps()),
-                total=len(pipeline_steps()),
+                current=len(selected_steps),
+                total=len(selected_steps),
                 stage="completed",
                 message="Loaded cached artifact after rubric confirmation",
                 completed_at=now_iso(),
@@ -1871,7 +1895,8 @@ class PipelineQueue:
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         manifest = _load_json(self._manifest_path(job_dir))
         runtime_profile = (manifest.get("runtime_profile", {}) or {}) if isinstance(manifest.get("runtime_profile", {}), dict) else {}
-        steps = pipeline_steps()
+        pipeline_profile = normalize_pipeline_profile(manifest.get("pipeline_profile") or FULL_VALIDATION_PROFILE)
+        steps = _pipeline_steps_for_profile(pipeline_profile)
         self._update_job(
             job_id,
             "running",
@@ -1882,7 +1907,7 @@ class PipelineQueue:
             started_at=now_iso(),
             cache_status="miss",
         )
-        self.log(self.root, run_id, f"QUEUE START mode={mode} manifest={job['snapshot_hash']} workspace={workspace_dir}")
+        self.log(self.root, run_id, f"QUEUE START mode={mode} profile={pipeline_profile} manifest={job['snapshot_hash']} workspace={workspace_dir}")
         try:
             baseline = self._artifact_snapshot(workspace_dir)
             metadata = ensure_class_metadata(workspace_dir / "inputs")
@@ -1918,6 +1943,7 @@ class PipelineQueue:
             env["PIPELINE_MANIFEST_HASH"] = job["snapshot_hash"]
             env["PIPELINE_WORKSPACE"] = str(workspace_dir)
             env["PIPELINE_MANIFEST_PATH"] = str(workspace_dir / "pipeline_manifest.json")
+            env["PIPELINE_PROFILE"] = pipeline_profile
             pythonpath_parts = [str(workspace_dir), str(self.root)]
             existing_pythonpath = env.get("PYTHONPATH", "")
             if existing_pythonpath:

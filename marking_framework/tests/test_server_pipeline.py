@@ -8,10 +8,11 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name="", pipeline_profile=""):
         payload = {
             "mode": mode,
             "runtime_profile_name": runtime_profile_name,
+            "pipeline_profile": pipeline_profile,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(item.name for item in submissions_dir.glob("*") if item.is_file()),
@@ -54,6 +55,7 @@ def test_pipeline_run_and_v2_delegate_to_same_queue(monkeypatch):
     assert fake.calls[0] == fake.calls[1]
     assert fake.calls[0]["mode"] == "openai"
     assert fake.calls[0]["runtime_profile_name"] == ""
+    assert fake.calls[0]["pipeline_profile"] == "teacher_review"
     assert fake.calls[0]["subs"] == ["s1.txt", "s2.txt"]
     assert fake.calls[0]["project_id"] == ""
     assert any(path.endswith("config/accuracy_gate.json") for path in fake.calls[0]["extra"])
@@ -89,6 +91,16 @@ def test_pipeline_run_codex_validation(monkeypatch):
     ok = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
     assert ok.status_code == 200
     assert fake.calls[-1]["mode"] == "codex_local"
+
+
+def test_pipeline_run_accepts_full_validation_profile(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+    client = TestClient(app)
+    resp = client.post("/pipeline/run", data={"mode": "openai", "pipeline_profile": "full_validation"}, files=_files())
+    assert resp.status_code == 200
+    assert fake.calls[-1]["pipeline_profile"] == "full_validation"
 
 
 def test_runtime_profiles_endpoint():

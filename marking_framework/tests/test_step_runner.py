@@ -51,6 +51,20 @@ def test_pipeline_steps_structure():
     assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
 
 
+def test_teacher_review_profile_skips_deep_audit_and_publishes_dashboard():
+    ids = [item["id"] for item in step_runner.pipeline_steps_for_profile("teacher_review")]
+    assert ids == list(step_runner.TEACHER_REVIEW_STEP_IDS)
+    assert ids[-3:] == ["pairwise", "grade", "dashboard"]
+    assert "assess" in ids
+    assert "aggregate_1" in ids
+    assert "consistency" not in ids
+    assert "pairwise_escalation" not in ids
+    assert "committee_edge_resolver" not in ids
+    assert step_runner.normalize_pipeline_profile("fast") == "teacher_review"
+    assert step_runner.normalize_pipeline_profile("full") == "full_validation"
+    assert step_runner.pipeline_step_graph_hash("teacher_review") != step_runner.pipeline_step_graph_hash("full_validation")
+
+
 def test_committee_edge_resolver_live_env_appends_flag(monkeypatch):
     monkeypatch.setenv("COMMITTEE_EDGE_LIVE", "1")
     cmd = step_runner.pipeline_step_command("committee_edge_resolver")

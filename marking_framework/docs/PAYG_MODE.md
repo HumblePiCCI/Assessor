@@ -11,16 +11,17 @@ What This Repo Provides
 
 Suggested Deployment Pattern
 1) Frontend uploads rubric/outline/submissions.
-2) Backend creates a job workspace and runs:
+2) Backend creates a job workspace with `pipeline_profile=teacher_review` for the first teacher-facing result and runs:
    - `scripts/run_llm_assessors.py`
    - `scripts/aggregate_assessments.py`
-   - `scripts/verify_consistency.py`
-   - `scripts/global_rerank.py`
-   - `scripts/review_and_grade.py` (optional for interactive UI)
-   - `scripts/build_dashboard_data.py` (optional for teacher review)
+   - `scripts/generate_pairwise_review.py`
+   - `scripts/review_and_grade.py --non-interactive`
+   - `scripts/build_dashboard_data.py`
 3) Select `teacher_payg_openai` in the UI or pass `--profile teacher_payg_openai`.
-4) Compute cost via `scripts/usage_pricing.py`.
-5) Bill the user using your payment processor from `customer_total`.
+4) Run Pass 1 with bounded concurrency (`ASSESSOR_PARALLELISM` or `--parallelism`) so a class set is not processed one model call at a time.
+5) Compute cost via `scripts/usage_pricing.py`.
+6) Bill the user using your payment processor from `customer_total`.
+7) Use `pipeline_profile=full_validation` for post-run audit, benchmark validation, or research calibration; it should not block the initial teacher dashboard.
 
 Notes
 - `teacher_payg_openai` is configured for `10%` over raw API cost.
