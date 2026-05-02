@@ -580,6 +580,12 @@ def test_timeout_seconds_negative_env(monkeypatch):
     assert oc._timeout_seconds() == 180.0
 
 
+def test_codex_timeout_seconds_prefers_codex_env(monkeypatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "120")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "360")
+    assert oc._codex_timeout_seconds() == 360.0
+
+
 def test_codex_timeout_raises_runtime_error(tmp_path, monkeypatch):
     routing = {"mode": "codex_local"}
     route_path = tmp_path / "routing.json"
@@ -593,6 +599,34 @@ def test_codex_timeout_raises_runtime_error(tmp_path, monkeypatch):
     monkeypatch.setattr(oc.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError):
         oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+
+
+def test_codex_timeout_retries_then_success(tmp_path, monkeypatch):
+    routing = {"mode": "codex_local"}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    monkeypatch.setenv("LLM_MODE", "codex_local")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "5")
+    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc.time, "sleep", lambda _: None)
+    calls = {"count": 0, "timeouts": []}
+
+    def fake_run(cmd, cwd=None, input=None, capture_output=None, text=None, timeout=None):
+        calls["count"] += 1
+        calls["timeouts"].append(timeout)
+        if calls["count"] == 1:
+            raise oc.subprocess.TimeoutExpired(cmd="codex", timeout=timeout)
+        raw = "\n".join([
+            json.dumps({"role": "user", "content": [{"type": "input_text", "text": "hi"}], "type": "message"}),
+            json.dumps({"role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}),
+        ])
+        return type("Result", (), {"returncode": 0, "stdout": raw, "stderr": ""})()
+
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+    resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert oc.extract_text(resp) == "ok"
+    assert calls["count"] == 2
+    assert calls["timeouts"] == [5.0, 5.0]
 
 
 def test_codex_empty_output_raises_runtime_error(tmp_path, monkeypatch):

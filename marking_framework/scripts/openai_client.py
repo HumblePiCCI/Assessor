@@ -37,6 +37,18 @@ def _timeout_seconds() -> float:
     return value if value > 0 else 180.0
 
 
+def _codex_timeout_seconds() -> float:
+    # Codex OAuth runs through a local CLI process, which can be slower than
+    # direct API calls during long adjudication stages. Keep a separate default
+    # so one slow comparison does not fail an entire class-set run.
+    raw = (os.environ.get("CODEX_TIMEOUT_SECONDS") or os.environ.get("LLM_TIMEOUT_SECONDS") or "360").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 360.0
+    return value if value > 0 else 360.0
+
+
 def _retry_attempts() -> int:
     raw = os.environ.get("OPENAI_MAX_RETRIES", "5").strip()
     try:
@@ -351,7 +363,7 @@ def _run_codex_exec(cli_path: str, model: str, prompt: str) -> tuple[object, str
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=_timeout_seconds(),
+            timeout=_codex_timeout_seconds(),
         )
         output_text = ""
         if output_path.exists():
@@ -366,7 +378,7 @@ def _run_codex_exec(cli_path: str, model: str, prompt: str) -> tuple[object, str
 
 def _run_codex_legacy(cli_path: str, model: str, prompt: str) -> tuple[object, str]:
     cmd = [cli_path, "-q", "--model", model, "--approval-mode", "suggest", "--no-project-doc", prompt]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_timeout_seconds())
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_codex_timeout_seconds())
     return result, result.stdout or ""
 
 
@@ -400,7 +412,12 @@ def _codex_response(model: str, messages: list, routing: dict, text_format: dict
                 result, last_stdout = _run_codex_legacy(cli_path, model, prompt)
         except subprocess.TimeoutExpired as exc:
             _emit_pipeline_progress("Codex OAuth call timed out", model=model, interface=cli_interface, status="timeout", attempt=attempt_index + 1)
-            raise RuntimeError(f"Codex CLI timed out after {_timeout_seconds():.0f}s") from exc
+            last_error = RuntimeError(f"Codex CLI timed out after {_codex_timeout_seconds():.0f}s")
+            if attempt_index + 1 < max_attempts:
+                _emit_pipeline_progress("Codex OAuth timeout retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
+                time.sleep(_retry_backoff_seconds(attempt_index + 1))
+                continue
+            raise last_error from exc
         if result.returncode != 0:
             detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "").strip()
             _emit_pipeline_progress("Codex OAuth call failed", model=model, interface=cli_interface, status="failed", attempt=attempt_index + 1)
