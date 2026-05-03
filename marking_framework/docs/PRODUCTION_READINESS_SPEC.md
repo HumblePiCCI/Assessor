@@ -128,6 +128,19 @@ Important product constraint: Classroom grading APIs exist, but this product
 must not automatically publish grades during pilot or early production. Teacher
 approval remains the explicit final action.
 
+Additional Google constraints that must be treated as launch inputs:
+
+- Classroom push registrations expire and must be renewed before expiry.
+- Classroom notifications are change hints delivered through Pub/Sub, not a
+  durable complete event log; reconciliation is mandatory.
+- Notifications require the app to retain the teacher's OAuth grant.
+- OAuth scope selection can trigger sensitive/restricted app verification or
+  security review, so the scope matrix is a launch artifact.
+- Classroom distinguishes `draftGrade`, `assignedGrade`, and submission state;
+  `return` changes state and does not itself set grades.
+- Classroom Add-ons are generally available and should be treated as an
+  explicit product-path decision, even if they are out of scope for v1.
+
 ## Slice 1: Production State Model And Manifest Contract
 
 Status: not implemented.
@@ -865,23 +878,638 @@ Done criteria:
 - Product copy says "teacher review assistant" and does not imply autonomous
   grading authority.
 
+## Slice 16: District/Admin Production Path
+
+Status: not implemented.
+
+Goal: support district-level adoption instead of only individual teacher OAuth.
+
+Why this exists: school production usually requires tenant setup, vendor
+approval, domain policy, data processing review, co-teacher access, billing
+controls, and retention controls before individual teachers can use the app.
+
+Touched files/areas:
+
+- new `server/districts.py`
+- `server/runtime_context.py`
+- `server/projects.py`
+- `server/review_store.py`
+- `server/billing.py`
+- admin UI routes
+- docs: `LEGAL_NOTES.md`, `TEACHER_PILOT_RUNBOOK.md`,
+  `PRODUCTION_READINESS_SPEC.md`
+
+Implementation:
+
+- Add district tenant model:
+  - district id/name/domain
+  - allowed Google Workspace domains
+  - admin contacts
+  - DPA/vendor approval status
+  - COPPA/FERPA/school-official posture fields
+  - retention policy
+  - billing owner and cost caps
+  - allowed providers/models
+  - allowed product features such as grade passback
+- Add district admin roles:
+  - district admin
+  - school admin
+  - teacher
+  - co-teacher
+  - support/operator
+- Add admin allowlisting:
+  - permitted domains
+  - permitted courses
+  - permitted teachers
+  - disabled external providers by default
+- Add district-level retention/billing controls that override teacher-level
+  defaults.
+- Add audit records for admin actions.
+
+Done criteria:
+
+- Teacher sign-in can be blocked or allowed by district policy.
+- Co-teachers inherit access only when district/course policy permits it.
+- Billing caps can be enforced at district, school, teacher, and project level.
+- Retention policy can be applied and audited at district level.
+- Production launch validator fails when district policy is absent for a
+  district-managed deployment.
+
+## Slice 17: Classroom Attachment Reality Matrix
+
+Status: not implemented.
+
+Goal: make Classroom/Drive attachment handling explicit, testable, and scoped.
+
+Why this exists: "fetch attachment metadata/content" hides most real-world
+Classroom complexity. Production must know which attachment types are supported
+and exactly when Drive scopes are unavoidable.
+
+Touched files/areas:
+
+- new `server/attachments.py`
+- `server/classroom.py`
+- `scripts/extract_text.py`
+- OCR/image extraction dependencies
+- `server/data/` attachment artifacts
+- docs and tests for attachment support
+
+Implementation:
+
+- Add an attachment support matrix:
+  - Google Docs export to text/PDF
+  - uploaded Drive docs
+  - PDFs
+  - images/OCR
+  - RTF/TXT/DOCX
+  - Slides
+  - Forms/non-text submissions
+  - external links
+  - multiple attachments per submission
+  - copied assignments
+  - reclaimed/resubmitted work
+  - missing permission cases
+  - malware/file-size blocked files
+  - empty placeholder submissions
+- Add attachment state fields:
+  - `supported`
+  - `requires_drive_scope`
+  - `extractable_text`
+  - `needs_manual_review`
+  - `unsupported_reason`
+  - `file_hash`
+  - `export_mime_type`
+- Define Drive scope escalation policy:
+  - Classroom-only metadata first
+  - Drive read scope only when the teacher links an assignment whose
+    attachments cannot be accessed through Classroom metadata alone
+  - explicit consent copy before requesting broader scopes
+- Add extraction quarantine for file-size/malware/OCR failures.
+
+Done criteria:
+
+- Unsupported attachment types surface as teacher-visible blockers, not silent
+  zero-text submissions.
+- Drive scope use is justified by a recorded attachment need.
+- Tests cover at least Docs, DOCX, PDF, image, link-only, missing permission,
+  reclaimed submission, oversized file, and unsupported Forms/Slides cases.
+
+## Slice 18: Roster And Co-Teacher Sync
+
+Status: not implemented.
+
+Goal: keep roster identity, co-teacher access, and pseudonym maps correct as
+Classroom courses change.
+
+Why this exists: coursework events alone do not handle roster drift, access
+removal, renamed students, course ownership changes, or co-teacher lifecycle.
+
+Touched files/areas:
+
+- `server/classroom.py`
+- new `server/roster_sync.py`
+- `server/runtime_context.py`
+- `server/projects.py`
+- `server/review_store.py`
+- `server/data/` roster tables
+- UI access/roster status panel
+
+Implementation:
+
+- Sync:
+  - students added/dropped
+  - student name changes
+  - co-teachers added/removed
+  - course owner changes
+  - teacher removed from course
+  - archived courses
+- Maintain pseudonym map lifecycle:
+  - stable per district/course/project where needed
+  - reversible only by authorized teacher/admin where policy permits
+  - retained/deleted according to district policy
+- Enforce co-teacher access:
+  - course co-teacher may view linked project only when district policy allows
+  - review/finalization actions record actor identity
+- Reconcile roster periodically, not only through push events.
+
+Done criteria:
+
+- Removing teacher access disables new ingestion and review access.
+- Added students can be ingested without recreating the project.
+- Dropped students are retained or hidden according to policy and audit state.
+- Co-teacher actions are authorized and separately logged.
+
+## Slice 19: Google Integration Path Decision
+
+Status: not decided.
+
+Goal: explicitly choose the v1 Google product path and park alternative Google
+integration modes with rationale.
+
+Why this exists: Classroom API + OAuth linking is one path; Classroom Add-ons
+and Google Workspace Marketplace review are now material options. Ignoring
+them should be intentional, not accidental.
+
+Touched files/areas:
+
+- docs: new `docs/GOOGLE_INTEGRATION_DECISION.md`
+- `docs/PRODUCTION_READINESS_SPEC.md`
+- product UI copy
+- deployment/OAuth config
+
+Implementation:
+
+- Compare:
+  - standalone web app with Google OAuth and Classroom API
+  - Classroom Add-on
+  - Google Workspace Marketplace app
+  - Drive-folder-only workflow
+- Decide v1:
+  - recommended: standalone OAuth/Classroom API app for speed of iteration
+  - Classroom Add-on/Marketplace as later production-distribution slice unless
+    district procurement requires it earlier
+- Record implications:
+  - OAuth review burden
+  - install/admin approval flow
+  - UI entry points
+  - attachment access
+  - passback capabilities
+  - support burden
+
+Done criteria:
+
+- The chosen v1 path is documented with explicit non-goals.
+- Add-ons/Marketplace are either scoped into a dated later slice or declared
+  out of scope for v1.
+- OAuth consent, scopes, and procurement docs match the chosen path.
+
+## Slice 20: Grade Export And Passback Guardrails
+
+Status: not implemented.
+
+Goal: define and enforce exactly how grades can leave the product.
+
+Why this exists: the product must not automatically publish grades. Classroom
+distinguishes draft grades, assigned grades, and returned submissions; each
+action needs separate teacher consent and auditability.
+
+Touched files/areas:
+
+- `server/classroom.py`
+- new `server/grade_passback.py`
+- `server/projects.py`
+- `ui/app.js`
+- `scripts/review_and_grade.py`
+- `scripts/build_dashboard_data.py`
+- audit log tables
+
+Implementation:
+
+- Keep passback disabled by default in pilot.
+- Add explicit modes:
+  - export CSV only
+  - write Classroom `draftGrade`
+  - write Classroom `assignedGrade`
+  - return submission
+- Require separate teacher confirmation for each write/return action.
+- Never call `return` as a side effect of setting a grade.
+- Add preflight diff:
+  - current Classroom grade/state
+  - proposed draft/assigned grade
+  - affected students
+  - changed/unchanged rows
+- Add rollback story:
+  - previous grade snapshot
+  - compensating update where Classroom permits it
+  - audit note when state cannot be fully rolled back
+
+Done criteria:
+
+- No grade API write occurs without explicit teacher action.
+- Pilot mode cannot publish/return submissions.
+- Every passback action has an actor, timestamp, before/after, and Classroom
+  response id.
+- Tests prove draft grade, assigned grade, and return are separate actions.
+
+## Slice 21: Prompt-Injection And Sensitive-Content Safety
+
+Status: not implemented.
+
+Goal: treat student submissions as untrusted input and route sensitive content
+to teacher/operator policy rather than unfiltered model execution.
+
+Why this exists: essays can contain instructions to the model, private student
+data, abuse disclosures, self-harm content, hate/harassment, or other
+sensitive material.
+
+Touched files/areas:
+
+- `scripts/extract_text.py`
+- new `scripts/content_safety_scan.py`
+- `scripts/run_llm_assessors.py`
+- `scripts/build_dashboard_data.py`
+- `server/pipeline_queue.py`
+- `ui/app.js`
+- safety policy docs
+
+Implementation:
+
+- Add pre-model content scan:
+  - prompt-injection language
+  - attempts to override rubric/system instructions
+  - PII beyond expected schoolwork identifiers
+  - self-harm or abuse disclosures
+  - hate/harassment/violent threats
+  - sexual content involving minors
+  - doxxing or credential leakage
+- Add model prompt hardening:
+  - isolate submission text as quoted data
+  - instruct models to ignore student-authored meta-instructions
+  - never expose hidden prompts or system details in feedback
+- Add escalation outputs:
+  - `outputs/content_safety_report.json`
+  - per-student teacher-visible flags
+  - district/operator escalation hook when policy requires
+- Add policy:
+  - the product does not replace mandatory reporting obligations
+  - teacher/school policy controls response to sensitive disclosures
+
+Done criteria:
+
+- Prompt-injection text inside a submission cannot alter evaluator routing.
+- Sensitive-content flags are visible to the teacher before feedback export.
+- Tests cover malicious instructions, PII, self-harm/abuse disclosure,
+  hate/harassment, and benign false positives.
+
+## Slice 22: Fairness And Accommodation Evaluation
+
+Status: not implemented as a launch-blocking packet.
+
+Goal: evaluate differential performance across student contexts before
+production release.
+
+Why this exists: existing accuracy gates cover hard-pair/source-family
+regressions, but production must also test whether the system behaves fairly
+across ELL, IEP/accommodation, dialect/language variation, grade band, genre,
+topic familiarity, and polish-vs-insight failure modes.
+
+Touched files/areas:
+
+- `bench/`
+- `config/accuracy_gate.json`
+- `scripts/publish_gate.py`
+- new `scripts/fairness_eval.py`
+- `docs/reports/`
+- `inputs/class_metadata.json` schema docs
+
+Implementation:
+
+- Define metadata fields that can be used only with policy approval:
+  - ELL context
+  - accommodation context
+  - grade band
+  - genre
+  - dialect/language variation marker where appropriate and consented
+  - source/topic familiarity
+- Add benchmark packets:
+  - rough but insightful vs polished shallow
+  - ELL grammar surface vs meaning quality
+  - accommodation-aware incomplete/scaffold cases
+  - dialect/language variation cases
+  - genre-specific expectations for speech, letter, report, instructions,
+    literary analysis
+- Add differential metrics:
+  - override concentration
+  - rank displacement by group
+  - boundary false movement by group
+  - feedback tone/edit rate by group
+
+Done criteria:
+
+- Release candidate includes a fairness/accommodation packet.
+- Any launch-blocking differential regression has an owner and remediation.
+- Teacher-facing explanations do not expose sensitive metadata unnecessarily.
+
+## Slice 23: Audit Log And Security Threat Model
+
+Status: not implemented as a concrete control set.
+
+Goal: define and enforce security controls for OAuth, sessions, webhooks,
+artifacts, admin actions, and model/provider secrets.
+
+Why this exists: broad privacy/security language is insufficient for a school
+SaaS product that handles student work and OAuth grants.
+
+Touched files/areas:
+
+- `server/runtime_context.py`
+- `server/app.py`
+- `server/google_auth.py`
+- `server/pubsub_handler.py`
+- `server/projects.py`
+- artifact serving paths
+- deployment config
+- CI/dependency scanning config
+
+Implementation:
+
+- OAuth/session controls:
+  - state parameter
+  - PKCE
+  - secure cookies
+  - session expiry and refresh
+  - CSRF protection for state-changing routes
+- Pub/Sub/webhook controls:
+  - IAM verification
+  - signed push token or equivalent verification
+  - registration id validation
+  - replay protection
+  - dead-letter topic
+- App controls:
+  - rate limiting
+  - dependency scanning
+  - secret rotation procedure
+  - admin action audit log
+  - artifact access audit log
+  - support impersonation rules, if any
+- Threat model:
+  - unauthorized classroom access
+  - cross-tenant artifact access
+  - prompt injection
+  - stale audit promotion
+  - billing tampering
+  - provider key leakage
+  - webhook spoofing
+
+Done criteria:
+
+- Threat model is checked into docs and reviewed before launch.
+- Security tests cover CSRF, tenant isolation, webhook verification, and
+  artifact authorization.
+- Admin/support access is logged and visible in audit export.
+
+## Slice 24: Provider Data-Processing Contract
+
+Status: not implemented.
+
+Goal: make provider privacy posture part of runtime profile enablement.
+
+Why this exists: provider abstraction is not only model compatibility. Schools
+need to know retention, training, subprocessors, region, and logging behavior
+for each provider that receives student work.
+
+Touched files/areas:
+
+- `config/runtime_profiles.json`
+- `config/provider_data_processing.json`
+- `scripts/openai_client.py`
+- `scripts/run_llm_assessors.py`
+- `server/pipeline_queue.py`
+- docs and launch validator
+
+Implementation:
+
+- Add provider data-processing fields:
+  - training/no-training terms
+  - retention duration
+  - zero-retention availability
+  - subprocessors
+  - region/data residency
+  - request/response logging policy
+  - whether student names are stripped before model calls
+  - whether prompts/responses are retained locally
+- Add pseudonymization controls:
+  - substitute student display names with stable ids before model calls
+  - keep mapping local to authorized tenant/project
+  - avoid sending unnecessary class metadata
+- Block provider enablement unless data-processing fields are complete.
+
+Done criteria:
+
+- Runtime profile status reports provider privacy posture.
+- Launch validator blocks incomplete provider data-processing records.
+- Model calls can be audited for pseudonymization and minimized metadata.
+
+## Slice 25: Operational Support Surface
+
+Status: not implemented.
+
+Goal: give operators and teachers a supportable production service, not a black
+box queue.
+
+Why this exists: health checks are not enough. Production needs stuck-job
+inspection, alerting, retry budgets, dead-letter queues, outage modes, support
+exports, and RPO/RTO targets.
+
+Touched files/areas:
+
+- new admin/support UI
+- `server/pipeline_queue.py`
+- `server/classroom_events.py`
+- `server/billing.py`
+- logs/metrics config
+- support export tooling
+
+Implementation:
+
+- Teacher-facing status page:
+  - provider outage
+  - Classroom ingestion degraded
+  - billing unavailable
+  - delayed validation
+- Admin console:
+  - stuck jobs
+  - stale background audits
+  - DLQ events
+  - provider errors
+  - cost anomalies
+  - retry budget exhaustion
+- Add support export packet:
+  - job manifest
+  - event log
+  - redacted inputs/outputs
+  - provider request ids
+  - billing rows
+  - current human revision state
+- Define:
+  - retry budgets by work item
+  - alert thresholds
+  - provider outage mode
+  - RPO/RTO targets
+
+Done criteria:
+
+- Operator can diagnose a stuck job without shell access.
+- DLQ events can be replayed or dismissed with audit logs.
+- Provider outage degrades gracefully and explains status to teachers.
+- Support export redacts student-identifying data unless explicitly authorized.
+
+## Slice 26: Schema And Artifact Versioning
+
+Status: not implemented.
+
+Goal: version every durable schema and artifact consumed by long-running jobs,
+dashboards, review ledgers, and rollback/backfill tools.
+
+Why this exists: long-running background audits and retained dashboards will
+span code deploys. Without versioning, old artifacts can be misread or
+silently corrupted by newer code.
+
+Touched files/areas:
+
+- `server/pipeline_queue.py`
+- `server/review_store.py`
+- `scripts/build_dashboard_data.py`
+- `scripts/aggregate_assessments.py`
+- `outputs/dashboard_data.json`
+- review ledger artifacts
+- migration scripts
+
+Implementation:
+
+- Add schema versions to:
+  - pipeline manifest
+  - dashboard JSON
+  - review ledger
+  - human revisions
+  - submission units
+  - attachment records
+  - cost ledger
+  - provider data-processing records
+- Add compatibility checks:
+  - refuse to promote unknown future schema
+  - migrate known old schemas
+  - flag stale dashboard artifacts
+- Add rollback/backfill policy:
+  - what can be downgraded
+  - what must be regenerated
+  - what is immutable audit evidence
+
+Done criteria:
+
+- Dashboard loader validates `schema_version`.
+- Review ledger migrations are tested.
+- Long-running job promotion checks code/artifact compatibility before
+  publishing.
+- Backfill tool can report which retained projects require regeneration.
+
+## Slice 27: Accessibility And Procurement Readiness
+
+Status: not implemented.
+
+Goal: make the product acceptable for school procurement and accessible teacher
+use.
+
+Why this exists: schools commonly require accessibility conformance,
+procurement documentation, privacy terms, and support contacts before approval.
+
+Touched files/areas:
+
+- `ui/index.html`
+- `ui/app.js`
+- `ui/styles.css`
+- docs:
+  - privacy policy
+  - terms
+  - accessibility statement
+  - VPAT or VPAT-lite packet
+  - procurement/security questionnaire answers
+- browser/Playwright accessibility tests
+
+Implementation:
+
+- Meet WCAG 2.2 AA target:
+  - keyboard navigation
+  - focus order
+  - screen-reader labels
+  - color contrast
+  - error announcement
+  - non-hover-only controls
+  - reduced motion where appropriate
+- Add procurement documents:
+  - privacy policy
+  - terms of service
+  - DPA template
+  - subprocessors list
+  - accessibility statement
+  - support/security contact
+- Add UI links where appropriate.
+
+Done criteria:
+
+- Automated accessibility smoke tests pass.
+- Manual keyboard/screen-reader review is documented for core flows.
+- Procurement docs are complete enough for pilot districts.
+
 ## Recommended Slice Order
 
 1. Production state model and manifest contract.
 2. Human revision ledger and authority layer.
 3. Background full-validation promotion.
 4. Incremental submission analysis cache.
-5. Performance SLO harness for upload-based runs.
-6. Google sign-in and Classroom link.
-7. Classroom event ingestion and reconciliation.
-8. Incremental scheduler and priority queue.
-9. Classroom review UI.
-10. Billing ledger and cost controls.
-11. Privacy/security/compliance hardening.
-12. Provider abstraction and provider-specific gates.
-13. Continuous validation automation.
-14. Production deployment and recovery.
-15. Pilot-to-production launch validator and rollout packet.
+5. Schema and artifact versioning.
+6. Prompt-injection and sensitive-content safety.
+7. Performance SLO harness for upload-based runs.
+8. District/admin production path.
+9. Google integration path decision.
+10. Google sign-in and Classroom link.
+11. Classroom attachment reality matrix.
+12. Roster and co-teacher sync.
+13. Classroom event ingestion and reconciliation.
+14. Incremental scheduler and priority queue.
+15. Classroom review UI.
+16. Grade export and passback guardrails.
+17. Billing ledger and cost controls.
+18. Provider data-processing contract.
+19. Provider abstraction and provider-specific gates.
+20. Fairness and accommodation evaluation.
+21. Privacy/security/compliance hardening.
+22. Audit log and security threat model.
+23. Operational support surface.
+24. Accessibility and procurement readiness.
+25. Continuous validation automation.
+26. Production deployment and recovery.
+27. Pilot-to-production launch validator and rollout packet.
 
 The immediate next engineering slice should be Slice 1 plus the minimal part of
 Slice 2 needed to prevent stale background audit promotion. That gives the fast
@@ -897,10 +1525,22 @@ Do not call this production-ready until these are true:
   revisions.
 - Teacher pairwise and anchor input are protected human evidence.
 - Classroom-linked submission changes are idempotent and reconciled.
+- Attachment support matrix is explicit and unsupported work is teacher-visible.
+- Roster/co-teacher drift is reconciled and authorized.
+- Google Add-on/Marketplace path is intentionally decided for v1.
+- Grade passback is disabled by default and guarded by explicit teacher action.
+- Prompt-injection and sensitive-content scans run before model assessment.
+- Fairness/accommodation packet is launch-green.
 - Class-of-30 review-ready SLO is measured under 5 minutes on the production
   provider path.
 - PAYG billing blocks unpriced usage and separates internal Codex OAuth runs.
 - Tenant isolation is enforced in production mode.
+- District/admin policy can gate teacher access, retention, and billing.
+- Provider data-processing posture is complete for every enabled model profile.
+- Audit logs cover admin actions, artifact access, passback, and support access.
+- Schema/artifact version compatibility is enforced for long-running jobs and
+  retained dashboards.
+- Accessibility/procurement docs meet school approval expectations.
 - Data retention, deletion, and policy docs are launch-ready.
 - Release validation packets cover the known hard-pair/source-family failure
   modes.
