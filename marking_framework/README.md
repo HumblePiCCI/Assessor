@@ -70,6 +70,7 @@ Quick Start
    - `python3 scripts/payg_job.py --profile teacher_payg_openai --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
    - Minimal API server: `python3 -m uvicorn server.app:app --reload`
    - Runtime provider/billing switch: `docs/RUNTIME_PROVIDER_SWITCH.md`
+   - Production readiness spec: `docs/PRODUCTION_READINESS_SPEC.md`
 
 Key Outputs
 - `outputs/ranked_list.md` (consensus order + confidence signals)
