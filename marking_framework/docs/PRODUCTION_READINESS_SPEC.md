@@ -2,7 +2,7 @@
 
 Status: execution spec for the path from controlled teacher pilot to production service.
 
-Last updated: 2026-05-02
+Last updated: 2026-05-03
 
 Branch context: `codex/runtime-provider-switch`
 
@@ -116,6 +116,13 @@ renewed. See:
 - https://developers.google.com/workspace/classroom/reference/rest
 - https://developers.google.com/workspace/classroom/guides/classroom-api/manage-grades
 - https://developers.google.com/workspace/guides/configure-oauth-consent
+- https://developers.google.com/workspace/classroom/rubrics/limitations
+- https://developers.google.com/workspace/classroom/guides/key-concepts/user-eligibility
+- https://developers.google.com/workspace/classroom/guides/key-concepts/admin-actions
+- https://developers.google.com/workspace/classroom/sis-integrations/validate-your-SIS
+- https://developers.google.com/workspace/classroom/troubleshooting/error-structure
+- https://help.openai.com/en/articles/8313397-how-can-chatgpt-be-used-for-assessment-and-feedback
+- https://openai.com/policies/usage-policies/
 
 Relevant Classroom resources:
 
@@ -140,6 +147,19 @@ Additional Google constraints that must be treated as launch inputs:
   `return` changes state and does not itself set grades.
 - Classroom Add-ons are generally available and should be treated as an
   explicit product-path decision, even if they are out of scope for v1.
+- Rubric API support is not equivalent to gradebook control: rubric grades are
+  read-only through the API, rubrics are tied to one `CourseWork`, and rubric
+  create/update/delete paths require capability and license checks.
+- Third-party app access for under-18 Google Workspace for Education users is
+  an administrator action in the Admin console and cannot be configured
+  programmatically by this developer app.
+- OneRoster/SIS integration is a separate partner path with conformance tests;
+  Classroom/CSV export should not be described as SIS-gradebook integration.
+- Classroom errors carry structured failure details and must be translated into
+  typed retry/remedy behavior instead of generic failed jobs.
+- Assessment and feedback workflows must keep humans in the loop for
+  educational decisions; product UX must force teacher review before final
+  grade/export/passback actions.
 
 ## Slice 1: Production State Model And Manifest Contract
 
@@ -1481,6 +1501,622 @@ Done criteria:
 - Manual keyboard/screen-reader review is documented for core flows.
 - Procurement docs are complete enough for pilot districts.
 
+## Slice 28: Classroom Rubric And Gradebook Semantics
+
+Status: not implemented.
+
+Goal: define how the product treats Classroom rubrics and gradebook state
+without overclaiming API control.
+
+Why this exists: Classroom rubric support has hard platform boundaries. Rubric
+grades are readable but not writable through the API, rubrics belong to one
+`CourseWork`, rubric management can depend on the Google Cloud project that
+created the coursework, and create/update/delete operations require user and
+course-owner eligibility checks.
+
+Touched files/areas:
+
+- new `server/rubrics.py`
+- `server/classroom.py`
+- `server/projects.py`
+- `server/review_store.py`
+- `scripts/extract_text.py`
+- `scripts/review_and_grade.py`
+- `scripts/build_dashboard_data.py`
+- `ui/app.js`
+- `outputs/evidence_packet.json`
+- docs: rubric source matrix and teacher workflow copy
+
+Implementation:
+
+- Add rubric source matrix:
+  - imported Classroom rubric
+  - uploaded rubric file
+  - teacher-edited rubric
+  - app-generated draft rubric
+  - assignment instructions without formal rubric
+- Snapshot rubric state:
+  - source
+  - criterion ids/titles/descriptions
+  - level ids/titles/descriptions/points
+  - scored vs unscored
+  - total points
+  - source `CourseWork` id where applicable
+  - rubric version hash
+  - teacher edits and effective rubric hash
+- Add Classroom rubric constraints:
+  - rubric grades can be read but not written
+  - app cannot promise to enforce rubric usage in Classroom
+  - app cannot assume it can manage rubrics for teacher-created coursework
+  - rubric creation/update/delete requires `checkUserCapability`
+  - Education Plus/license failures are first-class capability failures
+- Add gradebook mapping:
+  - app rubric evidence
+  - Classroom `draftGrade`
+  - Classroom `assignedGrade`
+  - Classroom rubric-grade readback, if present
+  - CSV/export grade columns
+
+Done criteria:
+
+- Every finalized run records the effective rubric source and version hash.
+- Teacher-facing copy clearly distinguishes app rubric evidence from Classroom
+  gradebook writes.
+- Capability/license failures produce actionable UI, not generic pipeline
+  errors.
+- Tests cover imported Classroom rubric, uploaded rubric, teacher-edited
+  rubric, app-generated rubric, no-rubric assignment, read-only rubric grades,
+  and unavailable rubric capability.
+
+## Slice 29: Admin And Under-18 App Approval Preflight
+
+Status: not implemented.
+
+Goal: determine whether a teacher/domain/student population can actually use
+the app before a pilot or Classroom sync begins.
+
+Why this exists: district approval is not only a contract artifact. Google
+Workspace for Education administrators must configure third-party app access
+for under-18 users in the Admin console, and the developer app cannot do that
+programmatically.
+
+Touched files/areas:
+
+- `server/google_auth.py`
+- `server/districts.py`
+- `server/classroom.py`
+- `server/projects.py`
+- `ui/app.js`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
+- docs: admin preflight checklist
+
+Implementation:
+
+- Add admin/domain preflight:
+  - teacher domain
+  - known district tenant
+  - OAuth consent status
+  - requested scopes
+  - under-18 app access status, teacher-confirmed or admin-confirmed
+  - required admin actions
+  - student-facing feature availability
+- Add capability preflight:
+  - Classroom API enabled
+  - app authorized for teacher
+  - retained teacher grant present
+  - add-on/rubric capability checks where relevant
+  - course owner/course status compatible with intended action
+- Add UX:
+  - block Classroom-linked run when under-18 approval is unknown and student
+    access is required
+  - allow upload-only pilot path when district policy permits
+  - produce admin checklist packet for approval
+
+Done criteria:
+
+- A teacher can see whether the blocker is OAuth, admin app approval, license,
+  Classroom API disabled, or district policy.
+- The product never implies it can programmatically approve itself for
+  under-18 Workspace users.
+- Launch validator fails Classroom pilot setup when admin preflight is
+  incomplete.
+
+## Slice 30: SIS And OneRoster Boundary
+
+Status: not decided.
+
+Goal: explicitly decide whether v1 stops at Classroom/CSV or includes SIS and
+OneRoster partnership work.
+
+Why this exists: Classroom is often not the district gradebook of record.
+Google treats OneRoster as a separate SIS partner path with conformance tests,
+so a Classroom export is not automatically a SIS integration.
+
+Touched files/areas:
+
+- docs: new `docs/SIS_ONEROSTER_DECISION.md`
+- `docs/PRODUCTION_READINESS_SPEC.md`
+- `server/grade_passback.py`
+- export tooling
+- procurement docs
+
+Implementation:
+
+- Compare v1 options:
+  - Classroom and CSV only
+  - district-specific CSV export templates
+  - SIS file export without official OneRoster partnership
+  - formal OneRoster/SIS partner path
+- Record recommendation:
+  - v1 should stop at Classroom/CSV unless a pilot district requires a
+    specific SIS export
+  - OneRoster partnership planning is a later production-distribution slice
+    with conformance tests, partner approval, and support burden
+- Add copy guardrails:
+  - do not call Classroom passback "SIS sync"
+  - do not imply gradebook-of-record integration without district validation
+
+Done criteria:
+
+- Product docs state whether v1 includes SIS integration.
+- Any SIS export has district-specific owner, mapping, and signoff.
+- OneRoster work has separate acceptance criteria and is not bundled into
+  generic Classroom readiness.
+
+## Slice 31: Classroom API Error Taxonomy
+
+Status: not implemented.
+
+Goal: translate Classroom and Drive failures into typed retry/remedy behavior
+for teachers and operators.
+
+Why this exists: generic "pipeline failed" errors are not supportable in school
+production. Teachers need to know whether the remedy is admin action, scope
+reauthorization, license upgrade, file permission change, retry later, or
+manual upload.
+
+Touched files/areas:
+
+- new `server/classroom_errors.py`
+- `server/classroom.py`
+- `server/classroom_events.py`
+- `server/pubsub_handler.py`
+- `server/pipeline_queue.py`
+- `server/support_export.py`
+- `ui/app.js`
+- tests for Classroom/Drive error mapping
+
+Implementation:
+
+- Add typed error kinds:
+  - `ClassroomApiDisabled`
+  - `MissingOrExpiredGrant`
+  - `AdminAppBlocked`
+  - `Under18AppAccessBlocked`
+  - `AttachmentNotVisible`
+  - `ProjectPermissionDenied`
+  - `ResourceExhausted`
+  - `RateLimited`
+  - `LicenseOrCapabilityUnavailable`
+  - `ArchivedCourse`
+  - `NonmodifiableCourseWork`
+  - `RubricUnavailable`
+  - `DriveScopeRequired`
+  - `FileTooLarge`
+  - `MalwareOrSafetyBlocked`
+- Map each error to:
+  - teacher-facing message
+  - operator details
+  - retry policy
+  - admin remedy
+  - fallback workflow
+  - support export fields
+- Preserve raw provider error details in support logs without exposing secrets
+  or unnecessary student data.
+
+Done criteria:
+
+- Known Classroom errors are not surfaced as undifferentiated run failures.
+- Teacher UI shows a specific next action for each recoverable class.
+- Retryable quota/network failures do not consume teacher attention until the
+  retry budget is exhausted.
+- Tests cover the named taxonomy and unknown-error fallback behavior.
+
+## Slice 32: Assessment Evidence Packet
+
+Status: not implemented.
+
+Goal: generate a defensibility artifact for every finalized result.
+
+Why this exists: security audit logs answer who accessed or changed data. They
+do not by themselves prove why the final assessment order, grade, feedback, or
+export was defensible at the time the teacher finalized it.
+
+Touched files/areas:
+
+- new `scripts/build_evidence_packet.py`
+- `scripts/build_dashboard_data.py`
+- `scripts/publish_gate.py`
+- `server/review_store.py`
+- `server/projects.py`
+- `server/pipeline_queue.py`
+- `server/grade_passback.py`
+- `outputs/evidence_packet.json`
+- `outputs/evidence_packet.zip`
+- dashboard export UI
+
+Implementation:
+
+- Capture:
+  - assignment snapshot
+  - source/rubric version hash
+  - submission ids and text hashes
+  - attachment extraction status
+  - runtime profile
+  - provider/model/effective model id
+  - pricing and billing profile
+  - model prompt/schema version
+  - human revisions and `human_revision_id`
+  - teacher anchors/pairwise corrections/flags
+  - protected committee and human edges
+  - withheld/suppressed edges
+  - promotion blockers and resolution
+  - final teacher action
+  - export/passback action
+  - generated feedback quality gate result
+- Produce redacted and full variants:
+  - teacher/local full packet
+  - support-safe redacted packet
+  - district audit packet according to policy
+
+Done criteria:
+
+- Every finalized project has an evidence packet linked from the dashboard.
+- Evidence packet can be regenerated or verified from retained artifacts.
+- Packet schema is versioned and migration-tested.
+- Tests prove missing evidence blocks finalization in production mode.
+
+## Slice 33: Feedback Quality Gate
+
+Status: not implemented.
+
+Goal: gate generated feedback separately from ranking and grade accuracy.
+
+Why this exists: a correct order can still produce unsafe, ungrounded, harsh,
+or unhelpful feedback. Teacher pilots need feedback that is grounded in the
+student work and does not leak hidden model rationale.
+
+Touched files/areas:
+
+- `scripts/review_and_grade.py`
+- `scripts/build_dashboard_data.py`
+- new `scripts/feedback_quality_gate.py`
+- `config/accuracy_gate.json`
+- `bench/feedback_quality/`
+- `ui/app.js`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
+
+Implementation:
+
+- Add feedback checks:
+  - quote/evidence grounding
+  - no fabricated details
+  - age-appropriate tone
+  - no harsh or demotivating phrasing
+  - accommodation-aware wording
+  - no hidden chain-of-thought or system-prompt leakage
+  - no sensitive content disclosure beyond policy
+  - actionable next step tied to the rubric
+- Add teacher UI status:
+  - passed
+  - needs teacher review
+  - blocked from export
+- Add benchmark packets:
+  - short/rough but insightful response
+  - polished but shallow response
+  - sensitive disclosure
+  - ELL/accommodation context
+  - prompt-injection attempt
+  - missing/unsupported attachment
+
+Done criteria:
+
+- Feedback export is blocked when the quality gate fails in production mode.
+- Tests catch fabricated feedback and hidden-rationale leakage.
+- Teacher can edit/approve feedback without losing evidence packet traceability.
+
+## Slice 34: Teacher Onboarding And Automation-Bias Controls
+
+Status: not implemented.
+
+Goal: make teacher authority a product behavior, not only a policy sentence.
+
+Why this exists: education assessment decisions require human review. The UI
+must prevent automation bias by requiring calibration, review attestations, and
+explicit teacher action before finalization or passback.
+
+Touched files/areas:
+
+- `ui/app.js`
+- `ui/index.html`
+- `server/projects.py`
+- `server/review_store.py`
+- `server/grade_passback.py`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
+- onboarding/training docs
+
+Implementation:
+
+- Add onboarding:
+  - model-as-aide explanation
+  - assessment authority checklist
+  - sample calibration exercise
+  - limitations and known failure modes
+- Add workflow gates:
+  - rubric confirmation before run
+  - cohort calibration checkpoint
+  - low-confidence cohort warning
+  - "I reviewed this" attestation before finalization
+  - separate attestation before export/passback
+- Add anti-bias nudges:
+  - require review of boundary cases
+  - show uncertainty and withheld items
+  - avoid defaulting teacher into one-click mass acceptance
+
+Done criteria:
+
+- Production finalization requires teacher attestation.
+- Passback/export requires a second explicit teacher action.
+- Training docs state that the model is an aide and the teacher remains the
+  assessor of record.
+- Tests cover blocked finalization when calibration or attestation is missing.
+
+## Slice 35: Model Lifecycle And Alias Drift
+
+Status: not implemented.
+
+Goal: prevent provider alias, pricing, or structured-output changes from
+silently changing teacher-facing behavior.
+
+Why this exists: provider profiles can name a model alias today, but aliases
+can move, deprecate, change price, or change structured-output behavior. Any
+such drift should force recertification before teacher release.
+
+Touched files/areas:
+
+- `config/runtime_profiles.json`
+- new `config/model_lifecycle.json`
+- `config/provider_data_processing.json`
+- `scripts/openai_client.py`
+- `scripts/run_llm_assessors.py`
+- `scripts/publish_gate.py`
+- `server/runtime_context.py`
+- `server/billing.py`
+- CI/nightly validation
+
+Implementation:
+
+- Record model lifecycle fields:
+  - configured model id
+  - effective provider model id
+  - provider-side revision where available
+  - certified date
+  - certified benchmark packet
+  - price schedule hash
+  - structured-output/schema behavior hash
+  - deprecation status
+  - allowed runtime profiles
+- Add drift checks:
+  - alias resolves differently
+  - model deprecated
+  - price changed
+  - max context/output limits changed
+  - structured output no longer validates
+  - provider safety/data-processing posture changed
+- Gate teacher release:
+  - internal testing may use uncertified models
+  - teacher-facing profiles require current certification
+
+Done criteria:
+
+- Runtime profile status reports model certification state.
+- Launch validator blocks teacher-facing use of uncertified alias drift.
+- Evidence packet records the effective model id used for the run.
+- Tests simulate alias and price drift.
+
+## Slice 36: Untrusted External Text Boundary
+
+Status: not implemented.
+
+Goal: treat all text imported from outside the trusted codebase as untrusted
+before it enters prompts, logs, feedback, or dashboards.
+
+Why this exists: prompt injection and sensitive data are not limited to student
+essays. Rubrics, assignment descriptions, Classroom comments, Drive metadata,
+teacher-uploaded files, copied assignment text, and attachment filenames can
+also contain malicious instructions or sensitive content.
+
+Touched files/areas:
+
+- `scripts/extract_text.py`
+- `scripts/content_safety_scan.py`
+- `scripts/run_llm_assessors.py`
+- `scripts/build_dashboard_data.py`
+- `server/classroom.py`
+- `server/attachments.py`
+- `server/projects.py`
+- `ui/app.js`
+
+Implementation:
+
+- Define external text classes:
+  - student submission body
+  - rubric text
+  - assignment title/description
+  - teacher comments
+  - Classroom attachment metadata
+  - Drive filenames and descriptions
+  - OCR output
+  - uploaded rubric or assignment files
+  - imported exemplar/anchor text
+- Apply:
+  - content safety scan
+  - prompt-injection scan
+  - PII/minimization pass
+  - prompt quoting/escaping
+  - display sanitization
+  - evidence packet hash recording
+- Keep trusted internal prompts, schemas, and code-generated instructions
+  separate from external text in every model call.
+
+Done criteria:
+
+- No external text enters a model prompt without source classification and
+  scan status.
+- Tests cover malicious rubric text, assignment description injection,
+  malicious filename/metadata, and benign external text.
+- Feedback never exposes hidden prompts because of external text injection.
+
+## Slice 37: Co-Teacher Conflict Semantics
+
+Status: not implemented.
+
+Goal: define how simultaneous teacher and co-teacher edits merge, lock, or
+conflict.
+
+Why this exists: authorization alone does not make collaborative review safe.
+Two teachers can edit anchors, flags, curve changes, feedback, or finalization
+state at the same time.
+
+Touched files/areas:
+
+- `server/review_store.py`
+- `server/projects.py`
+- `server/runtime_context.py`
+- `ui/app.js`
+- review ledger schema
+- websocket/event stream if added
+
+Implementation:
+
+- Add edit semantics:
+  - optimistic concurrency token per review object
+  - short locks for destructive/final actions
+  - mergeable comments/notes
+  - conflict resolution for anchors, flags, curve changes, feedback edits, and
+    finalization
+  - actor identity on every revision
+- Add UI:
+  - show active editor where available
+  - stale edit warning
+  - conflict diff
+  - finalization lock
+- Protect finalization:
+  - no passback/export while unresolved review conflicts exist
+  - final teacher action records actor and latest revision id
+
+Done criteria:
+
+- Concurrent edits cannot silently overwrite teacher evidence.
+- Conflicts block finalization until resolved.
+- Tests cover two-teacher edit, stale update rejection, and finalization lock.
+
+## Slice 38: Background-Audit Billing Consent
+
+Status: not implemented.
+
+Goal: make child-job, restart, and revision-triggered background audit spend
+explicit under PAYG.
+
+Why this exists: `full_validation` may continue after the review-ready result,
+rerun after teacher edits, or retry after provider errors. That spend can be
+real money even when it happens in the background.
+
+Touched files/areas:
+
+- `server/billing.py`
+- `server/pipeline_queue.py`
+- `server/runtime_context.py`
+- `server/projects.py`
+- `ui/app.js`
+- `docs/PAYG_MODE.md`
+- cost ledger schema
+
+Implementation:
+
+- Add billing consent fields:
+  - initial review-ready run cap
+  - background full-validation cap
+  - child-job cap
+  - retry budget cap
+  - revision-triggered rerun cap
+  - district override cap
+  - hard stop vs ask-to-continue mode
+- Add UI:
+  - estimated initial cost
+  - estimated background validation cost
+  - spend so far
+  - remaining authorized budget
+  - paused-for-consent state
+- Add ledger rows for:
+  - parent job
+  - child job
+  - retry
+  - resumed run
+  - teacher-triggered rerun
+  - background audit promotion attempt
+
+Done criteria:
+
+- Background work cannot exceed teacher/district budget consent.
+- Teacher sees when a job is paused for additional billing approval.
+- Tests prove child jobs and retries are charged, capped, and auditable.
+
+## Slice 39: Jurisdiction Matrix
+
+Status: not implemented.
+
+Goal: define launch jurisdictions and the policy controls required for each.
+
+Why this exists: "school approval" is too generic for production. FERPA/COPPA
+posture in the United States, Ontario/Canada privacy expectations, and EU/UK
+data protection obligations produce different consent, retention, residency,
+and contracting requirements.
+
+Touched files/areas:
+
+- docs: new `docs/JURISDICTION_MATRIX.md`
+- `docs/LEGAL_NOTES.md`
+- `docs/TEACHER_PILOT_RUNBOOK.md`
+- `server/districts.py`
+- `server/runtime_context.py`
+- retention/deletion tooling
+- provider data-processing config
+
+Implementation:
+
+- Define v1 launch jurisdiction:
+  - United States baseline: FERPA, COPPA, PPRA, state student privacy laws
+  - Canada/Ontario path if relevant to pilot districts
+  - EU/UK explicitly out of scope until GDPR/UK GDPR/DPA packet is complete,
+    unless a pilot requires it earlier
+- Map each jurisdiction to:
+  - required agreement documents
+  - consent posture
+  - subprocessors
+  - data residency/transfer posture
+  - retention/deletion policy
+  - student/parent access or deletion workflow
+  - provider eligibility
+- Add launch validator jurisdiction mode.
+
+Done criteria:
+
+- Pilot packet states which jurisdiction it is valid for.
+- Launch validator blocks production mode without a jurisdiction profile.
+- Provider and retention settings are compatible with the selected
+  jurisdiction.
+
 ## Recommended Slice Order
 
 1. Production state model and manifest contract.
@@ -1488,33 +2124,50 @@ Done criteria:
 3. Background full-validation promotion.
 4. Incremental submission analysis cache.
 5. Schema and artifact versioning.
-6. Prompt-injection and sensitive-content safety.
-7. Performance SLO harness for upload-based runs.
-8. District/admin production path.
-9. Google integration path decision.
-10. Google sign-in and Classroom link.
-11. Classroom attachment reality matrix.
-12. Roster and co-teacher sync.
-13. Classroom event ingestion and reconciliation.
-14. Incremental scheduler and priority queue.
-15. Classroom review UI.
-16. Grade export and passback guardrails.
-17. Billing ledger and cost controls.
-18. Provider data-processing contract.
-19. Provider abstraction and provider-specific gates.
-20. Fairness and accommodation evaluation.
-21. Privacy/security/compliance hardening.
-22. Audit log and security threat model.
-23. Operational support surface.
-24. Accessibility and procurement readiness.
-25. Continuous validation automation.
-26. Production deployment and recovery.
-27. Pilot-to-production launch validator and rollout packet.
+6. Model lifecycle and alias drift.
+7. Untrusted external text boundary.
+8. Prompt-injection and sensitive-content safety.
+9. Feedback quality gate.
+10. Assessment evidence packet.
+11. Teacher onboarding and automation-bias controls.
+12. Performance SLO harness for upload-based runs.
+13. District/admin production path.
+14. Admin and under-18 app approval preflight.
+15. Google integration path decision.
+16. Google sign-in and Classroom link.
+17. Classroom attachment reality matrix.
+18. Classroom rubric and gradebook semantics.
+19. Roster and co-teacher sync.
+20. Classroom event ingestion and reconciliation.
+21. Incremental scheduler and priority queue.
+22. Classroom review UI.
+23. Co-teacher conflict semantics.
+24. Grade export and passback guardrails.
+25. SIS and OneRoster boundary.
+26. Billing ledger and cost controls.
+27. Background-audit billing consent.
+28. Provider data-processing contract.
+29. Provider abstraction and provider-specific gates.
+30. Fairness and accommodation evaluation.
+31. Privacy/security/compliance hardening.
+32. Jurisdiction matrix.
+33. Audit log and security threat model.
+34. Classroom API error taxonomy.
+35. Operational support surface.
+36. Accessibility and procurement readiness.
+37. Continuous validation automation.
+38. Production deployment and recovery.
+39. Pilot-to-production launch validator and rollout packet.
 
 The immediate next engineering slice should be Slice 1 plus the minimal part of
 Slice 2 needed to prevent stale background audit promotion. That gives the fast
 teacher-review path a safe finalization story before Classroom integration
 adds more event sources.
+
+Before a teacher-facing pilot expands beyond trusted internal operators, the
+highest-risk second-order gates are the Classroom rubric/gradebook semantics,
+admin/under-18 approval preflight, assessment evidence packet, feedback quality
+gate, and model lifecycle/alias drift certification.
 
 ## Production Blockers
 
@@ -1527,15 +2180,29 @@ Do not call this production-ready until these are true:
 - Classroom-linked submission changes are idempotent and reconciled.
 - Attachment support matrix is explicit and unsupported work is teacher-visible.
 - Roster/co-teacher drift is reconciled and authorized.
+- Classroom rubric and gradebook semantics are explicit and capability-checked.
+- Admin/under-18 app approval preflight is complete for the pilot domain.
 - Google Add-on/Marketplace path is intentionally decided for v1.
+- SIS/OneRoster boundary is explicitly decided and not overclaimed.
 - Grade passback is disabled by default and guarded by explicit teacher action.
-- Prompt-injection and sensitive-content scans run before model assessment.
+- Classroom API errors have typed teacher remedies and retry behavior.
+- Assessment evidence packet exists for every finalized result.
+- Feedback quality gate passes before export or passback.
+- Teacher onboarding and review attestations are enforced in product flow.
+- Model alias, pricing, structured-output, and provider-policy drift force
+  recertification before teacher release.
+- Prompt-injection and sensitive-content scans run before model assessment on
+  all external text, not only student submissions.
 - Fairness/accommodation packet is launch-green.
+- Co-teacher conflict semantics protect simultaneous edits and finalization.
 - Class-of-30 review-ready SLO is measured under 5 minutes on the production
   provider path.
 - PAYG billing blocks unpriced usage and separates internal Codex OAuth runs.
+- Background audit, retry, child-job, and revision-triggered rerun spend is
+  separately capped and consented.
 - Tenant isolation is enforced in production mode.
 - District/admin policy can gate teacher access, retention, and billing.
+- Jurisdiction profile is selected and policy-compatible for each launch.
 - Provider data-processing posture is complete for every enabled model profile.
 - Audit logs cover admin actions, artifact access, passback, and support access.
 - Schema/artifact version compatibility is enforced for long-running jobs and
