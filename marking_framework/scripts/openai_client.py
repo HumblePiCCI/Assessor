@@ -4,14 +4,28 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 
+CODEX_APP_CLI_PATH = Path("/Applications/Codex.app/Contents/Resources/codex")
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS "
+
+
 def load_routing(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _emit_pipeline_progress(message: str, **fields):
+    payload = {"message": str(message)}
+    for key, value in fields.items():
+        if value is not None:
+            payload[str(key)] = str(value)
+    print(f"{PIPELINE_PROGRESS_PREFIX}{json.dumps(payload, ensure_ascii=True, sort_keys=True)}", file=sys.stderr, flush=True)
 
 def _timeout_seconds() -> float:
     # Conservative default: avoid hanging the UI/pipeline indefinitely.
@@ -21,6 +35,18 @@ def _timeout_seconds() -> float:
     except ValueError:
         return 180.0
     return value if value > 0 else 180.0
+
+
+def _codex_timeout_seconds() -> float:
+    # Codex OAuth runs through a local CLI process, which can be slower than
+    # direct API calls during long adjudication stages. Keep a separate default
+    # so one slow comparison does not fail an entire class-set run.
+    raw = (os.environ.get("CODEX_TIMEOUT_SECONDS") or os.environ.get("LLM_TIMEOUT_SECONDS") or "360").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 360.0
+    return value if value > 0 else 360.0
 
 
 def _retry_attempts() -> int:
@@ -270,29 +296,133 @@ def _codex_output_text(raw: str) -> str:
     raise ValueError("Codex output missing assistant response.")
 
 
-def _codex_response(model: str, messages: list, text_format: dict | None = None) -> dict:
-    if not shutil.which("codex"):
-        raise RuntimeError("Codex CLI not found. Install codex or switch to OpenAI API mode.")
+def _resolve_codex_cli_path(routing: dict) -> str:
+    configured = str(routing.get("codex_cli_path") or os.environ.get("CODEX_CLI_PATH") or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return str(path)
+        raise RuntimeError(f"Configured Codex CLI not found: {path}")
+    found = shutil.which("codex")
+    if found:
+        return found
+    if CODEX_APP_CLI_PATH.exists():
+        return str(CODEX_APP_CLI_PATH)
+    raise RuntimeError("Codex CLI not found. Install Codex.app/codex or switch to OpenAI API mode.")
+
+
+def _codex_cli_interface(routing: dict, cli_path: str) -> str:
+    configured = str(routing.get("codex_cli_interface") or os.environ.get("CODEX_CLI_INTERFACE") or "").strip().lower()
+    if configured:
+        if configured not in {"exec", "legacy"}:
+            raise RuntimeError(f"Unsupported Codex CLI interface: {configured}")
+        return configured
+    try:
+        if Path(cli_path).expanduser().resolve() == CODEX_APP_CLI_PATH.resolve():
+            return "exec"
+    except OSError:
+        pass
+    return "legacy"
+
+
+def _codex_cache_payload(cli_path: str, cli_interface: str, model: str, prompt: str, text_format: dict | None) -> dict:
+    return {
+        "mode": "codex_local",
+        "cli_path": cli_path,
+        "cli_interface": cli_interface,
+        "model": model,
+        "prompt": prompt,
+        "text_format": text_format,
+    }
+
+
+def _run_codex_exec(cli_path: str, model: str, prompt: str) -> tuple[object, str]:
+    handle = tempfile.NamedTemporaryFile(prefix="codex-last-message-", suffix=".txt", delete=False)
+    output_path = Path(handle.name)
+    handle.close()
+    cmd = [
+        cli_path,
+        "exec",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--color",
+        "never",
+        "--output-last-message",
+        str(output_path),
+        "--model",
+        model,
+        "-",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=_codex_timeout_seconds(),
+        )
+        output_text = ""
+        if output_path.exists():
+            output_text = output_path.read_text(encoding="utf-8", errors="replace").strip()
+        return result, output_text or (result.stdout or "")
+    finally:
+        try:
+            output_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _run_codex_legacy(cli_path: str, model: str, prompt: str) -> tuple[object, str]:
+    cmd = [cli_path, "-q", "--model", model, "--approval-mode", "suggest", "--no-project-doc", prompt]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_codex_timeout_seconds())
+    return result, result.stdout or ""
+
+
+def _codex_response(model: str, messages: list, routing: dict, text_format: dict | None = None) -> dict:
+    cli_path = _resolve_codex_cli_path(routing)
+    cli_interface = _codex_cli_interface(routing, cli_path)
     normalized_format = _normalized_text_format(text_format)
     prompt = _build_codex_prompt(messages, normalized_format)
     cache_key = None
     if _cache_enabled():
-        cache_key = _cache_key({"mode": "codex_local", "model": model, "prompt": prompt, "text_format": normalized_format})
+        cache_key = _cache_key(_codex_cache_payload(cli_path, cli_interface, model, prompt, normalized_format))
         cached = _cache_get(cache_key)
         if cached is not None:
+            _emit_pipeline_progress("Reused cached Codex OAuth response", model=model, interface=cli_interface, status="cache_hit")
             return cached
-    cmd = ["codex", "-q", "--model", model, "--approval-mode", "suggest", "--no-project-doc", prompt]
     last_error = None
     last_stdout = ""
     max_attempts = 3 if text_format else 2
-    for _ in range(max_attempts):
+    for attempt_index in range(max_attempts):
+        _emit_pipeline_progress(
+            "Codex OAuth call started",
+            model=model,
+            interface=cli_interface,
+            status="started",
+            attempt=attempt_index + 1,
+        )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=_timeout_seconds())
+            if cli_interface == "exec":
+                result, last_stdout = _run_codex_exec(cli_path, model, prompt)
+            else:
+                result, last_stdout = _run_codex_legacy(cli_path, model, prompt)
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"Codex CLI timed out after {_timeout_seconds():.0f}s") from exc
+            _emit_pipeline_progress("Codex OAuth call timed out", model=model, interface=cli_interface, status="timeout", attempt=attempt_index + 1)
+            last_error = RuntimeError(f"Codex CLI timed out after {_codex_timeout_seconds():.0f}s")
+            if attempt_index + 1 < max_attempts:
+                _emit_pipeline_progress("Codex OAuth timeout retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
+                time.sleep(_retry_backoff_seconds(attempt_index + 1))
+                continue
+            raise last_error from exc
         if result.returncode != 0:
-            raise RuntimeError(f"Codex CLI failed: {result.stderr.strip() or 'unknown error'}")
-        last_stdout = result.stdout or ""
+            detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "").strip()
+            _emit_pipeline_progress("Codex OAuth call failed", model=model, interface=cli_interface, status="failed", attempt=attempt_index + 1)
+            raise RuntimeError(f"Codex CLI failed ({cli_interface} at {cli_path}): {detail or 'unknown error'}")
+        _emit_pipeline_progress("Codex OAuth response received", model=model, interface=cli_interface, status="received", attempt=attempt_index + 1)
         structured_text = _coerce_structured_text(last_stdout, normalized_format)
         if structured_text:
             text = structured_text
@@ -308,16 +438,16 @@ def _codex_response(model: str, messages: list, text_format: dict | None = None)
                 if text:
                     break
                 last_error = ValueError("Codex structured output invalid.")
+                _emit_pipeline_progress("Codex OAuth structured output retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
                 prompt = _build_codex_prompt(messages, normalized_format, extracted)
-                cmd[-1] = prompt
                 continue
             last_error = ValueError("Codex output empty.")
             text = None
         except ValueError as exc:
             last_error = exc
             if normalized_format:
+                _emit_pipeline_progress("Codex OAuth structured output retrying", model=model, interface=cli_interface, status="retrying", attempt=attempt_index + 1)
                 prompt = _build_codex_prompt(messages, normalized_format, last_stdout)
-                cmd[-1] = prompt
             text = None
     if text is None:
         # Fall back to raw output so the caller can decide how to recover (e.g., repair prompt).
@@ -331,6 +461,37 @@ def _codex_response(model: str, messages: list, text_format: dict | None = None)
     return resp
 
 
+def _provider_config(routing: dict, provider: str) -> dict:
+    config = routing.get(provider, {})
+    return config if isinstance(config, dict) else {}
+
+
+def _provider_api_key(routing: dict, provider: str) -> tuple[str, str]:
+    config = _provider_config(routing, provider)
+    api_key_env = (
+        routing.get("api_key_env")
+        or config.get("api_key_env")
+        or ("OPENAI_API_KEY" if provider == "openai" else f"{provider.upper()}_API_KEY")
+    )
+    api_key = os.environ.get(str(api_key_env))
+    if not api_key:
+        raise RuntimeError(f"{api_key_env} is not set")
+    return str(api_key_env), api_key
+
+
+def _provider_url(routing: dict, provider: str) -> str:
+    config = _provider_config(routing, provider)
+    base_url_env = routing.get("base_url_env") or config.get("base_url_env")
+    base_url = os.environ.get(str(base_url_env)) if base_url_env else ""
+    base_url = base_url or routing.get("base_url") or config.get("base_url")
+    if not base_url:
+        base_url = "https://api.openai.com/v1" if provider == "openai" else ""
+    if not base_url:
+        raise RuntimeError(f"Base URL is not configured for provider {provider}")
+    endpoint = routing.get("responses_endpoint") or config.get("responses_endpoint") or "/responses"
+    return str(base_url).rstrip("/") + str(endpoint)
+
+
 def _openai_response(
     model: str,
     messages: list,
@@ -340,12 +501,9 @@ def _openai_response(
     text_format: dict | None = None,
     max_output_tokens: int | None = None,
 ) -> dict:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-    base_url = routing.get("openai", {}).get("base_url", "https://api.openai.com/v1")
-    endpoint = routing.get("openai", {}).get("responses_endpoint", "/responses")
-    url = base_url.rstrip("/") + endpoint
+    provider = str(routing.get("provider") or ("openai" if routing.get("mode") == "openai" else "openai_compatible"))
+    api_key_env, api_key = _provider_api_key(routing, provider)
+    url = _provider_url(routing, provider)
     normalized_format = _normalized_text_format(text_format)
     payload = {
         "model": model,
@@ -361,7 +519,10 @@ def _openai_response(
             payload["text"]["verbosity"] = "low"
     cache_key = None
     if _cache_enabled():
-        cache_key = _cache_key({"mode": "openai", "url": url, "payload": payload})
+        cache_payload = {"mode": routing.get("mode", "openai"), "url": url, "payload": payload}
+        if provider != "openai" or api_key_env != "OPENAI_API_KEY":
+            cache_payload.update({"provider": provider, "api_key_env": api_key_env})
+        cache_key = _cache_key(cache_payload)
         cached = _cache_get(cache_key)
         if cached is not None:
             return cached
@@ -383,7 +544,9 @@ def responses_create(
     routing = load_routing(Path(routing_path))
     mode = os.environ.get("LLM_MODE") or routing.get("mode", "openai")
     if mode == "codex_local":
-        return _codex_response(model, messages, text_format=text_format)
+        return _codex_response(model, messages, routing, text_format=text_format)
+    if mode not in {"openai", "openai_compatible"}:
+        raise RuntimeError(f"Unsupported LLM mode: {mode}")
     return _openai_response(
         model,
         messages,

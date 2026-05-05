@@ -265,7 +265,7 @@ def test_responses_create_uses_cache_codex(tmp_path, monkeypatch):
     monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
 
     prompt = oc._messages_to_prompt([{"role": "user", "content": "hi"}])
-    key = oc._cache_key({"mode": "codex_local", "model": "gpt-5.2", "prompt": prompt, "text_format": None})
+    key = oc._cache_key(oc._codex_cache_payload("/usr/bin/codex", "legacy", "gpt-5.2", prompt, None))
     cache_path = Path(os.environ["LLM_CACHE_DIR"]) / f"{key}.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps({"output": [{"type": "output_text", "text": "cached"}], "usage": {}}), encoding="utf-8")
@@ -346,9 +346,39 @@ def test_responses_create_writes_cache_codex(tmp_path, monkeypatch):
     resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
     assert oc.extract_text(resp) == "ok"
     prompt = oc._messages_to_prompt([{"role": "user", "content": "hi"}])
-    key = oc._cache_key({"mode": "codex_local", "model": "gpt-5.2", "prompt": prompt, "text_format": None})
+    key = oc._cache_key(oc._codex_cache_payload("/usr/bin/codex", "legacy", "gpt-5.2", prompt, None))
     cache_path = Path(os.environ["LLM_CACHE_DIR"]) / f"{key}.json"
     assert cache_path.exists()
+
+
+def test_responses_create_codex_exec_uses_output_last_message(tmp_path, monkeypatch, capsys):
+    cli = tmp_path / "codex"
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    routing = {"mode": "codex_local", "codex_cli_path": str(cli), "codex_cli_interface": "exec"}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    monkeypatch.setenv("LLM_CACHE", "0")
+    captured = {}
+
+    def fake_run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        captured["cmd"] = cmd
+        captured["input"] = input
+        output_path = Path(cmd[cmd.index("--output-last-message") + 1])
+        output_path.write_text("ok from exec", encoding="utf-8")
+        return type("Result", (), {"returncode": 0, "stdout": "noisy session output", "stderr": ""})()
+
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+    resp = oc.responses_create("gpt-5.4-mini", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert oc.extract_text(resp) == "ok from exec"
+    assert captured["cmd"][:2] == [str(cli), "exec"]
+    assert captured["cmd"][-1] == "-"
+    assert "--output-last-message" in captured["cmd"]
+    assert "USER: hi" in captured["input"]
+    progress = capsys.readouterr().err
+    assert "PIPELINE_PROGRESS" in progress
+    assert "Codex OAuth call started" in progress
+    assert "USER: hi" not in progress
+
 
 def test_responses_create_codex_success(tmp_path, monkeypatch):
     routing = {"mode": "openai", "openai": {"base_url": "https://api.openai.com/v1", "responses_endpoint": "/responses"}}
@@ -372,7 +402,7 @@ def test_responses_create_codex_success(tmp_path, monkeypatch):
     resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
     assert oc.extract_text(resp) == "ok"
     assert oc.extract_usage(resp) == {}
-    assert captured["cmd"][0] == "codex"
+    assert captured["cmd"][0] == "/usr/bin/codex"
 
 
 def test_codex_output_text_parses_json_lines():
@@ -418,6 +448,7 @@ def test_responses_create_codex_missing(monkeypatch, tmp_path):
     route_path = tmp_path / "routing.json"
     route_path.write_text(json.dumps(routing), encoding="utf-8")
     monkeypatch.setattr(oc.shutil, "which", lambda _: None)
+    monkeypatch.setattr(oc, "CODEX_APP_CLI_PATH", tmp_path / "missing-codex")
     with pytest.raises(RuntimeError):
         oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
 
@@ -479,6 +510,35 @@ def test_extract_text_nested():
     assert oc.extract_text(resp) == "nested"
 
 
+def test_responses_create_openai_compatible_uses_provider_env_and_base_url(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "compatible-key")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://adapter.example/v1")
+    routing = {
+        "mode": "openai_compatible",
+        "provider": "openai_compatible",
+        "api_key_env": "OPENAI_COMPATIBLE_API_KEY",
+        "base_url_env": "OPENAI_COMPATIBLE_BASE_URL",
+        "responses_endpoint": "/responses",
+    }
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["auth"] = req.headers.get("Authorization")
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        return DummyResponse({"output": [{"type": "output_text", "text": "adapter ok"}], "usage": {"input_tokens": 1}})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    resp = oc.responses_create("provider-model", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert captured["url"] == "https://adapter.example/v1/responses"
+    assert captured["auth"] == "Bearer compatible-key"
+    assert captured["payload"]["model"] == "provider-model"
+    assert oc.extract_text(resp) == "adapter ok"
+
+
 def test_extract_text_non_list_content():
     resp = {"output": [{"type": "output_text", "text": "hi", "content": "oops"}]}
     assert oc.extract_text(resp) == "hi"
@@ -520,6 +580,12 @@ def test_timeout_seconds_negative_env(monkeypatch):
     assert oc._timeout_seconds() == 180.0
 
 
+def test_codex_timeout_seconds_prefers_codex_env(monkeypatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "120")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "360")
+    assert oc._codex_timeout_seconds() == 360.0
+
+
 def test_codex_timeout_raises_runtime_error(tmp_path, monkeypatch):
     routing = {"mode": "codex_local"}
     route_path = tmp_path / "routing.json"
@@ -533,6 +599,34 @@ def test_codex_timeout_raises_runtime_error(tmp_path, monkeypatch):
     monkeypatch.setattr(oc.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError):
         oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+
+
+def test_codex_timeout_retries_then_success(tmp_path, monkeypatch):
+    routing = {"mode": "codex_local"}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    monkeypatch.setenv("LLM_MODE", "codex_local")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "5")
+    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc.time, "sleep", lambda _: None)
+    calls = {"count": 0, "timeouts": []}
+
+    def fake_run(cmd, cwd=None, input=None, capture_output=None, text=None, timeout=None):
+        calls["count"] += 1
+        calls["timeouts"].append(timeout)
+        if calls["count"] == 1:
+            raise oc.subprocess.TimeoutExpired(cmd="codex", timeout=timeout)
+        raw = "\n".join([
+            json.dumps({"role": "user", "content": [{"type": "input_text", "text": "hi"}], "type": "message"}),
+            json.dumps({"role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}),
+        ])
+        return type("Result", (), {"returncode": 0, "stdout": raw, "stderr": ""})()
+
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+    resp = oc.responses_create("gpt-5.2", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert oc.extract_text(resp) == "ok"
+    assert calls["count"] == 2
+    assert calls["timeouts"] == [5.0, 5.0]
 
 
 def test_codex_empty_output_raises_runtime_error(tmp_path, monkeypatch):

@@ -49,6 +49,30 @@ def _seed_runtime(root: Path):
     _write_json(root / "config" / "calibration_set.json", {"samples": []})
     _write_json(root / "config" / "cost_limits.json", {"hard_cap": 1.0})
     _write_json(root / "config" / "pricing.json", {"models": {}})
+    _write_json(
+        root / "config" / "runtime_profiles.json",
+        {
+            "default_profile": "internal_codex",
+            "profiles": {
+                "internal_codex": {
+                    "enabled": True,
+                    "mode": "codex_local",
+                    "provider": "openai-codex",
+                    "codex_cli_path": "/tmp/codex-app-cli",
+                    "codex_cli_interface": "exec",
+                    "billing": {"billable": False, "customer_markup_percent": 0.0},
+                    "routing_overrides": {"tasks": {"pairwise_reviewer": {"model": "gpt-5.5"}}},
+                },
+                "teacher_payg_openai": {
+                    "enabled": True,
+                    "mode": "openai",
+                    "provider": "openai",
+                    "billing": {"billable": True, "customer_markup_percent": 10.0},
+                    "routing_overrides": {},
+                },
+            },
+        },
+    )
     _write_json(root / "outputs" / "calibration_bias.json", {"bias": 0.0, "generated_at": "2026-01-01T00:00:00+00:00"})
 
 
@@ -134,11 +158,27 @@ def test_snapshot_hash_changes_with_inputs_and_manifest_round_trip(tmp_path):
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest_hash(loaded) == manifest["manifest_hash"]
+    assert manifest["pipeline_profile"] == "full_validation"
     assert manifest["run_scope"]["grade_band"] == "grade_6_7"
     assert "calibration_manifest" in manifest
     (subs / "s1.txt").write_text("essay changed", encoding="utf-8")
     changed = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root)
     assert changed != first
+
+
+def test_teacher_review_manifest_uses_fast_step_graph(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _seed_runtime(root)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    full = build_pipeline_manifest(root, "openai", rubric, outline, subs, _extra_paths(root), pipeline_profile="full_validation")
+    teacher = build_pipeline_manifest(root, "openai", rubric, outline, subs, _extra_paths(root), pipeline_profile="teacher_review")
+    teacher_ids = [step["id"] for step in teacher["step_graph"]["steps"]]
+    assert teacher["pipeline_profile"] == "teacher_review"
+    assert teacher_ids[-3:] == ["pairwise", "grade", "dashboard"]
+    assert "consistency" not in teacher_ids
+    assert "pairwise_escalation" not in teacher_ids
+    assert teacher["manifest_hash"] != full["manifest_hash"]
 
 
 def test_snapshot_hash_missing_paths_and_non_file_entries(tmp_path):
@@ -238,6 +278,70 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert (artifact_dir / "outputs" / "dashboard_data.json").exists()
     data_json = queue.load_dashboard_data(result["job_id"])
     assert data_json["students"][0]["student_id"] == "s1"
+
+
+def test_submit_runtime_profile_applies_effective_routing_and_billing_env(tmp_path):
+    calls = {}
+
+    def run_ok(_cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        calls["env"] = env
+        calls["routing"] = json.loads((workspace / "config" / "llm_routing.json").read_text(encoding="utf-8"))
+        calls["profile"] = json.loads((workspace / "outputs" / "runtime_profile.json").read_text(encoding="utf-8"))
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+        (out / "consistency_adjusted.csv").write_text("student_id\ns1\n", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_ok)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    result = queue.submit("openai", rubric, outline, subs, _extra_paths(root), runtime_profile_name="internal_codex")
+    assert result["runtime_profile"]["name"] == "internal_codex"
+    queue._process_job(result["job_id"])
+    manifest = json.loads((Path(queue.get_job(result["job_id"])["workspace_dir"]) / "pipeline_manifest.json").read_text(encoding="utf-8"))
+    assert calls["env"]["LLM_MODE"] == "codex_local"
+    assert calls["env"]["LLM_RUNTIME_PROFILE"] == "internal_codex"
+    assert calls["env"]["BILLING_BILLABLE"] == "0"
+    assert calls["env"]["CODEX_CLI_PATH"] == "/tmp/codex-app-cli"
+    assert calls["env"]["CODEX_CLI_INTERFACE"] == "exec"
+    assert calls["routing"]["mode"] == "codex_local"
+    assert calls["routing"]["codex_cli_path"] == "/tmp/codex-app-cli"
+    assert calls["routing"]["codex_cli_interface"] == "exec"
+    assert calls["routing"]["tasks"]["pairwise_reviewer"]["model"] == "gpt-5.5"
+    assert calls["profile"]["billing"]["billable"] is False
+    assert manifest["runtime_profile"]["name"] == "internal_codex"
+    assert manifest["model_routing"]["task_models"]["pairwise_reviewer"] == "gpt-5.5"
+
+
+def test_internal_codex_profile_strips_openai_api_key_and_writes_auth_audit(tmp_path, monkeypatch):
+    calls = {}
+
+    def run_ok(_cmd, env=None, cwd=None, **kwargs):
+        workspace = Path(cwd)
+        calls["env"] = env
+        calls["audit"] = json.loads((workspace / "outputs" / "runtime_auth_audit.json").read_text(encoding="utf-8"))
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+        (out / "consistency_adjusted.csv").write_text("student_id\ns1\n", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "should-not-reach-job")
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_ok)
+    queue.get_api_key = lambda: "override-should-not-reach-job"
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    result = queue.submit("openai", rubric, outline, subs, _extra_paths(root), runtime_profile_name="internal_codex")
+    queue._process_job(result["job_id"])
+    assert calls["env"]["LLM_MODE"] == "codex_local"
+    assert "OPENAI_API_KEY" not in calls["env"]
+    assert calls["audit"]["auth_funding_source"] == "codex_oauth"
+    assert calls["audit"]["codex_cli_path"] == "/tmp/codex-app-cli"
+    assert calls["audit"]["codex_cli_interface"] == "exec"
+    assert calls["audit"]["openai_api_key_injected"] is False
+    assert calls["audit"]["openai_api_key_visible_to_job"] is False
 
 
 def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):
@@ -606,6 +710,61 @@ def test_get_events_returns_none_for_missing_job(tmp_path):
     assert queue.get_events("missing") is None
 
 
+def test_pipeline_progress_message_includes_counts():
+    message = pqmod._pipeline_progress_message(
+        'PIPELINE_PROGRESS {"message":"Pairwise consistency comparison complete","completed":"7","total":"236","status":"completed"}'
+    )
+    assert message == "Pairwise consistency comparison complete • 7/236"
+
+
+def test_latest_active_job_returns_newest_accessible_active_job(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    first = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    (subs / "s2.txt").write_text("essay two", encoding="utf-8")
+    second = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._update_job(first["job_id"], "failed", completed_at=pqmod.now_iso())
+    queue._update_job(second["job_id"], "running", stage="consistency", message="Collecting pairwise consistency evidence")
+
+    latest = queue.latest_active_job()
+    assert latest["id"] == second["job_id"]
+    assert latest["status"] == "running"
+    assert latest["progress_stage"] == "consistency"
+
+
+def test_startup_recovery_marks_abandoned_jobs_failed(tmp_path):
+    queue, root, data, _logs, _resets = _make_queue(tmp_path)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    job_id = submitted["job_id"]
+    queue._update_job(
+        job_id,
+        "running",
+        current=10,
+        total=22,
+        stage="consistency",
+        message="Collecting pairwise consistency evidence",
+    )
+
+    recovered = PipelineQueue(
+        root=root,
+        data_dir=data,
+        reset_workspace_fn=queue.reset_workspace,
+        run_fn=queue.run,
+        log_fn=queue.log,
+        api_key_fn=queue.get_api_key,
+    )
+
+    job = recovered.get_job(job_id)
+    assert job["status"] == "failed"
+    assert "interrupted while Collecting pairwise consistency evidence" in job["progress_message"]
+    assert "server stopped before this job finished" in job["error"]
+    events = recovered.get_events(job_id, after=-1, limit=50)["events"]
+    assert any(item.get("event") == "failed" and "server stopped before this job finished" in item.get("message", "") for item in events)
+
+
 def test_standardized_events_include_start_output_artifacts_and_complete(tmp_path, monkeypatch):
     steps = [{"id": "single", "label": "Single", "cmd": ["single"]}]
     monkeypatch.setattr(pqmod, "pipeline_steps", lambda: steps)
@@ -630,6 +789,29 @@ def test_standardized_events_include_start_output_artifacts_and_complete(tmp_pat
     assert "complete" in event_types
     artifact_events = [item for item in events if item.get("event") == "artifact"]
     assert any("outputs/step_output.txt" in item.get("artifacts", []) for item in artifact_events)
+
+
+def test_pipeline_progress_marker_becomes_heartbeat_event(tmp_path, monkeypatch):
+    steps = [{"id": "consistency", "label": "Collecting pairwise consistency evidence", "cmd": ["consistency"]}]
+    monkeypatch.setattr(pqmod, "pipeline_steps", lambda: steps)
+    marker = 'PIPELINE_PROGRESS {"message":"Codex OAuth call started","model":"gpt-5.4-mini","status":"started"}'
+
+    def run_fn(_cmd, env=None, cwd=None, **kwargs):
+        out = Path(cwd) / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "dashboard_data.json").write_text("{}", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr=f"{marker}\n")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_fn)
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    queue._start_worker = lambda: None
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    queue._process_job(submitted["job_id"])
+
+    events = queue.get_events(submitted["job_id"], after=-1, limit=100)["events"]
+    heartbeat_events = [item for item in events if item.get("event") == "heartbeat"]
+    assert any("Codex OAuth call started" in item.get("message", "") for item in heartbeat_events)
+    assert any("gpt-5.4-mini" in item.get("message", "") for item in heartbeat_events)
 
 
 def test_non_blocking_step_failure_continues(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,6 +106,15 @@ RESPONSE_FORMAT = {
 DEFAULT_BAND_SEAM_REPORT = "outputs/band_seam_report.json"
 DEFAULT_EXPANSION_REPORT = "outputs/post_seam_pair_expansion.json"
 DEFAULT_PAIRWISE_ANCHOR_DIR = Path(__file__).resolve().parents[1] / "inputs" / "pairwise_anchors"
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS "
+
+
+def emit_pipeline_progress(message: str, **fields):
+    payload = {"message": str(message)}
+    for key, value in fields.items():
+        if value is not None:
+            payload[str(key)] = str(value)
+    print(f"{PIPELINE_PROGRESS_PREFIX}{json.dumps(payload, ensure_ascii=True, sort_keys=True)}", file=sys.stderr, flush=True)
 DECISION_BASIS_VALUES = {
     "task_alignment",
     "content_reasoning",
@@ -1778,6 +1788,14 @@ def collect_judgments(
         uncertainty_challenger_count=uncertainty_challenger_count,
         uncertainty_anchor_count=uncertainty_anchor_count,
     )
+    total_judgments = len(pair_specs) * max(1, int(replicates))
+    completed_judgments = 0
+    emit_pipeline_progress(
+        "Pairwise consistency plan ready",
+        completed=completed_judgments,
+        total=total_judgments,
+        status="planned",
+    )
     for spec in pair_specs:
         higher = spec["higher"]
         lower = spec["lower"]
@@ -1785,6 +1803,13 @@ def collect_judgments(
             details = list(spec.get("selection_details", []))
             if replicates > 1:
                 details.append(f"Independent replicate {replicate_idx + 1} of {replicates}; re-read the essays from scratch.")
+            emit_pipeline_progress(
+                "Reading pairwise consistency comparison",
+                completed=completed_judgments,
+                total=total_judgments,
+                pair=f"{higher['student_id']}::{lower['student_id']}",
+                status="started",
+            )
             judgment = judge_pair_with_orientation_audit(
                 rubric,
                 outline,
@@ -1805,6 +1830,14 @@ def collect_judgments(
                 student_count=len(rows),
             )
             judgments.append(judgment)
+            completed_judgments += 1
+            emit_pipeline_progress(
+                "Pairwise consistency comparison complete",
+                completed=completed_judgments,
+                total=total_judgments,
+                pair=f"{higher['student_id']}::{lower['student_id']}",
+                status="completed",
+            )
     return judgments
 
 

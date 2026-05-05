@@ -79,8 +79,12 @@ Recommended cohort shape:
 
    ```bash
    export OPENAI_API_KEY=<key>
-   export APP_MODE=codex_local
    ```
+
+   In the UI runtime switch, use:
+
+   - `internal_codex` for internal operator testing through Codex OAuth
+   - `teacher_payg_openai` for teacher pilot PAYG runs
 
 3. Start a fresh server process.
 
@@ -96,6 +100,15 @@ Recommended cohort shape:
    - student submissions
 
 5. Run the full queue-backed pipeline.
+
+   For PAYG pilot runs, confirm the generated `outputs/usage_costs.json`
+   contains:
+
+   - `billable: true`
+   - `api_cost_total`
+   - `service_fee`
+   - `customer_total`
+   - empty `unpriced_models`
 
 6. If the job pauses for rubric confirmation:
 

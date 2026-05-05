@@ -35,6 +35,27 @@ FULL_PIPELINE_STEP_IDS = (
     "dashboard",
 )
 
+DEFAULT_PIPELINE_PROFILE = "teacher_review"
+FULL_VALIDATION_PROFILE = "full_validation"
+
+TEACHER_REVIEW_STEP_IDS = (
+    "rubric",
+    "scope_grounding",
+    "extract",
+    "conventions",
+    "assess",
+    "cost",
+    "aggregate_1",
+    "pairwise",
+    "grade",
+    "dashboard",
+)
+
+PIPELINE_PROFILE_STEP_IDS = {
+    DEFAULT_PIPELINE_PROFILE: TEACHER_REVIEW_STEP_IDS,
+    FULL_VALIDATION_PROFILE: FULL_PIPELINE_STEP_IDS,
+}
+
 ANCHOR_RESUME_STEP_IDS = (
     "aggregate_1",
     "boundary",
@@ -52,6 +73,25 @@ ANCHOR_RESUME_STEP_IDS = (
     "grade",
     "dashboard",
 )
+
+
+def normalize_pipeline_profile(profile: str | None) -> str:
+    token = str(profile or "").strip().lower().replace("-", "_")
+    aliases = {
+        "": DEFAULT_PIPELINE_PROFILE,
+        "default": DEFAULT_PIPELINE_PROFILE,
+        "teacher": DEFAULT_PIPELINE_PROFILE,
+        "teacher_fast": DEFAULT_PIPELINE_PROFILE,
+        "review": DEFAULT_PIPELINE_PROFILE,
+        "fast": DEFAULT_PIPELINE_PROFILE,
+        "full": FULL_VALIDATION_PROFILE,
+        "validation": FULL_VALIDATION_PROFILE,
+        "full_audit": FULL_VALIDATION_PROFILE,
+    }
+    normalized = aliases.get(token, token)
+    if normalized not in PIPELINE_PROFILE_STEP_IDS:
+        raise ValueError(f"Unknown pipeline profile: {profile}")
+    return normalized
 
 def pipeline_steps() -> list[dict]:
     return [
@@ -174,6 +214,11 @@ def pipeline_steps_by_ids(step_ids: list[str] | tuple[str, ...]) -> list[dict]:
     return [dict(step_map[step_id]) for step_id in step_ids if step_id in step_map]
 
 
+def pipeline_steps_for_profile(profile: str | None = None) -> list[dict]:
+    normalized = normalize_pipeline_profile(profile)
+    return pipeline_steps_by_ids(PIPELINE_PROFILE_STEP_IDS[normalized])
+
+
 def anchor_resume_steps() -> list[dict]:
     return pipeline_steps_by_ids(ANCHOR_RESUME_STEP_IDS)
 
@@ -187,9 +232,10 @@ def pipeline_step_command(step_id: str) -> list[str]:
     return cmd
 
 
-def pipeline_step_graph_hash() -> str:
+def pipeline_step_graph_hash(profile: str | None = FULL_VALIDATION_PROFILE) -> str:
+    normalized = normalize_pipeline_profile(profile)
     payload = []
-    for step in pipeline_steps():
+    for step in pipeline_steps_for_profile(normalized):
         payload.append(
             {
                 "id": step["id"],
@@ -198,7 +244,7 @@ def pipeline_step_graph_hash() -> str:
                 "required": bool(step.get("required", True)),
             }
         )
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    raw = json.dumps({"profile": normalized, "steps": payload}, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -212,6 +258,15 @@ def artifact_watch_roots() -> tuple[str, ...]:
 
 def _can_stream_subprocess(run_fn) -> bool:
     return getattr(run_fn, "__module__", "") == "subprocess" and getattr(run_fn, "__name__", "") == "run"
+
+
+def _heartbeat_seconds() -> float:
+    raw = os.environ.get("PIPELINE_STEP_HEARTBEAT_SECONDS", "60").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 60.0
+    return value if value > 0 else 60.0
 
 
 def _run_capture(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
@@ -230,6 +285,7 @@ def _run_capture(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tup
 def _run_stream(cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
     proc = subprocess.Popen(cmd, env=env, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     lines = queue.Queue()
+    heartbeat_seconds = _heartbeat_seconds()
 
     def pump(stream, source):
         for line in iter(stream.readline, ""):
@@ -244,7 +300,12 @@ def _run_stream(cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, s
     closed = 0
     out_lines, err_lines = [], []
     while closed < 2:
-        source, line = lines.get()
+        try:
+            source, line = lines.get(timeout=heartbeat_seconds)
+        except queue.Empty:
+            if proc.poll() is None:
+                on_output("heartbeat", "Still running")
+            continue
         if line is None:
             closed += 1
             continue

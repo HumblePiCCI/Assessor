@@ -67,8 +67,11 @@ Quick Start
    - For supervised classroom testing, use `docs/TEACHER_PILOT_RUNBOOK.md`; teacher pilot is not production launch and teachers retain final authority.
 
 10) Pay-as-you-go job runner (optional)
-   - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
+   - `python3 scripts/payg_job.py --profile teacher_payg_openai --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
    - Minimal API server: `python3 -m uvicorn server.app:app --reload`
+   - Runtime provider/billing switch: `docs/RUNTIME_PROVIDER_SWITCH.md`
+   - Production readiness spec: `docs/PRODUCTION_READINESS_SPEC.md`
+   - Product and Google Classroom hero path: `docs/GOOGLE_CLASSROOM_HERO_PATH.md`
 
 Key Outputs
 - `outputs/ranked_list.md` (consensus order + confidence signals)
@@ -109,5 +112,6 @@ Notes
 - Product-wide learning now uses anonymized finalized-only records, project-level opt-in or policy-compliant collection, governed export/ingestion packages, and adjudication-required promotion staging under `bench/promoted/` and `inputs/exemplars/promoted/`.
 - See `docs/LEGAL_NOTES.md` before production use.
 - LLM routing: `config/llm_routing.json`
+- Runtime profiles: `config/runtime_profiles.json`
 - Pricing config: `config/pricing.json`
 - Cost limits: `config/cost_limits.json`

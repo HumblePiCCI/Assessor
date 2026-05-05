@@ -16,9 +16,11 @@ class FakeQueue:
         self.confirmed = None
         self.anchor = None
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", runtime_profile_name="", pipeline_profile=""):
         self.submitted = {
             "mode": mode,
+            "runtime_profile_name": runtime_profile_name,
+            "pipeline_profile": pipeline_profile,
             "rubric": rubric_path.name,
             "outline": outline_path.name,
             "subs": sorted(p.name for p in submissions_dir.glob("*")),
@@ -32,6 +34,9 @@ class FakeQueue:
         if self.job and self.job.get("id") == job_id:
             return self.job
         return None
+
+    def latest_active_job(self, identity=None):
+        return self.job
 
     def load_dashboard_data(self, job_id, identity=None):
         if self.data and job_id == "j1":
@@ -85,7 +90,29 @@ def test_pipeline_v2_run_success_openai(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "j1"
     assert fake.submitted["mode"] == "openai"
+    assert fake.submitted["pipeline_profile"] == "teacher_review"
     assert fake.submitted["subs"] == ["s1.txt"]
+
+
+def test_pipeline_v2_run_success_runtime_profile(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
+    client = TestClient(app)
+    resp = client.post("/pipeline/v2/run", data={"mode": "openai", "profile": "internal_codex"}, files=_files())
+    assert resp.status_code == 200
+    assert fake.submitted["mode"] == "codex_local"
+    assert fake.submitted["runtime_profile_name"] == "internal_codex"
+
+
+def test_pipeline_v2_run_can_request_full_validation(monkeypatch):
+    fake = FakeQueue()
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+    client = TestClient(app)
+    resp = client.post("/pipeline/v2/run", data={"mode": "openai", "pipeline_profile": "full_validation"}, files=_files())
+    assert resp.status_code == 200
+    assert fake.submitted["pipeline_profile"] == "full_validation"
 
 
 def test_pipeline_v2_run_validation(monkeypatch):
@@ -136,6 +163,19 @@ def test_pipeline_v2_status_and_data(monkeypatch):
     assert no_data.status_code == 404
 
 
+def test_pipeline_v2_latest_active_job(monkeypatch):
+    fake = FakeQueue()
+    fake.job = {"id": "j1", "status": "running", "progress_stage": "consistency"}
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
+    client = TestClient(app)
+    latest = client.get("/pipeline/v2/jobs/latest")
+    assert latest.status_code == 200
+    assert latest.json()["id"] == "j1"
+    fake.job = None
+    missing = client.get("/pipeline/v2/jobs/latest")
+    assert missing.status_code == 404
+
+
 def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     fake = FakeQueue()
     fake.events = {"events": [{"index": 0, "message": "ok"}], "next_after": 0, "done": True, "status": "completed"}
@@ -148,6 +188,10 @@ def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     assert missing.status_code == 404
     asset = client.get("/progress_stream.js")
     assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "no-store"
+    assert "Run timed out" not in asset.text
+    assert "while (true)" in asset.text
+    assert "awaiting_anchor_scores" in asset.text
 
 
 def test_pipeline_v2_rubric_endpoints(monkeypatch):

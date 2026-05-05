@@ -51,6 +51,20 @@ def test_pipeline_steps_structure():
     assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
 
 
+def test_teacher_review_profile_skips_deep_audit_and_publishes_dashboard():
+    ids = [item["id"] for item in step_runner.pipeline_steps_for_profile("teacher_review")]
+    assert ids == list(step_runner.TEACHER_REVIEW_STEP_IDS)
+    assert ids[-3:] == ["pairwise", "grade", "dashboard"]
+    assert "assess" in ids
+    assert "aggregate_1" in ids
+    assert "consistency" not in ids
+    assert "pairwise_escalation" not in ids
+    assert "committee_edge_resolver" not in ids
+    assert step_runner.normalize_pipeline_profile("fast") == "teacher_review"
+    assert step_runner.normalize_pipeline_profile("full") == "full_validation"
+    assert step_runner.pipeline_step_graph_hash("teacher_review") != step_runner.pipeline_step_graph_hash("full_validation")
+
+
 def test_committee_edge_resolver_live_env_appends_flag(monkeypatch):
     monkeypatch.setenv("COMMITTEE_EDGE_LIVE", "1")
     cmd = step_runner.pipeline_step_command("committee_edge_resolver")
@@ -115,6 +129,22 @@ def test_run_stream_skips_blank_lines(tmp_path):
     assert stderr == ""
     assert stdout.strip() == "ok"
     assert seen == [("stdout", "ok")]
+
+
+def test_run_stream_emits_heartbeat_for_quiet_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPELINE_STEP_HEARTBEAT_SECONDS", "0.05")
+    cmd = ["python3", "-c", "import time; time.sleep(0.12); print('done')"]
+    seen = []
+    code, stdout, stderr = step_runner._run_stream(
+        cmd,
+        os.environ.copy(),
+        tmp_path,
+        lambda source, text: seen.append((source, text)),
+    )
+    assert code == 0
+    assert "done" in stdout
+    assert stderr == ""
+    assert ("heartbeat", "Still running") in seen
 
 
 def test_run_step_routes_by_runner_type(tmp_path):

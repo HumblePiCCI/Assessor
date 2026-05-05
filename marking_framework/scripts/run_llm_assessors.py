@@ -4,6 +4,8 @@ import json
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -51,6 +53,40 @@ def reset_assessor_outputs(path: Path):
             file.unlink()
 def write_text_atomic(path: Path, content: str):
     tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(content, encoding="utf-8"); tmp.replace(path)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def resolve_pass1_parallelism(mode: str, requested: int | None = None) -> int:
+    if requested and requested > 0:
+        return int(requested)
+    env_value = os.environ.get("ASSESSOR_PARALLELISM", "").strip()
+    if env_value:
+        return _env_int("ASSESSOR_PARALLELISM", 1)
+    return 4 if str(mode or "").strip().lower() == "codex_local" else 16
+
+
+def append_jsonl(path: Path, payload: dict, lock: threading.Lock | None = None):
+    def write():
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload) + "\n")
+
+    if lock is None:
+        write()
+        return
+    with lock:
+        write()
+
+
 def ranking_from_scores(scores: dict, known_ids: list) -> list:
     ranked = [(sid, float(scores.get(sid, 0.0) or 0.0)) for sid in known_ids]
     ranked.sort(key=lambda item: (-item[1], item[0].lower()))
@@ -1421,11 +1457,13 @@ def main() -> int:
     parser.add_argument("--portfolio-piece-report", default="outputs/portfolio_piece_report.json", help="Portfolio piece scoring report JSON")
     parser.add_argument("--scope-grounding", default="outputs/scope_grounding.json", help="Scope grounding JSON")
     parser.add_argument("--committee-report", default="outputs/committee_consensus_report.json", help="Committee consensus report JSON")
+    parser.add_argument("--parallelism", type=int, default=None, help="Max concurrent Pass 1 assessor calls; defaults to ASSESSOR_PARALLELISM or a provider-aware value")
     parser.add_argument("--fallback", choices=["none", "deterministic"], default="deterministic", help="Fallback strategy when model output is invalid")
     parser.add_argument("--require-model-usage", action="store_true", help="Fail if no model outputs are accepted")
     args = parser.parse_args()
     routing = load_routing(Path(args.routing))
     mode = os.environ.get("LLM_MODE") or routing.get("mode", "openai")
+    pass1_parallelism = resolve_pass1_parallelism(mode, args.parallelism)
     if mode != "codex_local" and not os.environ.get("OPENAI_API_KEY"):
         print("OPENAI_API_KEY is not set. Aborting.")
         return 1
@@ -1602,78 +1640,88 @@ def main() -> int:
     model_attempts = 0
     portfolio_piece_report = {"enabled": bool(portfolio_scope), "students": {}}
     min_piece_success_ratio = 0.6
-    for assessor in assessors:
-        scores = []
-        for student_id, text in texts.items():
-            pieces = portfolio_pieces_by_student.get(student_id, []) if portfolio_scope else []
-            use_piece_mode = len(pieces) > 1
-            model_attempts += 1
-            if use_piece_mode:
-                piece_items = []
-                piece_successes = 0
-                for piece in pieces:
-                    piece_key = f"{student_id}::{piece.get('piece_id')}"
-                    piece_text = str(piece.get("text", "") or "")
-                    anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, piece_required_ids, exemplars)
-                    piece_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=True)
-                    base_prompt = build_portfolio_piece_prompt(
-                        assessor,
-                        rubric,
-                        outline,
-                        student_id,
-                        piece,
-                        len(pieces),
-                        grade_context,
-                        exemplar_block,
-                        piece_criteria_block,
-                        reqs,
-                        notes_word_limit=piece_notes_word_limit,
-                    )
-                    prompt = base_prompt
-                    piece_item = None
-                    for attempt in range(3):
-                        response = None
-                        try:
-                            response = responses_create(
-                                model=pass1_model,
-                                messages=[{"role": "user", "content": prompt}],
-                                temperature=pass1_temp,
-                                reasoning=pass1_reasoning,
-                                routing_path=args.routing,
-                                text_format=pass1_text_format(require_evidence),
-                                max_output_tokens=pass1_max_tokens,
-                            )
-                            content = extract_text(response)
-                            usage = extract_usage(response)
-                            with usage_log.open("a", encoding="utf-8") as f:
-                                f.write(
-                                    json.dumps(
-                                        {
-                                            "task": "pass1_piece",
-                                            "assessor": assessor,
-                                            "student_id": student_id,
-                                            "piece_id": piece.get("piece_id"),
-                                            "usage": usage,
-                                            "model": pass1_model,
-                                        }
-                                    ) + "\n"
-                                )
-                        except Exception as exc:
-                            content = f"[model_error] {exc}"
-                        try:
-                            if mode == "codex_local" and looks_like_prompt_echo(content, piece_key):
-                                raise ValueError("Model returned prompt echo instead of scored JSON.")
-                            piece_item = parse_pass1_item(content, piece_key, piece_required_ids, reqs, piece_text, strict=False)
-                            if str(piece_item.get("student_id", "")).strip() != piece_key:
-                                raise ValueError("Pass1 response student_id mismatch.")
-                            score = piece_item.get("rubric_total_points")
-                            if not isinstance(score, (int, float)):
-                                raise ValueError("Pass1 response missing numeric rubric_total_points.")
-                            piece_item = strip_internal_fields(reconcile_pass1_item(piece_item, piece_required_ids))
-                            piece_successes += 1
-                            break
-                        except ValueError as exc:
-                            failure = {
+    usage_log_lock = threading.Lock()
+    failure_log_lock = threading.Lock()
+
+    def score_pass1_submission(assessor: str, student_id: str, text: str) -> dict:
+        pieces = portfolio_pieces_by_student.get(student_id, []) if portfolio_scope else []
+        use_piece_mode = len(pieces) > 1
+        result = {
+            "assessor": assessor,
+            "student_id": student_id,
+            "item": None,
+            "model_attempts": 1,
+            "model_successes": 0,
+            "portfolio_aggregation": None,
+            "portfolio_piece_metadata": None,
+        }
+        if use_piece_mode:
+            piece_items = []
+            piece_successes = 0
+            for piece in pieces:
+                piece_key = f"{student_id}::{piece.get('piece_id')}"
+                piece_text = str(piece.get("text", "") or "")
+                anchor_piece_item = deterministic_pass1_item(piece_key, piece_text, assessor, piece_required_ids, exemplars)
+                piece_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=True)
+                base_prompt = build_portfolio_piece_prompt(
+                    assessor,
+                    rubric,
+                    outline,
+                    student_id,
+                    piece,
+                    len(pieces),
+                    grade_context,
+                    exemplar_block,
+                    piece_criteria_block,
+                    reqs,
+                    notes_word_limit=piece_notes_word_limit,
+                )
+                prompt = base_prompt
+                piece_item = None
+                for attempt in range(3):
+                    response = None
+                    try:
+                        response = responses_create(
+                            model=pass1_model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=pass1_temp,
+                            reasoning=pass1_reasoning,
+                            routing_path=args.routing,
+                            text_format=pass1_text_format(require_evidence),
+                            max_output_tokens=pass1_max_tokens,
+                        )
+                        content = extract_text(response)
+                        usage = extract_usage(response)
+                        append_jsonl(
+                            usage_log,
+                            {
+                                "task": "pass1_piece",
+                                "assessor": assessor,
+                                "student_id": student_id,
+                                "piece_id": piece.get("piece_id"),
+                                "usage": usage,
+                                "model": pass1_model,
+                            },
+                            usage_log_lock,
+                        )
+                    except Exception as exc:
+                        content = f"[model_error] {exc}"
+                    try:
+                        if mode == "codex_local" and looks_like_prompt_echo(content, piece_key):
+                            raise ValueError("Model returned prompt echo instead of scored JSON.")
+                        piece_item = parse_pass1_item(content, piece_key, piece_required_ids, reqs, piece_text, strict=False)
+                        if str(piece_item.get("student_id", "")).strip() != piece_key:
+                            raise ValueError("Pass1 response student_id mismatch.")
+                        score = piece_item.get("rubric_total_points")
+                        if not isinstance(score, (int, float)):
+                            raise ValueError("Pass1 response missing numeric rubric_total_points.")
+                        piece_item = strip_internal_fields(reconcile_pass1_item(piece_item, piece_required_ids))
+                        piece_successes += 1
+                        break
+                    except ValueError as exc:
+                        append_jsonl(
+                            failure_log,
+                            {
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "task": "pass1_piece",
                                 "assessor": assessor,
@@ -1683,111 +1731,107 @@ def main() -> int:
                                 "mode": mode,
                                 "error": str(exc),
                                 "response_preview": content[:2000],
-                            }
-                            with failure_log.open("a", encoding="utf-8") as f:
-                                f.write(json.dumps(failure) + "\n")
-                            prompt = build_pass1_repair_prompt(
-                                piece_key,
-                                content,
-                                bool(piece_required_ids),
-                                context_prompt=base_prompt,
-                                error_hint=_response_incomplete_hint(response),
-                                notes_word_limit=piece_notes_word_limit,
-                            )
-                    if piece_item is None:
-                        if args.fallback == "deterministic":
-                            piece_item = anchor_piece_item
-                        else:
-                            raise ValueError(f"Pass1 portfolio piece response invalid after retry. See {failure_log}.")
-                    piece_item, _draft_quality = apply_draft_penalty(
-                        piece_item,
-                        piece_text,
-                        str(piece_item.get("notes", "") or ""),
-                    )
-                    piece_items.append(piece_item)
-                item, aggregation = aggregate_portfolio_piece_assessments(student_id, pieces, piece_items, assessor)
-                scores.append(item)
-                student_entry = portfolio_piece_report["students"].setdefault(
-                    student_id,
-                    {
-                        "piece_count": len(pieces),
-                        "pieces": [
-                            {
-                                "piece_id": piece.get("piece_id"),
-                                "title": piece.get("title"),
-                                "word_count": piece.get("word_count"),
-                            }
-                            for piece in pieces
-                        ],
-                        "assessors": {},
-                    },
+                            },
+                            failure_log_lock,
+                        )
+                        prompt = build_pass1_repair_prompt(
+                            piece_key,
+                            content,
+                            bool(piece_required_ids),
+                            context_prompt=base_prompt,
+                            error_hint=_response_incomplete_hint(response),
+                            notes_word_limit=piece_notes_word_limit,
+                        )
+                if piece_item is None:
+                    if args.fallback == "deterministic":
+                        piece_item = anchor_piece_item
+                    else:
+                        raise ValueError(f"Pass1 portfolio piece response invalid after retry. See {failure_log}.")
+                piece_item, _draft_quality = apply_draft_penalty(
+                    piece_item,
+                    piece_text,
+                    str(piece_item.get("notes", "") or ""),
                 )
-                student_entry["assessors"][assessor] = aggregation
-                if piece_successes > 0 and (piece_successes / max(1, len(pieces))) >= min_piece_success_ratio:
-                    model_successes += 1
-                continue
+                piece_items.append(piece_item)
+            item, aggregation = aggregate_portfolio_piece_assessments(student_id, pieces, piece_items, assessor)
+            result["item"] = item
+            result["portfolio_aggregation"] = aggregation
+            result["portfolio_piece_metadata"] = [
+                {
+                    "piece_id": piece.get("piece_id"),
+                    "title": piece.get("title"),
+                    "word_count": piece.get("word_count"),
+                }
+                for piece in pieces
+            ]
+            if piece_successes > 0 and (piece_successes / max(1, len(pieces))) >= min_piece_success_ratio:
+                result["model_successes"] = 1
+            return result
 
-            anchor_item = deterministic_pass1_item(student_id, text, assessor, required_ids, exemplars)
-            pass1_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=False)
-            prompt = build_pass1_prompt(
-                assessor,
-                rubric,
-                outline,
-                student_id,
-                text,
-                grade_context,
-                exemplar_block,
-                criteria_block,
-                reqs,
-                notes_word_limit=pass1_notes_word_limit,
-            )
-            base_prompt = prompt
-            item = None
-            item_used_model = False
-            for attempt in range(3):
-                response = None
-                try:
-                    response = responses_create(
-                        model=pass1_model,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=pass1_temp,
-                        reasoning=pass1_reasoning,
-                        routing_path=args.routing,
-                        text_format=pass1_text_format(require_evidence),
-                        max_output_tokens=pass1_max_tokens,
+        anchor_item = deterministic_pass1_item(student_id, text, assessor, required_ids, exemplars)
+        pass1_notes_word_limit = _pass1_notes_word_limit(pass1_model, piece_mode=False)
+        prompt = build_pass1_prompt(
+            assessor,
+            rubric,
+            outline,
+            student_id,
+            text,
+            grade_context,
+            exemplar_block,
+            criteria_block,
+            reqs,
+            notes_word_limit=pass1_notes_word_limit,
+        )
+        base_prompt = prompt
+        item = None
+        item_used_model = False
+        for attempt in range(3):
+            response = None
+            try:
+                response = responses_create(
+                    model=pass1_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=pass1_temp,
+                    reasoning=pass1_reasoning,
+                    routing_path=args.routing,
+                    text_format=pass1_text_format(require_evidence),
+                    max_output_tokens=pass1_max_tokens,
+                )
+                content = extract_text(response)
+                usage = extract_usage(response)
+                append_jsonl(
+                    usage_log,
+                    {"task": "pass1", "assessor": assessor, "student_id": student_id, "usage": usage, "model": pass1_model},
+                    usage_log_lock,
+                )
+            except Exception as exc:
+                content = f"[model_error] {exc}"
+            try:
+                if mode == "codex_local" and looks_like_prompt_echo(content, student_id):
+                    raise ValueError("Model returned prompt echo instead of scored JSON.")
+                item = parse_pass1_item(content, student_id, required_ids, reqs, text, strict=False)
+                if str(item.get("student_id", "")).strip() != student_id:
+                    raise ValueError("Pass1 response student_id mismatch.")
+                score = item.get("rubric_total_points")
+                if not isinstance(score, (int, float)):
+                    raise ValueError("Pass1 response missing numeric rubric_total_points.")
+                item = reconcile_pass1_item(item, required_ids)
+                if guard_enabled:
+                    scope_delta, scope_gap, scope_blend = guard_bias_for_exemplar_scope(
+                        exemplar_selection.get("match_quality"),
+                        guard_max_score_delta,
+                        guard_max_level_gap,
+                        guard_anchor_blend,
                     )
-                    content = extract_text(response)
-                    usage = extract_usage(response)
-                    with usage_log.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps({"task": "pass1", "assessor": assessor, "student_id": student_id, "usage": usage, "model": pass1_model}) + "\n")
-                except Exception as exc:
-                    content = f"[model_error] {exc}"
-                try:
-                    if mode == "codex_local" and looks_like_prompt_echo(content, student_id):
-                        raise ValueError("Model returned prompt echo instead of scored JSON.")
-                    item = parse_pass1_item(content, student_id, required_ids, reqs, text, strict=False)
-                    if str(item.get("student_id", "")).strip() != student_id:
-                        raise ValueError("Pass1 response student_id mismatch.")
-                    score = item.get("rubric_total_points")
-                    if not isinstance(score, (int, float)):
-                        raise ValueError("Pass1 response missing numeric rubric_total_points.")
-                    item = reconcile_pass1_item(item, required_ids)
-                    if guard_enabled:
-                        scope_delta, scope_gap, scope_blend = guard_bias_for_exemplar_scope(
-                            exemplar_selection.get("match_quality"),
-                            guard_max_score_delta,
-                            guard_max_level_gap,
-                            guard_anchor_blend,
-                        )
-                        dyn_delta, dyn_gap, dyn_blend = guard_parameters(
-                            item, scope_delta, scope_gap, scope_blend
-                        )
-                        item = stabilize_pass1_item(item, anchor_item, dyn_delta, dyn_gap, dyn_blend)
-                    item = strip_internal_fields(item)
-                    item_used_model = True
-                    break
-                except ValueError as exc:
-                    failure = {
+                    dyn_delta, dyn_gap, dyn_blend = guard_parameters(item, scope_delta, scope_gap, scope_blend)
+                    item = stabilize_pass1_item(item, anchor_item, dyn_delta, dyn_gap, dyn_blend)
+                item = strip_internal_fields(item)
+                item_used_model = True
+                break
+            except ValueError as exc:
+                append_jsonl(
+                    failure_log,
+                    {
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "task": "pass1",
                         "assessor": assessor,
@@ -1796,29 +1840,66 @@ def main() -> int:
                         "mode": mode,
                         "error": str(exc),
                         "response_preview": content[:2000],
-                    }
-                    with failure_log.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps(failure) + "\n")
-                    prompt = build_pass1_repair_prompt(
-                        student_id,
-                        content,
-                        bool(required_ids),
-                        context_prompt=base_prompt,
-                        error_hint=_response_incomplete_hint(response),
-                        notes_word_limit=pass1_notes_word_limit,
-                    )
-            if item is None:
-                if args.fallback == "deterministic":
-                    item = anchor_item
-                else:
-                    raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
-            item, _draft_quality = apply_draft_penalty(
-                item,
-                text,
-                str(item.get("notes", "") or ""),
-            )
-            if item_used_model:
-                model_successes += 1
+                    },
+                    failure_log_lock,
+                )
+                prompt = build_pass1_repair_prompt(
+                    student_id,
+                    content,
+                    bool(required_ids),
+                    context_prompt=base_prompt,
+                    error_hint=_response_incomplete_hint(response),
+                    notes_word_limit=pass1_notes_word_limit,
+                )
+        if item is None:
+            if args.fallback == "deterministic":
+                item = anchor_item
+            else:
+                raise ValueError(f"Pass1 response invalid after retry. See {failure_log}.")
+        item, _draft_quality = apply_draft_penalty(
+            item,
+            text,
+            str(item.get("notes", "") or ""),
+        )
+        if item_used_model:
+            result["model_successes"] = 1
+        result["item"] = item
+        return result
+
+    pass1_task_inputs = [(assessor, student_id, text) for assessor in assessors for student_id, text in texts.items()]
+    pass1_results = {}
+    if pass1_parallelism > 1 and len(pass1_task_inputs) > 1:
+        print(f"Pass 1 parallelism: {pass1_parallelism}")
+        with ThreadPoolExecutor(max_workers=pass1_parallelism) as executor:
+            futures = {
+                executor.submit(score_pass1_submission, assessor, student_id, text): (assessor, student_id)
+                for assessor, student_id, text in pass1_task_inputs
+            }
+            for future in as_completed(futures):
+                assessor, student_id = futures[future]
+                result = future.result()
+                pass1_results[(assessor, student_id)] = result
+    else:
+        for assessor, student_id, text in pass1_task_inputs:
+            pass1_results[(assessor, student_id)] = score_pass1_submission(assessor, student_id, text)
+
+    for assessor in assessors:
+        scores = []
+        for student_id in texts.keys():
+            result = pass1_results[(assessor, student_id)]
+            item = result["item"]
+            model_attempts += int(result.get("model_attempts", 0) or 0)
+            model_successes += int(result.get("model_successes", 0) or 0)
+            if result.get("portfolio_aggregation") is not None:
+                student_entry = portfolio_piece_report["students"].setdefault(
+                    student_id,
+                    {
+                        "piece_count": len(result.get("portfolio_piece_metadata") or []),
+                        "pieces": result.get("portfolio_piece_metadata") or [],
+                        "assessors": {},
+                    },
+                )
+                student_entry["assessors"][assessor] = result.get("portfolio_aggregation")
             scores.append(item)
         pass1_scores_by_assessor[assessor] = {
             s["student_id"]: float(s.get("rubric_total_points", 0.0) or 0.0) for s in scores

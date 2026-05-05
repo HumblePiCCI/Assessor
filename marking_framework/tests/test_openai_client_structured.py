@@ -131,7 +131,7 @@ def test_responses_create_codex_structured_cache_hit(tmp_path, monkeypatch):
     fmt = {"type": "json_schema", "schema": {"type": "object", "required": ["student_id"]}}
     normalized = oc._normalized_text_format(fmt)
     prompt = oc._build_codex_prompt([{"role": "user", "content": "hi"}], normalized)
-    key = oc._cache_key({"mode": "codex_local", "model": "gpt-5.2", "prompt": prompt, "text_format": normalized})
+    key = oc._cache_key(oc._codex_cache_payload("/usr/bin/codex", "legacy", "gpt-5.2", prompt, normalized))
     path = tmp_path / "cache" / f"{key}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"output": [{"type": "output_text", "text": "{\"student_id\":\"s1\"}"}], "usage": {}}), encoding="utf-8")

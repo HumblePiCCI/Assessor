@@ -1,4 +1,5 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, runtimeProfiles = [], defaultRuntimeProfile = '', authSnapshot = { codex: null, api: null };
+const ACTIVE_PIPELINE_JOB_STORAGE_KEY = 'assessor.activePipelineJobId';
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -44,6 +45,29 @@ function compactLabel(text, max = 42) {
   const clean = String(text || '').trim();
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
+function selectedRuntimeProfile() {
+  const select = document.getElementById('runtimeProfileSelect');
+  const name = select?.value || defaultRuntimeProfile || '';
+  return runtimeProfiles.find(profile => profile.name === name) || runtimeProfiles[0] || null;
+}
+function profileConnectionReady(profile = selectedRuntimeProfile()) {
+  if (!profile) return false;
+  if (profile.mode === 'codex_local') return !!(authSnapshot.codex && authSnapshot.codex.available && authSnapshot.codex.connected);
+  if (profile.mode === 'openai') return !!(authSnapshot.api && authSnapshot.api.connected);
+  return !!profile.enabled;
+}
+function profileConnectionLabel(profile = selectedRuntimeProfile()) {
+  if (!profile) return 'Offline';
+  if (profile.mode === 'codex_local') {
+    if (authSnapshot.codex && authSnapshot.codex.available && authSnapshot.codex.connected) return 'Codex connected';
+    if (authSnapshot.codex && authSnapshot.codex.available) return 'Codex not connected';
+    return 'Codex unavailable';
+  }
+  if (profile.mode === 'openai') {
+    return authSnapshot.api && authSnapshot.api.connected ? 'API key connected' : 'API key required';
+  }
+  return profile.enabled ? 'Provider env required' : 'Profile disabled';
+}
 function setNodeState(node, text, state = 'idle') {
   if (!node) return;
   node.textContent = text;
@@ -65,10 +89,11 @@ function inferPipelineState(text) {
   return 'idle';
 }
 function updateWorkflowState() {
-  const authText = document.getElementById('authStatus')?.textContent || 'Offline';
+  const profile = selectedRuntimeProfile();
+  const authText = profileConnectionLabel(profile);
   const projectText = currentProject ? currentProject.name : 'unsaved';
   const pipelineText = document.getElementById('pipelineStatus')?.textContent || 'Idle';
-  const authState = inferConnectionState(authText);
+  const authState = profileConnectionReady(profile) ? 'ready' : inferConnectionState(authText);
   const pipelineState = inferPipelineState(pipelineText);
   const essayCount = document.getElementById('uploadEssays')?.files?.length || 0;
   const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
@@ -135,24 +160,52 @@ async function refreshAuthStatus() {
     const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]);
     const codex = codexRes.ok ? await codexRes.json() : null;
     const api = apiRes.ok ? await apiRes.json() : null;
-    if (codex && codex.available && codex.connected) {
-      status.textContent = 'Codex connected';
-      if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; }
-    } else if (api && api.connected) {
-      status.textContent = 'API key connected';
-      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
-    } else if (codex && codex.available) {
-      status.textContent = 'Codex not connected';
-      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
-    } else {
-      status.textContent = 'Offline';
-      if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+    authSnapshot = { codex, api };
+    const codexReady = !!(codex && codex.available && codex.connected);
+    status.textContent = profileConnectionLabel(selectedRuntimeProfile());
+    if (codexBtn) {
+      codexBtn.disabled = codexReady;
+      codexBtn.textContent = codexReady ? 'Codex connected' : 'Sign in with Codex';
     }
   } catch (err) {
+    authSnapshot = { codex: null, api: null };
     status.textContent = 'Offline';
     if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
   }
   updateWorkflowState();
+}
+async function loadRuntimeProfiles() {
+  const select = document.getElementById('runtimeProfileSelect');
+  if (!select) return;
+  const attachOptions = () => {
+    select.innerHTML = '';
+    runtimeProfiles.forEach(profile => {
+      const opt = document.createElement('option');
+      opt.value = profile.name;
+      const markup = profile.billing?.customer_markup_percent ?? 0;
+      const suffix = profile.billable ? ` · cost + ${markup}%` : ' · internal';
+      opt.textContent = `${profile.label || profile.name}${suffix}`;
+      opt.disabled = !profile.enabled;
+      if (profile.name === defaultRuntimeProfile) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.onchange = refreshAuthStatus;
+  };
+  try {
+    const res = await fetch(apiUrl('/runtime/profiles'));
+    if (!res.ok) throw new Error('profiles unavailable');
+    const payload = await res.json();
+    runtimeProfiles = payload.profiles || [];
+    defaultRuntimeProfile = payload.default_profile || '';
+    attachOptions();
+  } catch (_) {
+    runtimeProfiles = [
+      { name: 'codex_local', label: 'Codex local', mode: 'codex_local', enabled: true, billable: false, billing: { customer_markup_percent: 0 } },
+      { name: 'openai', label: 'OpenAI API', mode: 'openai', enabled: true, billable: true, billing: { customer_markup_percent: 10 } },
+    ];
+    defaultRuntimeProfile = 'codex_local';
+    attachOptions();
+  }
 }
 async function connectApiKey() {
   const input = document.getElementById('apiKeyInput');
@@ -169,6 +222,8 @@ async function connectApiKey() {
     }
     input.value = '';
     status.textContent = 'API key connected';
+    await refreshAuthStatus();
+    return;
   } catch (err) {
     status.textContent = 'Offline';
   }
@@ -1134,17 +1189,112 @@ function updatePreviewFromUploads() {
   updateWorkflowState();
 }
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
+function rememberActivePipelineJob(jobId) {
+  if (!jobId) return;
+  try { window.localStorage?.setItem(ACTIVE_PIPELINE_JOB_STORAGE_KEY, jobId); } catch (_) {}
+}
+function forgetActivePipelineJob(jobId = '') {
+  try {
+    const stored = window.localStorage?.getItem(ACTIVE_PIPELINE_JOB_STORAGE_KEY) || '';
+    if (!jobId || stored === jobId) window.localStorage?.removeItem(ACTIVE_PIPELINE_JOB_STORAGE_KEY);
+  } catch (_) {}
+}
+function pipelineJobIdFromLocation() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const fromQuery = params.get('job_id') || params.get('job');
+    if (fromQuery) return fromQuery.trim();
+    const hash = (window.location.hash || '').replace(/^#/, '');
+    const hashParams = new URLSearchParams(hash);
+    return (hashParams.get('job_id') || hashParams.get('job') || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+function storedPipelineJobId() {
+  try { return (window.localStorage?.getItem(ACTIVE_PIPELINE_JOB_STORAGE_KEY) || '').trim(); } catch (_) { return ''; }
+}
+async function fetchPipelineJob(jobId) {
+  if (!jobId) return null;
+  const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`), { cache: 'no-store' });
+  if (!res.ok) return null;
+  return res.json();
+}
+function isResumablePipelineJob(job) {
+  return job && job.id && job.status !== 'completed' && job.status !== 'failed';
+}
+async function findResumablePipelineJob() {
+  try {
+    const res = await fetch(apiUrl('/pipeline/v2/jobs/latest'), { cache: 'no-store' });
+    if (res.ok) {
+      const latest = await res.json();
+      if (isResumablePipelineJob(latest)) return latest;
+    }
+  } catch (_) {}
+  const candidates = [pipelineJobIdFromLocation(), storedPipelineJobId()].filter(Boolean);
+  for (const jobId of [...new Set(candidates)]) {
+    try {
+      const job = await fetchPipelineJob(jobId);
+      if (isResumablePipelineJob(job)) return job;
+      if (job && (job.status === 'completed' || job.status === 'failed')) forgetActivePipelineJob(jobId);
+    } catch (_) {}
+  }
+  return null;
+}
+async function waitForJob(jobId) { while (true) { const job = await fetchPipelineJob(jobId); if (!job) throw new Error('Run status unavailable'); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') { forgetActivePipelineJob(jobId); return job; } if (job.status === 'failed') { forgetActivePipelineJob(jobId); throw new Error(job.error || 'Run failed'); } await sleep(2000); } }
+async function resumeLatestPipelineJob() {
+  if (activeJobId || running) return;
+  const latest = await findResumablePipelineJob();
+  if (!latest) return;
+  activeJobId = latest.id;
+  rememberActivePipelineJob(activeJobId);
+  setPipelineStatus(`Reconnected • ${latest.progress_message || latest.progress_stage || 'Running'}`, 'running');
+  setRunning(true);
+  startPipelineNarrative();
+  pipelineLog(`Reconnected to active run ${activeJobId.slice(0, 8)}.`);
+  try {
+    const job = await waitForJob(activeJobId);
+    if (job.status === 'awaiting_rubric_confirmation') {
+      setPipelineStatus('Rubric confirmation needed', 'warn');
+      stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.');
+      await fetchRubricReview(activeJobId);
+      return;
+    }
+    if (job.status === 'awaiting_anchor_scores') {
+      setPipelineStatus('Anchor calibration needed', 'warn');
+      stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.');
+      const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
+      if (dataRes.ok) {
+        previewStudents = [];
+        await boot(await dataRes.json());
+      }
+      await fetchAnchorReview(activeJobId);
+      return;
+    }
+    const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`));
+    if (!dataRes.ok) throw new Error('Dashboard data unavailable');
+    previewStudents = [];
+    await boot(await dataRes.json());
+    setPipelineStatus('Complete', 'ready');
+    stopPipelineNarrative('Done. Review is ready.');
+  } catch (err) {
+    const msg = `Run failed: ${err.message || 'connection lost'}`;
+    setPipelineStatus(msg, 'danger');
+    stopPipelineNarrative(msg);
+  }
+}
 async function runPipeline() {
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
   if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { setPipelineStatus('Add essays, rubric, outline', 'warn'); return; }
   if (!previewStudents.length) updatePreviewFromUploads();
-  setPipelineStatus('Checking connection...', 'warn'); let mode = '';
-  try { const [cRes, aRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]); const c = cRes.ok ? await cRes.json() : null; const a = aRes.ok ? await aRes.json() : null; mode = c && c.connected ? 'codex_local' : (a && a.connected ? 'openai' : ''); } catch (err) { setPipelineStatus('Offline', 'danger'); return; }
-  if (!mode) { setPipelineStatus('Connect Codex or API key', 'warn'); return; }
-  const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode); if (currentProject?.id) form.append('project_id', currentProject.id);
-  setPipelineStatus('Running...', 'running'); setRunning(true); startPipelineNarrative(); startShuffle();
-  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } if (job.status === 'awaiting_anchor_scores') { setPipelineStatus('Anchor calibration needed', 'warn'); stopShuffle(); stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.'); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (dataRes.ok) { previewStudents = []; await boot(await dataRes.json()); } await fetchAnchorReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); setPipelineStatus('Complete', 'ready'); stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); }
+  setPipelineStatus('Checking connection...', 'warn');
+  await refreshAuthStatus();
+  const profile = selectedRuntimeProfile();
+  const mode = profile?.mode || '';
+  if (!profile || !profileConnectionReady(profile)) { setPipelineStatus(profileConnectionLabel(profile), 'warn'); return; }
+  const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode); form.append('profile', profile.name || ''); form.append('pipeline_profile', 'teacher_review'); if (currentProject?.id) form.append('project_id', currentProject.id);
+  setPipelineStatus('Building teacher review...', 'running'); setRunning(true); startPipelineNarrative(); startShuffle();
+  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; rememberActivePipelineJob(activeJobId); if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } if (job.status === 'awaiting_anchor_scores') { setPipelineStatus('Anchor calibration needed', 'warn'); stopShuffle(); stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.'); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (dataRes.ok) { previewStudents = []; await boot(await dataRes.json()); } await fetchAnchorReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); setPipelineStatus('Complete', 'ready'); stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); }
 }
 function setupUploads() {
   document.querySelectorAll('.upload').forEach(zone => {
@@ -1284,6 +1434,7 @@ async function boot(payload) {
   if (data.curve_bottom) document.getElementById('bottomGrade').value = data.curve_bottom;
   applyCurveBounds(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), false);
   await detectApiBase();
+  await loadRuntimeProfiles();
   setupControls();
   renderRubricReview(
     payload && (payload.rubric_verification || payload.normalized_rubric || payload.rubric_manifest)
@@ -1316,5 +1467,5 @@ async function boot(payload) {
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })
   .then(res => res.ok ? res.text() : '')
   .then(text => { try { return text ? JSON.parse(text) : { students: [] }; } catch (_) { return { students: [] }; } })
-  .then(payload => boot(payload))
+  .then(async payload => { await boot(payload); await resumeLatestPipelineJob(); })
   .catch(err => { console.error(err); return boot({ students: [] }); });
