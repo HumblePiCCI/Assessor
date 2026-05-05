@@ -71,6 +71,7 @@ Quick Start
    - Minimal API server: `python3 -m uvicorn server.app:app --reload`
    - Runtime provider/billing switch: `docs/RUNTIME_PROVIDER_SWITCH.md`
    - Production readiness spec: `docs/PRODUCTION_READINESS_SPEC.md`
+   - Product and Google Classroom hero path: `docs/GOOGLE_CLASSROOM_HERO_PATH.md`
 
 Key Outputs
 - `outputs/ranked_list.md` (consensus order + confidence signals)
