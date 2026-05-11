@@ -80,6 +80,7 @@ function updateWorkflowState() {
   setNodeState(document.getElementById('connectionBadge'), `Connection · ${compactLabel(authText, 24)}`, authState);
   setNodeState(document.getElementById('runBadge'), `Pipeline · ${compactLabel(pipelineText, 26)}`, pipelineState);
   const hint = document.getElementById('intakeHint');
+  const workflowSummary = document.getElementById('workflowSummary');
   if (hint) {
     if (hasReview) {
       hint.textContent = `${students.length} essays loaded. Review the order, correct the exceptions, then finalize.`;
@@ -93,6 +94,14 @@ function updateWorkflowState() {
       ];
       hint.textContent = parts.join(' · ');
     }
+  }
+  if (workflowSummary) {
+    workflowSummary.textContent = hasReview
+      ? `${students.length} essays ready for review`
+      : filesReady
+        ? 'Files ready'
+        : `${essayCount || 0} essays · ${rubricReady ? 'rubric ready' : 'rubric missing'} · ${outlineReady ? 'outline ready' : 'outline missing'}`;
+    workflowSummary.dataset.state = hasReview || filesReady ? 'ready' : 'idle';
   }
   const railMeta = document.getElementById('railMeta');
   if (railMeta) railMeta.textContent = students.length ? `${students.length} essays in order` : 'No essays loaded';
@@ -152,6 +161,7 @@ async function refreshAuthStatus() {
     status.textContent = 'Offline';
     if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
   }
+  status.dataset.state = inferConnectionState(status.textContent);
   updateWorkflowState();
 }
 async function connectApiKey() {
@@ -222,7 +232,10 @@ async function loadProjects() {
       });
     }
     const status = document.getElementById('projectStatus');
-    if (status) status.textContent = currentProject ? `Current: ${currentProject.name}` : 'No project loaded';
+    if (status) {
+      status.textContent = currentProject ? currentProject.name : 'No project loaded';
+      status.dataset.state = currentProject ? 'ready' : 'idle';
+    }
   } catch (_) {}
   updateWorkflowState();
 }
@@ -282,14 +295,18 @@ function renderClassroomState(bundle) {
   const confirmBtn = document.getElementById('confirmPassback');
   if (!status || !counts) return;
   const link = bundle?.classroom_link || {};
+  const linkedControls = document.querySelectorAll('.classroom-linked-control');
   if (!link.course_id) {
-    status.textContent = 'No Classroom assignment linked.';
+    status.textContent = 'No assignment linked';
+    status.dataset.state = 'idle';
     counts.innerHTML = '';
     if (preflight) preflight.textContent = '';
     if (finalizeBtn) finalizeBtn.disabled = true;
     if (confirmBtn) confirmBtn.disabled = true;
+    linkedControls.forEach(node => node.classList.add('is-hidden'));
     return;
   }
+  linkedControls.forEach(node => node.classList.remove('is-hidden'));
   const stateLabel = classroomStateLabel(bundle.product_state);
   const blockers = bundle.blockers || [];
   status.textContent = `${link.course_name || link.course_id} · ${link.coursework_title || link.coursework_id} · ${stateLabel}${blockers.length ? ` · ${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : ''}`;
@@ -506,7 +523,7 @@ function ensureReviewPanel() {
   section.innerHTML = `
     <div class="panel-row">
       <div>
-        <div class="label">Teacher review</div>
+        <div class="label">Review decision</div>
         <div id="reviewDraftStatus" class="auth-status">No draft review yet.</div>
       </div>
       <div class="project-actions">
@@ -529,20 +546,20 @@ function ensureReviewPanel() {
       </div>
       <div class="control">
         <label for="reviewEvidenceComment">Teacher note</label>
-        <textarea id="reviewEvidenceComment" rows="4" placeholder="Only add a note if the machine missed something important."></textarea>
+        <textarea id="reviewEvidenceComment" rows="3" placeholder="Only add a note if the machine missed something important."></textarea>
       </div>
     </div>
-    <div class="review-pairwise">
-      <div class="label">Pairwise check</div>
-      <div class="project-actions">
-        <button id="preferCurrent" class="ghost">Keep current above compare</button>
-        <button id="preferCompare" class="ghost">Move compare above current</button>
-        <button id="clearPairwise" class="ghost">Clear pair</button>
+    <details class="secondary-details compact-details">
+      <summary>Compare and advanced adjustments</summary>
+      <div class="review-pairwise">
+        <div class="label">Pairwise check</div>
+        <div class="project-actions">
+          <button id="preferCurrent" class="ghost">Keep current above compare</button>
+          <button id="preferCompare" class="ghost">Move compare above current</button>
+          <button id="clearPairwise" class="ghost">Clear pair</button>
+        </div>
+        <div class="auth-status" id="pairwiseStatus">Open split view to compare two essays.</div>
       </div>
-      <div class="auth-status" id="pairwiseStatus">Open split view to compare two essays.</div>
-    </div>
-    <details class="secondary-details">
-      <summary>More review options</summary>
       <div class="controls compact-controls">
         <div class="control">
           <label for="reviewDesiredRank">Teacher rank</label>
@@ -561,7 +578,10 @@ function ensureReviewPanel() {
       </div>
     </details>
     <div id="reviewStatus" class="auth-status">No finalized review yet.</div>
-    <div id="learningSummary" class="auth-status">Local profile unavailable.</div>
+    <details class="secondary-details compact-details">
+      <summary>Learning profile</summary>
+      <div id="learningSummary" class="auth-status">Local profile unavailable.</div>
+    </details>
   `;
   const anchor = actionsInsertionAnchor(actions);
   if (anchor) actions.insertBefore(section, anchor);
@@ -1545,7 +1565,8 @@ async function boot(payload) {
   await loadReviewBundle();
   await refreshClassroomState();
   renderRail();
-  scrollToIndex(0, false);
+  if (data.students.length) scrollToIndex(0, false);
+  else renderDetail();
   updateControlVisibility();
   updateWorkflowState();
   refreshAuthStatus();
