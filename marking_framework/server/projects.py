@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from scripts.aggregate_review_learning import default_aggregate_learning_policy, normalize_aggregate_learning_policy
+from server import classroom
 from server import review_store
 from server.runtime_context import identity_can_access, project_owner, resolve_request_identity
 
@@ -39,6 +40,48 @@ class ProjectReviewPayload(BaseModel):
     curve_bottom: float | None = None
     assigned_marks: list[dict] = Field(default_factory=list)
     feedback_drafts: list[dict] = Field(default_factory=list)
+
+
+class ClassroomLinkPayload(BaseModel):
+    course_id: str
+    coursework_id: str
+    course_name: str | None = None
+    coursework_title: str | None = None
+    assignment_title: str | None = None
+    selected_rubric_source: str | None = None
+    google_integration_path: str | None = None
+    passback_mode: str | None = None
+    policy: dict = Field(default_factory=dict)
+
+
+class ClassroomSnapshotPayload(BaseModel):
+    roster: list[dict] = Field(default_factory=list)
+    submissions: list[dict] = Field(default_factory=list)
+
+
+class ClassroomEventPayload(BaseModel):
+    event_id: str | None = None
+    event_type: str | None = None
+    course_id: str | None = None
+    coursework_id: str | None = None
+    submission_id: str | None = None
+    submission: dict | None = None
+
+
+class ClassroomAuditPayload(BaseModel):
+    audit_revision_id: int | None = None
+    gate_status: str | None = None
+    blocked_reasons: list[str] = Field(default_factory=list)
+    audit_artifact_hash: str | None = None
+
+
+class ClassroomPassbackPreflightPayload(BaseModel):
+    mode: str
+
+
+class ClassroomPassbackConfirmPayload(BaseModel):
+    preflight_id: str
+    confirmed: bool = False
 
 
 def identity_context(request: Request | None) -> dict:
@@ -255,6 +298,14 @@ def project_meta_for_review(project_id: str | None, identity: dict | None = None
     return current or workspace_project(identity)
 
 
+def project_meta_for_product(identity: dict | None = None) -> dict:
+    return get_current_project(identity) or workspace_project(identity)
+
+
+def classroom_error_response(exc: classroom.ClassroomStateError):
+    raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
 def copy_tree(src: Path, dst: Path):
     if not src.exists():
         return
@@ -429,10 +480,109 @@ async def projects_review_save(payload: ProjectReviewPayload, request: Request):
     project = project_meta_for_review(payload.project_id, identity)
     action = str(payload.action or "draft").strip().lower()
     stage = "final" if action in {"final", "finalize", "publish"} else "draft"
-    return review_store.save_review_bundle(
+    request_payload = payload.model_dump(exclude_none=True)
+    bundle = review_store.save_review_bundle(
         BASE_DIR,
         root,
         project,
-        payload.model_dump(exclude_none=True),
+        request_payload,
         stage=stage,
     )
+    classroom.record_review_revision(BASE_DIR, root, project, identity, request_payload, stage=stage)
+    return bundle
+
+
+@router.get("/projects/classroom")
+async def projects_classroom_state(request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    return classroom.state_bundle(BASE_DIR, root, project, identity)
+
+
+@router.post("/projects/classroom/link")
+async def projects_classroom_link(payload: ClassroomLinkPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.link_assignment(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/reconcile")
+async def projects_classroom_reconcile(payload: ClassroomSnapshotPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.reconcile_snapshot(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/events")
+async def projects_classroom_events(payload: ClassroomEventPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.record_event_hint(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/audit/complete")
+async def projects_classroom_audit_complete(payload: ClassroomAuditPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.complete_background_audit(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/finalize")
+async def projects_classroom_finalize(request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.finalize_by_teacher(BASE_DIR, root, project, identity)
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.get("/projects/classroom/evidence-packet")
+async def projects_classroom_evidence_packet(request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.assessment_evidence_packet(BASE_DIR, root, project, identity)
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/passback/preflight")
+async def projects_classroom_passback_preflight(payload: ClassroomPassbackPreflightPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.passback_preflight(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/passback/confirm")
+async def projects_classroom_passback_confirm(payload: ClassroomPassbackConfirmPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.confirm_passback(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)

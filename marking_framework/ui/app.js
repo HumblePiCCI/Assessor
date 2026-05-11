@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -263,6 +263,232 @@ function clearLocalState() {
 async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error('clear failed'); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) { if (status) status.textContent = 'Server unavailable: local view cleared only'; } }
 async function loadProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; try { const res = await fetch(apiUrl('/projects/load'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: select.value }) }); if (!res.ok) return; location.reload(); } catch (_) {} }
 async function deleteProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; if (!confirm('Delete this project?')) return; try { const res = await fetch(apiUrl(`/projects/${select.value}`), { method: 'DELETE' }); if (!res.ok) return; await loadProjects(); } catch (_) {} }
+function classroomStateLabel(value) {
+  return String(value || 'blocked').replaceAll('_', ' ');
+}
+function classroomStateTone(value) {
+  const state = String(value || '');
+  if (['review_ready', 'final_ready', 'finalized_by_teacher'].includes(state)) return 'ready';
+  if (['collecting', 'ingesting', 'analyzing_submissions', 'background_validating', 'teacher_revision_pending'].includes(state)) return 'warn';
+  if (['blocked', 'failed'].includes(state)) return 'danger';
+  return 'idle';
+}
+function renderClassroomState(bundle) {
+  classroomState = bundle || null;
+  const status = document.getElementById('classroomStatus');
+  const counts = document.getElementById('classroomCounts');
+  const preflight = document.getElementById('classroomPreflight');
+  const finalizeBtn = document.getElementById('finalizeClassroom');
+  const confirmBtn = document.getElementById('confirmPassback');
+  if (!status || !counts) return;
+  const link = bundle?.classroom_link || {};
+  if (!link.course_id) {
+    status.textContent = 'No Classroom assignment linked.';
+    counts.innerHTML = '';
+    if (preflight) preflight.textContent = '';
+    if (finalizeBtn) finalizeBtn.disabled = true;
+    if (confirmBtn) confirmBtn.disabled = true;
+    return;
+  }
+  const stateLabel = classroomStateLabel(bundle.product_state);
+  const blockers = bundle.blockers || [];
+  status.textContent = `${link.course_name || link.course_id} · ${link.coursework_title || link.coursework_id} · ${stateLabel}${blockers.length ? ` · ${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : ''}`;
+  status.dataset.state = classroomStateTone(bundle.product_state);
+  const summary = bundle.summary || {};
+  const cells = [
+    ['Roster', summary.roster_count || 0],
+    ['Submitted', summary.submitted_count || 0],
+    ['Scheduled', summary.scheduled_analysis_count || 0],
+    ['Blockers', summary.attachment_blocker_count || 0],
+    ['Human rev', bundle.latest_human_revision_id || 0],
+    ['Audit rev', bundle.audit?.audit_revision_id || 0],
+  ];
+  counts.innerHTML = cells.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
+  if (finalizeBtn) finalizeBtn.disabled = bundle.product_state !== 'final_ready';
+  if (confirmBtn) confirmBtn.disabled = !(classroomPreflight && !classroomPreflight.blocked);
+  if (preflight && !classroomPreflight && (!preflight.textContent || preflight.textContent.startsWith('Gates:'))) {
+    const gates = bundle.launch_gates || {};
+    preflight.textContent = `Gates: teacher review ${gates.teacher_review_finalized ? 'ready' : 'open'} · validation ${gates.full_validation_current ? 'current' : 'pending'} · attachments ${gates.attachment_blockers_clear ? 'clear' : 'blocked'}.`;
+  }
+}
+async function refreshClassroomState() {
+  try {
+    const res = await fetch(apiUrl('/projects/classroom'));
+    if (!res.ok) return;
+    renderClassroomState(await res.json());
+  } catch (_) {}
+}
+function classroomLinkPayload() {
+  const courseName = (document.getElementById('classroomCourseName')?.value || '').trim();
+  const assignmentTitle = (document.getElementById('classroomAssignmentTitle')?.value || '').trim();
+  const courseId = (document.getElementById('classroomCourseId')?.value || '').trim() || baseName(courseName || 'course');
+  const courseworkId = (document.getElementById('classroomCourseworkId')?.value || '').trim() || baseName(assignmentTitle || 'assignment');
+  return {
+    course_id: courseId,
+    course_name: courseName || courseId,
+    coursework_id: courseworkId,
+    coursework_title: assignmentTitle || courseworkId,
+    passback_mode: document.getElementById('classroomPassbackMode')?.value || 'no_passback',
+    policy: {
+      policy_state: 'operator_supervised_pilot',
+      app_approval_status: 'operator_supervised_pilot',
+      oauth_scope_posture: 'not_connected',
+      external_writes_enabled: false,
+      read_only_first: true,
+    },
+  };
+}
+async function linkClassroomAssignment() {
+  const status = document.getElementById('classroomStatus');
+  if (status) status.textContent = 'Linking Classroom assignment...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/link'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(classroomLinkPayload()),
+    });
+    if (!res.ok) throw new Error('link failed');
+    classroomPreflight = null;
+    renderClassroomState(await res.json());
+  } catch (err) {
+    if (status) status.textContent = `Classroom link failed: ${err.message || 'unknown error'}`;
+  }
+}
+function sampleClassroomSnapshot() {
+  const students = data?.students?.length ? data.students : previewStudents;
+  return {
+    roster: students.map(student => ({
+      student_id: student.student_id,
+      display_name: labelFor(student),
+    })),
+    submissions: students.map(student => ({
+      submission_id: student.student_id,
+      student_id: student.student_id,
+      display_name: labelFor(student),
+      classroom_state: 'submitted',
+      text: student.text || '',
+      attachments: [
+        {
+          attachment_id: `${student.student_id}-text`,
+          title: `${labelFor(student)} submission`,
+          type: 'text',
+          mime_type: 'text/plain',
+          text: student.text || '',
+        },
+      ],
+    })),
+  };
+}
+async function reconcileClassroom() {
+  const status = document.getElementById('classroomStatus');
+  if (status) status.textContent = 'Reconciling Classroom snapshot...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/reconcile'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sampleClassroomSnapshot()),
+    });
+    if (!res.ok) throw new Error('reconcile failed');
+    classroomPreflight = null;
+    renderClassroomState(await res.json());
+  } catch (err) {
+    if (status) status.textContent = `Classroom reconciliation failed: ${err.message || 'unknown error'}`;
+  }
+}
+async function completeClassroomAudit() {
+  const status = document.getElementById('classroomStatus');
+  if (status) status.textContent = 'Marking background validation current...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/audit/complete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gate_status: 'pass' }),
+    });
+    if (!res.ok) throw new Error('audit update failed');
+    classroomPreflight = null;
+    renderClassroomState(await res.json());
+  } catch (err) {
+    if (status) status.textContent = `Background validation update failed: ${err.message || 'unknown error'}`;
+  }
+}
+async function finalizeClassroomResult() {
+  const status = document.getElementById('classroomStatus');
+  if (status) status.textContent = 'Finalizing Classroom result...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/finalize'), { method: 'POST' });
+    if (!res.ok) throw new Error('finalize failed');
+    classroomPreflight = null;
+    renderClassroomState(await res.json());
+  } catch (err) {
+    if (status) status.textContent = `Classroom finalization failed: ${err.message || 'unknown error'}`;
+  }
+}
+function renderPreflight(preflight) {
+  classroomPreflight = preflight || null;
+  const node = document.getElementById('classroomPreflight');
+  const confirmBtn = document.getElementById('confirmPassback');
+  if (!node) return;
+  if (!preflight) {
+    node.textContent = '';
+    if (confirmBtn) confirmBtn.disabled = true;
+    return;
+  }
+  const blockers = preflight.blockers || [];
+  node.textContent = preflight.blocked
+    ? `Preflight blocked: ${blockers.map(item => item.replaceAll('_', ' ')).join(' · ')}`
+    : `Preflight ready: ${preflight.mode.replaceAll('_', ' ')} · ${preflight.row_count} row${preflight.row_count === 1 ? '' : 's'} · confirmation required.`;
+  if (confirmBtn) confirmBtn.disabled = preflight.blocked;
+}
+async function preflightPassback() {
+  const node = document.getElementById('classroomPreflight');
+  if (node) node.textContent = 'Building passback preflight...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/passback/preflight'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: document.getElementById('passbackPreflightMode')?.value || 'csv_export' }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = payload.detail?.message || payload.detail || 'preflight failed';
+      throw new Error(detail);
+    }
+    renderPreflight(payload);
+  } catch (err) {
+    if (node) node.textContent = `Preflight failed: ${err.message || 'unknown error'}`;
+  }
+}
+async function confirmPassback() {
+  const node = document.getElementById('classroomPreflight');
+  if (!classroomPreflight?.preflight_id) return;
+  if (node) node.textContent = 'Recording teacher-confirmed export action...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/passback/confirm'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preflight_id: classroomPreflight.preflight_id, confirmed: true }),
+    });
+    if (!res.ok) throw new Error('confirmation failed');
+    const action = await res.json();
+    if (node) node.textContent = `Export action recorded: ${action.status.replaceAll('_', ' ')} · ${action.row_count} row${action.row_count === 1 ? '' : 's'}.`;
+    await refreshClassroomState();
+  } catch (err) {
+    if (node) node.textContent = `Export confirmation failed: ${err.message || 'unknown error'}`;
+  }
+}
+async function showEvidencePacket() {
+  const node = document.getElementById('classroomPreflight');
+  if (node) node.textContent = 'Building evidence packet...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/evidence-packet'));
+    if (!res.ok) throw new Error('packet unavailable');
+    const packet = await res.json();
+    if (node) node.textContent = `Evidence packet ${packet.packet_id || 'ready'} · ${packet.product_state?.replaceAll('_', ' ') || 'state unavailable'} · ${Object.keys(packet.submission_hashes || {}).length} submissions.`;
+    await refreshClassroomState();
+  } catch (err) {
+    if (node) node.textContent = `Evidence packet failed: ${err.message || 'unknown error'}`;
+  }
+}
 function actionsInsertionAnchor(actions) {
   if (!actions) return null;
   return document.getElementById('teacherSpotlight')
@@ -737,6 +963,7 @@ function applyReviewBundle(bundle) {
     learningSummary.textContent = `Local learning: ${profile.review_count || 0} finalized reviews · ${profile.student_review_count || 0} essay decisions · ${profile.pairwise_adjudication_count || 0} pairwise calls · prior ${activeLabel} · aggregate mode ${aggregateMode}.`;
   }
   applyPersistedReviewState(active);
+  if (!data?.students?.length) renderReviewPanel(null);
 }
 async function loadReviewBundle() {
   ensureRubricPanel();
@@ -830,6 +1057,7 @@ async function saveReviewBundle(action = 'draft') {
     });
     if (!res.ok) throw new Error('save failed');
     applyReviewBundle(await res.json());
+    await refreshClassroomState();
     if (data?.students?.length) renderReviewPanel(data.students[currentIndex]);
   } catch (_) {
     if (action === 'finalize') {
@@ -1264,11 +1492,19 @@ function setupControls() {
   const clearBtn = document.getElementById('clearProject'); if (clearBtn) clearBtn.addEventListener('click', clearProject);
   const loadBtn = document.getElementById('loadProject'); if (loadBtn) loadBtn.addEventListener('click', loadProject);
   const delBtn = document.getElementById('deleteProject'); if (delBtn) delBtn.addEventListener('click', deleteProject);
+  const linkClassroom = document.getElementById('linkClassroom'); if (linkClassroom) linkClassroom.addEventListener('click', linkClassroomAssignment);
+  const reconcileBtn = document.getElementById('reconcileClassroom'); if (reconcileBtn) reconcileBtn.addEventListener('click', reconcileClassroom);
+  const auditBtn = document.getElementById('completeClassroomAudit'); if (auditBtn) auditBtn.addEventListener('click', completeClassroomAudit);
+  const finalizeClassroom = document.getElementById('finalizeClassroom'); if (finalizeClassroom) finalizeClassroom.addEventListener('click', finalizeClassroomResult);
+  const preflightBtn = document.getElementById('passbackPreflight'); if (preflightBtn) preflightBtn.addEventListener('click', preflightPassback);
+  const confirmPassbackBtn = document.getElementById('confirmPassback'); if (confirmPassbackBtn) confirmPassbackBtn.addEventListener('click', confirmPassback);
+  const evidenceBtn = document.getElementById('showEvidencePacket'); if (evidenceBtn) evidenceBtn.addEventListener('click', showEvidencePacket);
   const confirmRubric = document.getElementById('confirmRubric'); if (confirmRubric) confirmRubric.addEventListener('click', () => submitRubricReview('confirm'));
   const saveRubricEdits = document.getElementById('saveRubricEdits'); if (saveRubricEdits) saveRubricEdits.addEventListener('click', () => submitRubricReview('edit'));
   const rejectRubric = document.getElementById('rejectRubric'); if (rejectRubric) rejectRubric.addEventListener('click', () => submitRubricReview('reject'));
   const submitAnchors = document.getElementById('submitAnchors'); if (submitAnchors) submitAnchors.addEventListener('click', submitAnchorReview);
   updateWorkflowState();
+  refreshClassroomState();
 }
 async function boot(payload) {
   data = payload;
@@ -1307,6 +1543,7 @@ async function boot(payload) {
       : null,
   );
   await loadReviewBundle();
+  await refreshClassroomState();
   renderRail();
   scrollToIndex(0, false);
   updateControlVisibility();

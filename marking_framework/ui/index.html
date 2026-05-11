@@ -82,6 +82,47 @@
             </div>
             <div id="projectStatus" class="auth-status">No project loaded</div>
           </div>
+
+          <div class="classroom auth compact">
+            <div class="label">Google Classroom</div>
+            <div class="classroom-grid">
+              <input id="classroomCourseName" type="text" placeholder="Course name" />
+              <input id="classroomCourseId" type="text" placeholder="Course ID" />
+              <input id="classroomAssignmentTitle" type="text" placeholder="Assignment title" />
+              <input id="classroomCourseworkId" type="text" placeholder="CourseWork ID" />
+            </div>
+            <div class="auth-row">
+              <select id="classroomPassbackMode">
+                <option value="no_passback">Dashboard only</option>
+                <option value="csv_export">CSV export</option>
+                <option value="draft_grade">Classroom draft grades</option>
+                <option value="assigned_grade">Classroom assigned grades</option>
+                <option value="return_submission">Grades and return</option>
+              </select>
+              <button id="linkClassroom" class="ghost">Link</button>
+            </div>
+            <div class="project-actions">
+              <button id="reconcileClassroom" class="ghost">Reconcile</button>
+              <button id="completeClassroomAudit" class="ghost">Audit current</button>
+              <button id="finalizeClassroom" class="primary">Finalize</button>
+            </div>
+            <div class="auth-row">
+              <select id="passbackPreflightMode">
+                <option value="csv_export">CSV export</option>
+                <option value="draft_grade">Draft grades</option>
+                <option value="assigned_grade">Assigned grades</option>
+                <option value="return_submission">Return submissions</option>
+              </select>
+              <button id="passbackPreflight" class="ghost">Preflight</button>
+            </div>
+            <div class="project-actions">
+              <button id="confirmPassback" class="ghost">Confirm export</button>
+              <button id="showEvidencePacket" class="ghost">Evidence packet</button>
+            </div>
+            <div id="classroomStatus" class="auth-status">No Classroom assignment linked.</div>
+            <div id="classroomCounts" class="classroom-counts"></div>
+            <div id="classroomPreflight" class="auth-status"></div>
+          </div>
         </div>
       </details>
     </div>
