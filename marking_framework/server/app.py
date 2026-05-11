@@ -10,7 +10,7 @@ from subprocess import DEVNULL, Popen, run
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
@@ -175,6 +175,9 @@ async def ui_data_json(request: Request):
 @app.get("/")
 async def ui_index():
     return ui_file_response("index.html")
+@app.get("/favicon.ico", include_in_schema=False)
+async def ui_favicon():
+    return Response(status_code=204)
 @app.get("/app.js")
 async def ui_app_js():
     return ui_file_response("app.js", media_type="application/javascript")
