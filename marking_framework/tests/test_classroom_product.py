@@ -146,6 +146,48 @@ def test_classroom_state_tracks_reconciliation_revisions_evidence_and_passback(t
     assert action["external_write_performed"] is False
 
 
+def test_classroom_finalization_is_reopened_by_later_teacher_revision(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    write_workspace(root)
+    project = {"id": "project-a", "name": "Project A"}
+
+    classroom.link_assignment(base_dir, root, project, {}, classroom_link_payload())
+    classroom.reconcile_snapshot(base_dir, root, project, {}, classroom_snapshot(include_blocker=False))
+    finalize_review(base_dir, root, project)
+    classroom.complete_background_audit(base_dir, root, project, {}, {"gate_status": "pass"})
+
+    finalized = classroom.finalize_by_teacher(base_dir, root, project, {})
+    assert finalized["product_state"] == "finalized_by_teacher"
+    assert finalized["finalization"]["finalized_revision_id"] == 1
+
+    revised_payload = {
+        "action": "finalize",
+        "assigned_marks": [{"student_id": "s1", "mark": 95}, {"student_id": "s2", "mark": 82}],
+        "feedback_drafts": [
+            {"student_id": "s1", "star1": "Sharper claim.", "star2": "Strong detail.", "wish": "Tighten transitions."},
+            {"student_id": "s2", "star1": "Good structure.", "star2": "Relevant example.", "wish": "Explain the quote."},
+        ],
+    }
+    review_store.save_review_bundle(base_dir, root, project, revised_payload, stage="final")
+    classroom.record_review_revision(base_dir, root, project, {}, revised_payload, stage="final")
+
+    stale = classroom.state_bundle(base_dir, root, project, {})
+    assert stale["product_state"] == "background_validating"
+    assert stale["finalization"]["status"] == "stale"
+    assert stale["launch_gates"]["full_validation_current"] is False
+
+    preflight = classroom.passback_preflight(base_dir, root, project, {}, {"mode": "csv_export"})
+    assert preflight["blocked"] is True
+    assert "full_validation_current_required" in preflight["blockers"]
+    assert "final_ready_required" in preflight["blockers"]
+
+    classroom.complete_background_audit(base_dir, root, project, {}, {"gate_status": "pass"})
+    ready = classroom.state_bundle(base_dir, root, project, {})
+    assert ready["product_state"] == "final_ready"
+
+
 def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()

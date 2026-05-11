@@ -57,7 +57,9 @@ The contract uses the same stable state language as the hero path:
 `final_ready` requires `audit_revision_id >= latest_human_revision_id` and a
 passing audit gate. Saving or finalizing teacher review state on a linked
 Classroom project creates a monotonic human revision and marks prior audit
-evidence stale.
+evidence stale. `finalized_by_teacher` is revision-bound: a later teacher
+revision reopens the background-validation gate until a fresh audit consumes
+that revision.
 
 ## Attachment And Event Rules
 
@@ -79,7 +81,10 @@ preserves Classroom grade semantics:
 - Classroom rubric scores are not treated as writable
 
 `passback/confirm` records the explicit teacher action and updates the evidence
-packet. It does not perform a live Classroom write in this implementation.
+packet. It does not perform a live Classroom write in this implementation. Live
+Classroom write modes stay fail-closed unless policy, OAuth scope posture, admin
+approval, and a verified write adapter are all present; CSV export remains the
+read-only-first path.
 
 ## Evidence Packet
 

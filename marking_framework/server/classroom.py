@@ -34,7 +34,10 @@ UNSUPPORTED_GOOGLE_MIME_TYPES = {
 }
 CLASSROOM_REMEDIES = {
     "classroom_api_disabled": "Ask the Google Workspace admin to enable the Classroom API for this domain.",
+    "admin_approval_required": "Ask the Google Workspace admin to approve live Classroom writes before passback.",
     "admin_blocked_app": "Ask the Google Workspace admin to approve the app for the teacher, course, or pilot cohort.",
+    "classroom_write_adapter_not_configured": "Keep using CSV export until a verified Classroom write adapter is configured.",
+    "full_validation_current_required": "Run background validation against the latest teacher revision before export or passback.",
     "missing_oauth_grant": "Reconnect Google so the app can refresh the teacher's Classroom grant.",
     "insufficient_scope": "Reconnect with the Classroom and Drive scopes required by the selected workflow.",
     "teacher_removed_from_course": "Have a course teacher or admin restore access before retrying reconciliation.",
@@ -140,7 +143,9 @@ def default_state(scope_id: str, current_project: dict | None, identity: dict | 
         },
         "finalization": {
             "finalized_by_teacher_at": "",
+            "finalized_revision_id": 0,
             "evidence_packet_id": "",
+            "status": "not_finalized",
         },
         "passback": {
             "mode": "no_passback",
@@ -172,6 +177,7 @@ def default_policy(identity: dict | None = None) -> dict:
         "policy_state": "operator_supervised_pilot" if not identity.get("strict_auth") else "missing_policy",
         "app_approval_status": "operator_supervised_pilot" if not identity.get("strict_auth") else "missing_admin_approval",
         "oauth_scope_posture": "not_connected",
+        "classroom_write_adapter_status": "not_configured",
         "provider_allowlist_status": "not_evaluated",
         "retention_policy_status": "not_evaluated",
         "external_writes_enabled": False,
@@ -209,6 +215,11 @@ def load_state(base_dir: Path, scope_id: str, current_project: dict | None = Non
     merged["audit"].setdefault("audit_revision_id", 0)
     merged["audit"].setdefault("gate_status", "not_run")
     merged.setdefault("finalization", {"finalized_by_teacher_at": "", "evidence_packet_id": ""})
+    merged["finalization"].setdefault("finalized_revision_id", 0)
+    merged["finalization"].setdefault(
+        "status",
+        "current" if merged["finalization"].get("finalized_by_teacher_at") else "not_finalized",
+    )
     return merged
 
 
@@ -579,6 +590,10 @@ def record_human_revision(
     if int(audit.get("audit_revision_id", 0) or 0) < revision_id:
         audit["status"] = "stale"
         audit["gate_status"] = "not_current"
+    finalization = state.setdefault("finalization", {})
+    if finalization.get("finalized_by_teacher_at") and state_int(finalization.get("finalized_revision_id", 0)) < revision_id:
+        finalization["status"] = "stale"
+        finalization["stale_after_revision_id"] = revision_id
     state["product_state"] = derive_product_state(state, root, current_project, base_dir)
     save_state(base_dir, scope_id, state, root)
     return revision
@@ -655,19 +670,53 @@ def unresolved_blockers(state: dict) -> list[str]:
     return sorted(set(item for item in blockers if item))
 
 
+def state_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def latest_revision_id(state: dict) -> int:
+    return state_int(state.get("latest_human_revision_id", 0))
+
+
+def audit_is_current(state: dict) -> bool:
+    latest_revision = latest_revision_id(state)
+    audit = state.get("audit", {}) if isinstance(state.get("audit"), dict) else {}
+    return bool(
+        latest_revision
+        and state_int(audit.get("audit_revision_id", 0)) >= latest_revision
+        and audit.get("gate_status") == "pass"
+    )
+
+
+def finalization_is_current(state: dict, blockers: list[str] | None = None) -> bool:
+    finalization = state.get("finalization", {}) if isinstance(state.get("finalization"), dict) else {}
+    if not finalization.get("finalized_by_teacher_at"):
+        return False
+    latest_revision = latest_revision_id(state)
+    finalized_revision = state_int(finalization.get("finalized_revision_id", 0))
+    return bool(
+        latest_revision
+        and finalized_revision >= latest_revision
+        and audit_is_current(state)
+        and not (blockers if blockers is not None else unresolved_blockers(state))
+    )
+
+
 def derive_product_state(state: dict, root: Path, current_project: dict | None = None, base_dir: Path | None = None) -> str:
     blockers = unresolved_blockers(state)
     if not state.get("classroom_link"):
         return "blocked"
-    if state.get("finalization", {}).get("finalized_by_teacher_at"):
+    if finalization_is_current(state, blockers):
         return "finalized_by_teacher"
-    latest_revision = int(state.get("latest_human_revision_id", 0) or 0)
-    audit_revision = int(state.get("audit", {}).get("audit_revision_id", 0) or 0)
-    audit_current = bool(latest_revision and audit_revision >= latest_revision and state.get("audit", {}).get("gate_status") == "pass")
+    latest_revision = latest_revision_id(state)
+    audit_current = audit_is_current(state)
     review_base_dir = base_dir or (Path(root) / "server")
     if latest_review_is_final(review_base_dir, root, current_project) and audit_current and not blockers:
         return "final_ready"
-    if latest_revision and audit_revision < latest_revision:
+    if latest_revision and not audit_current:
         return "background_validating"
     if dashboard_exists(root):
         return "review_ready" if not blockers else "blocked"
@@ -693,14 +742,9 @@ def state_bundle(base_dir: Path, root: Path, current_project: dict | None, ident
     review_bundle = review_store.load_review_bundle(base_dir, root, current_project)
     latest_review = review_bundle.get("latest_review", {})
     latest_delta = review_bundle.get("latest_delta", {})
-    audit = state.get("audit", {})
     launch_gates = {
         "teacher_review_finalized": bool(latest_review.get("review_state") == "final" and latest_review.get("review_id")),
-        "full_validation_current": bool(
-            int(audit.get("audit_revision_id", 0) or 0) >= int(state.get("latest_human_revision_id", 0) or 0)
-            and int(state.get("latest_human_revision_id", 0) or 0) > 0
-            and audit.get("gate_status") == "pass"
-        ),
+        "full_validation_current": audit_is_current(state),
         "attachment_blockers_clear": not any(
             submission.get("attachment_blockers") for submission in (state.get("submissions", {}) or {}).values()
         ),
@@ -804,7 +848,9 @@ def finalize_by_teacher(base_dir: Path, root: Path, current_project: dict | None
     state = load_state(base_dir, scope_id, current_project, identity)
     state["finalization"] = {
         "finalized_by_teacher_at": now_iso(),
+        "finalized_revision_id": latest_revision_id(state),
         "evidence_packet_id": packet["packet_id"],
+        "status": "current",
     }
     state["product_state"] = "finalized_by_teacher"
     save_state(base_dir, scope_id, state, root)
@@ -828,11 +874,21 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
     blockers = unresolved_blockers(state)
     if latest_review.get("review_state") != "final" or not latest_review.get("review_id"):
         blockers.append("finalized_teacher_review_required")
+    if not audit_is_current(state):
+        blockers.append("full_validation_current_required")
     if state.get("product_state") not in {"final_ready", "finalized_by_teacher"}:
         blockers.append("final_ready_required")
     policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
-    if mode in LIVE_WRITE_MODES and not bool(policy.get("external_writes_enabled", False)):
-        blockers.append("external_writes_disabled")
+    if mode in LIVE_WRITE_MODES:
+        if not bool(policy.get("external_writes_enabled", False)):
+            blockers.append("external_writes_disabled")
+        else:
+            if policy.get("classroom_write_adapter_status") != "verified":
+                blockers.append("classroom_write_adapter_not_configured")
+            if policy.get("oauth_scope_posture") not in {"write_ready", "classroom_write_ready", "connected_with_write_scopes"}:
+                blockers.append("insufficient_scope")
+            if policy.get("app_approval_status") != "approved":
+                blockers.append("admin_approval_required")
     submissions_by_student = {
         str(item.get("student_id", "") or ""): item
         for item in (state.get("submissions", {}) or {}).values()
