@@ -9,9 +9,9 @@
 <body data-theme="light" data-view="single">
   <header class="topbar">
     <div class="brand">
-      <div class="eyebrow">Release Workspace</div>
+      <div class="eyebrow">Teacher Workspace</div>
       <h1>Assessor</h1>
-      <p class="tagline">Upload the class set, run the assessment once, then correct only the exceptions.</p>
+      <p class="tagline">Upload the set, run one pass, review only what needs judgment.</p>
     </div>
     <div class="topbar-meta">
       <div id="projectBadge" class="status-pill" data-state="idle">Project · unsaved</div>
@@ -32,6 +32,7 @@
           <div class="panel-title">Setup</div>
           <div id="intakeHint" class="intake-hint">Add essays, rubric, and outline. Then run the assessment.</div>
         </div>
+        <div id="workflowSummary" class="workflow-summary">Ready for files</div>
       </div>
 
       <div class="uploads intake-grid">
@@ -53,23 +54,13 @@
         <div id="pipelineStatus" class="auth-status">Idle</div>
       </div>
 
-      <details class="secondary-details">
-        <summary>Session details</summary>
-        <div class="details-grid">
-          <div class="auth compact">
-            <div class="label">Connection</div>
-            <div class="auth-row">
-              <input id="apiKeyInput" type="password" placeholder="OpenAI API key" />
-              <button id="connectKey" class="ghost">Connect</button>
-            </div>
-            <div class="auth-row auth-row-single">
-              <button id="codexLogin" class="ghost">Sign in with Codex</button>
-            </div>
-            <div id="authStatus" class="auth-status">Not connected</div>
-          </div>
-
-          <div class="projects auth compact">
-            <div class="label">Projects</div>
+      <div class="workflow-strip">
+        <details class="quick-card project-card">
+          <summary>
+            <span>Project</span>
+            <span id="projectStatus" class="quick-card-status">No project loaded</span>
+          </summary>
+          <div class="quick-card-body auth compact">
             <div class="auth-row">
               <select id="projectSelect"></select>
               <button id="loadProject" class="ghost">Load</button>
@@ -77,19 +68,26 @@
             <div class="project-actions">
               <button id="saveProject" class="ghost">Save</button>
               <button id="newProject" class="ghost">New</button>
-              <button id="clearProject" class="ghost">Clear</button>
-              <button id="deleteProject" class="ghost">Delete</button>
             </div>
-            <div id="projectStatus" class="auth-status">No project loaded</div>
+            <details class="advanced-details">
+              <summary>Manage</summary>
+              <div class="project-actions">
+                <button id="clearProject" class="ghost">Clear</button>
+                <button id="deleteProject" class="ghost">Delete</button>
+              </div>
+            </details>
           </div>
+        </details>
 
-          <div class="classroom auth compact">
-            <div class="label">Google Classroom</div>
+        <details class="quick-card classroom-card">
+          <summary>
+            <span>Google Classroom</span>
+            <span id="classroomStatus" class="quick-card-status">No assignment linked</span>
+          </summary>
+          <div class="quick-card-body classroom auth compact">
             <div class="classroom-grid">
               <input id="classroomCourseName" type="text" placeholder="Course name" />
-              <input id="classroomCourseId" type="text" placeholder="Course ID" />
               <input id="classroomAssignmentTitle" type="text" placeholder="Assignment title" />
-              <input id="classroomCourseworkId" type="text" placeholder="CourseWork ID" />
             </div>
             <div class="auth-row">
               <select id="classroomPassbackMode">
@@ -101,12 +99,19 @@
               </select>
               <button id="linkClassroom" class="ghost">Link</button>
             </div>
-            <div class="project-actions">
+            <details class="advanced-details">
+              <summary>Course IDs</summary>
+              <div class="classroom-grid">
+                <input id="classroomCourseId" type="text" placeholder="Course ID" />
+                <input id="classroomCourseworkId" type="text" placeholder="CourseWork ID" />
+              </div>
+            </details>
+            <div class="project-actions classroom-linked-control is-hidden">
               <button id="reconcileClassroom" class="ghost">Reconcile</button>
               <button id="completeClassroomAudit" class="ghost">Audit current</button>
               <button id="finalizeClassroom" class="primary">Finalize</button>
             </div>
-            <div class="auth-row">
+            <div class="auth-row classroom-linked-control is-hidden">
               <select id="passbackPreflightMode">
                 <option value="csv_export">CSV export</option>
                 <option value="draft_grade">Draft grades</option>
@@ -115,16 +120,31 @@
               </select>
               <button id="passbackPreflight" class="ghost">Preflight</button>
             </div>
-            <div class="project-actions">
+            <div class="project-actions classroom-linked-control is-hidden">
               <button id="confirmPassback" class="ghost">Confirm export</button>
               <button id="showEvidencePacket" class="ghost">Evidence packet</button>
             </div>
-            <div id="classroomStatus" class="auth-status">No Classroom assignment linked.</div>
-            <div id="classroomCounts" class="classroom-counts"></div>
-            <div id="classroomPreflight" class="auth-status"></div>
+            <div id="classroomCounts" class="classroom-counts classroom-linked-control is-hidden"></div>
+            <div id="classroomPreflight" class="auth-status classroom-linked-control is-hidden"></div>
           </div>
-        </div>
-      </details>
+        </details>
+
+        <details class="quick-card account-card">
+          <summary>
+            <span>Connection</span>
+            <span id="authStatus" class="quick-card-status">Not connected</span>
+          </summary>
+          <div class="quick-card-body auth compact">
+            <div class="auth-row">
+              <input id="apiKeyInput" type="password" placeholder="OpenAI API key" />
+              <button id="connectKey" class="ghost">Connect</button>
+            </div>
+            <div class="auth-row auth-row-single">
+              <button id="codexLogin" class="ghost">Sign in with Codex</button>
+            </div>
+          </div>
+        </details>
+      </div>
     </div>
   </section>
 
@@ -180,16 +200,19 @@
           <input id="gradeOverride" type="number" placeholder="Final mark" />
           <button id="copyFeedback" class="ghost">Copy feedback</button>
         </div>
-        <div class="curve-range">
-          <div class="control curve-control">
-            <label for="topGrade">Top mark</label>
-            <input id="topGrade" type="number" value="92" />
+        <details class="secondary-details compact-details">
+          <summary>Curve</summary>
+          <div class="curve-range">
+            <div class="control curve-control">
+              <label for="topGrade">Top mark</label>
+              <input id="topGrade" type="number" value="92" />
+            </div>
+            <div class="control curve-control">
+              <label for="bottomGrade">Bottom mark</label>
+              <input id="bottomGrade" type="number" value="58" />
+            </div>
           </div>
-          <div class="control curve-control">
-            <label for="bottomGrade">Bottom mark</label>
-            <input id="bottomGrade" type="number" value="58" />
-          </div>
-        </div>
+        </details>
       </div>
 
       <details id="feedbackSection" class="secondary-details" open>
