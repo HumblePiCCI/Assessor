@@ -16,6 +16,8 @@ from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
 import server.projects as projectsmod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
+from scripts.codex_runtime import codex_status_payload
+from scripts.openai_client import api_provider_status
 app = FastAPI()
 app.include_router(projects_router)
 app.add_middleware(
@@ -59,7 +61,15 @@ def save_upload(upload: UploadFile, dest: Path):
 def workspace_root() -> Path:
     return BASE_DIR.parent
 def current_api_key() -> str | None:
-    return API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
+    if API_KEY_OVERRIDE["value"]:
+        return API_KEY_OVERRIDE["value"]
+    status = api_provider_status(str(BASE_DIR.parent / "config" / "llm_routing.json"))
+    auth_source = status.get("auth_source")
+    if auth_source == "LLM_API_KEY":
+        return os.environ.get("LLM_API_KEY")
+    if auth_source and auth_source not in {"runtime_override", ""}:
+        return os.environ.get(str(auth_source))
+    return None
 
 
 def request_identity(request: Request | None) -> dict:
@@ -102,29 +112,13 @@ def log_pipeline(root: Path, run_id: str, message: str, detail: str | None = Non
         if detail:
             f.write(detail.strip() + "\n")
             f.write("---\n")
-def codex_home() -> Path:
-    return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
-def codex_auth_path() -> Path:
-    return codex_home() / "auth.json"
-def codex_status_payload() -> dict:
-    available = bool(shutil.which("codex"))
-    connected = False
-    if available:
-        auth_path = codex_auth_path()
-        if auth_path.exists():
-            try:
-                data = json.loads(auth_path.read_text(encoding="utf-8"))
-                connected = bool(data.get("OPENAI_API_KEY") or data.get("tokens"))
-            except json.JSONDecodeError:
-                connected = False
-    return {"available": available, "connected": connected}
-
-
 def codex_login_supported() -> bool:
-    if not shutil.which("codex"):
+    status = codex_status_payload()
+    path = status.get("runtime_path") or shutil.which("codex")
+    if not path:
         return False
     try:
-        result = run(["codex", "--help"], capture_output=True, text=True)
+        result = run([path, "--help"], capture_output=True, text=True)
     except Exception:
         return False
     text = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
@@ -139,11 +133,12 @@ PIPELINE_QUEUE = PipelineQueue(
 )
 @app.get("/auth/status")
 async def auth_status(request: Request):
-    key = API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
     identity = request_identity(request)
     contract = launch_contract(BASE_DIR.parent)
+    provider = api_provider_status(str(BASE_DIR.parent / "config" / "llm_routing.json"), API_KEY_OVERRIDE["value"])
     return {
-        "connected": bool(key),
+        "connected": bool(provider.get("connected")),
+        "api_provider": provider,
         "runtime_mode": identity.get("auth_mode", "development"),
         "strict_auth": bool(identity.get("strict_auth", False)),
         "identity_headers": identity.get("headers", {}),
@@ -204,18 +199,24 @@ async def codex_status():
     return codex_status_payload()
 @app.post("/codex/login")
 async def codex_login():
-    if not shutil.which("codex"):
+    status = codex_status_payload()
+    runtime_path = status.get("runtime_path") or shutil.which("codex")
+    if not runtime_path:
         raise HTTPException(status_code=400, detail="Codex CLI not found")
     # Some local Codex CLIs are already authenticated but do not expose a browser login subcommand.
-    status = codex_status_payload()
     if status.get("connected"):
         return {"status": "already_connected"}
+    if status.get("oauth_tokens_present") and not status.get("connected"):
+        raise HTTPException(
+            status_code=400,
+            detail="Codex OAuth tokens are present, but this Codex CLI needs an API key for local non-interactive runs.",
+        )
     if not codex_login_supported():
         raise HTTPException(
             status_code=400,
             detail="Installed Codex CLI does not support browser login. Use API key connect or upgrade Codex CLI.",
         )
-    Popen(["codex", "login"], stdout=DEVNULL, stderr=DEVNULL)
+    Popen([runtime_path, "login"], stdout=DEVNULL, stderr=DEVNULL)
     return {"status": "started"}
 
 
@@ -228,7 +229,7 @@ def validate_pipeline_mode(mode: str) -> str:
         if not status["available"]:
             raise HTTPException(status_code=400, detail="Codex CLI not found")
         if not status["connected"]:
-            raise HTTPException(status_code=400, detail="Codex not connected")
+            raise HTTPException(status_code=400, detail=status.get("reason") or "Codex not connected")
     if normalized == "openai" and not current_api_key():
         raise HTTPException(status_code=400, detail="OpenAI API key not configured")
     return normalized

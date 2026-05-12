@@ -121,6 +121,7 @@ function updateControlVisibility() {
   document.getElementById('actionsEmpty')?.classList.toggle('is-hidden', hasScored);
   document.getElementById('teacherSpotlight')?.classList.toggle('is-hidden', !hasScored);
   document.getElementById('feedbackSection')?.classList.toggle('is-hidden', !hasScored);
+  document.getElementById('reviewSection')?.classList.toggle('is-hidden', !hasScored);
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
   if (prevBtn) prevBtn.disabled = !hasScored || currentIndex <= 0;
@@ -145,13 +146,14 @@ async function refreshAuthStatus() {
     const codex = codexRes.ok ? await codexRes.json() : null;
     const api = apiRes.ok ? await apiRes.json() : null;
     if (codex && codex.available && codex.connected) {
-      status.textContent = 'Codex connected';
+      status.textContent = codex.auth_source === 'codex_oauth' ? 'Codex OAuth connected' : 'Codex connected';
       if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; }
     } else if (api && api.connected) {
-      status.textContent = 'API key connected';
+      const provider = api.api_provider && api.api_provider.provider ? api.api_provider.provider : 'API';
+      status.textContent = `${provider} key connected`;
       if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
     } else if (codex && codex.available) {
-      status.textContent = 'Codex not connected';
+      status.textContent = codex.reason || 'Codex not connected';
       if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
     } else {
       status.textContent = 'Offline';
@@ -519,7 +521,7 @@ function ensureReviewPanel() {
   if (!actions) return null;
   section = document.createElement('div');
   section.id = 'reviewSection';
-  section.className = 'auth review-section';
+  section.className = 'auth review-section is-hidden';
   section.innerHTML = `
     <div class="panel-row">
       <div>
@@ -1383,6 +1385,20 @@ function updatePreviewFromUploads() {
 }
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function waitForJob(jobId) { const start = Date.now(); while (Date.now() - start < 45 * 60 * 1000) { const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`)); if (!res.ok) throw new Error('Run status unavailable'); const job = await res.json(); if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job; if (job.status === 'failed') throw new Error(job.error || 'Run failed'); await sleep(2000); } throw new Error('Run timed out'); }
+function runErrorForTeacher(message) {
+  const raw = String(message || '').trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes('calibration gate failed')) {
+    if (lower.includes('stale')) return 'Calibration needs refresh before this class can run. Ask an admin to refresh calibration, then run again.';
+    if (lower.includes('missing')) return 'Calibration is not set up yet. Ask an admin to prepare calibration, then run again.';
+    return 'Calibration is not ready for this class. Ask an admin to refresh calibration, then run again.';
+  }
+  if (lower.includes('codex not connected')) return 'Codex is not connected. Sign in with Codex, then run again.';
+  if (lower.includes('api key') || lower.includes('is not set')) return 'The runtime is not connected. Connect Codex or an API key, then run again.';
+  if (lower.includes('timed out')) return 'The run took too long. Try again, or ask an admin to check the runtime.';
+  if (!raw) return 'Run failed. Check the inputs and try again.';
+  return raw.length > 180 ? 'Run failed. Check the inputs and try again; if it repeats, ask an admin to inspect the run.' : raw;
+}
 async function runPipeline() {
   const essays = document.getElementById('uploadEssays'); const rubric = document.getElementById('uploadRubric'); const outline = document.getElementById('uploadOutline');
   if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) { setPipelineStatus('Add essays, rubric, outline', 'warn'); return; }
@@ -1392,7 +1408,7 @@ async function runPipeline() {
   if (!mode) { setPipelineStatus('Connect Codex or API key', 'warn'); return; }
   const form = new FormData(); form.append('rubric', rubric.files[0]); form.append('outline', outline.files[0]); Array.from(essays.files).forEach(f => form.append('submissions', f)); form.append('mode', mode); if (currentProject?.id) form.append('project_id', currentProject.id);
   setPipelineStatus('Running...', 'running'); setRunning(true); startPipelineNarrative(); startShuffle();
-  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = `Run failed: ${err.detail}`; } catch (_) {} setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } if (job.status === 'awaiting_anchor_scores') { setPipelineStatus('Anchor calibration needed', 'warn'); stopShuffle(); stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.'); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (dataRes.ok) { previewStudents = []; await boot(await dataRes.json()); } await fetchAnchorReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); setPipelineStatus('Complete', 'ready'); stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = `Run failed: ${err.message || 'connection lost'}`; setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); }
+  try { const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form }); if (!res.ok) { let msg = 'Run failed'; try { const err = await res.json(); if (err.detail) msg = runErrorForTeacher(err.detail); } catch (_) {} setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); return; } const submit = await res.json(); activeJobId = submit.job_id || ''; if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.'); if (submit.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } const job = submit.status === 'completed' ? submit : await waitForJob(activeJobId); if (job.status === 'awaiting_rubric_confirmation') { setPipelineStatus('Rubric confirmation needed', 'warn'); stopShuffle(); stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.'); await fetchRubricReview(activeJobId); return; } if (job.status === 'awaiting_anchor_scores') { setPipelineStatus('Anchor calibration needed', 'warn'); stopShuffle(); stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.'); const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (dataRes.ok) { previewStudents = []; await boot(await dataRes.json()); } await fetchAnchorReview(activeJobId); return; } const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${job.id || activeJobId}/data`)); if (!dataRes.ok) throw new Error('Dashboard data unavailable'); previewStudents = []; await boot(await dataRes.json()); setPipelineStatus('Complete', 'ready'); stopShuffle(); stopPipelineNarrative('Done. Review is ready.'); } catch (err) { const msg = runErrorForTeacher(err.message || 'connection lost'); setPipelineStatus(msg, 'danger'); stopShuffle(); stopPipelineNarrative(msg); }
 }
 function setupUploads() {
   document.querySelectorAll('.upload').forEach(zone => {

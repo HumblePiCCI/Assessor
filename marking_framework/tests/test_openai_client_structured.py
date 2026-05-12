@@ -3,6 +3,16 @@ import json
 import scripts.openai_client as oc
 
 
+def fake_codex_runtime():
+    return {
+        "available": True,
+        "path": "/usr/bin/codex",
+        "kind": "legacy_q",
+        "supports_oauth": False,
+        "version": "codex-test",
+    }
+
+
 def test_schema_required_keys_and_contract_hint():
     fmt = {
         "type": "json_schema",
@@ -58,7 +68,7 @@ def test_responses_create_codex_structured_retry_and_canonical(tmp_path, monkeyp
     route_path = tmp_path / "routing.json"
     route_path.write_text(json.dumps({"mode": "codex_local"}), encoding="utf-8")
     monkeypatch.setenv("LLM_MODE", "codex_local")
-    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: fake_codex_runtime())
 
     calls = {"n": 0, "prompts": []}
 
@@ -95,7 +105,7 @@ def test_responses_create_codex_structured_from_raw_without_assistant(tmp_path, 
     route_path = tmp_path / "routing.json"
     route_path.write_text(json.dumps({"mode": "codex_local"}), encoding="utf-8")
     monkeypatch.setenv("LLM_MODE", "codex_local")
-    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: fake_codex_runtime())
 
     def fake_run(cmd, capture_output=None, text=None, timeout=None):
         stdout = json.dumps({"student_id": "s7", "rubric_total_points": 73, "criteria_points": {}, "notes": "ok"})
@@ -127,11 +137,11 @@ def test_responses_create_codex_structured_cache_hit(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_MODE", "codex_local")
     monkeypatch.setenv("LLM_CACHE", "1")
     monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: fake_codex_runtime())
     fmt = {"type": "json_schema", "schema": {"type": "object", "required": ["student_id"]}}
     normalized = oc._normalized_text_format(fmt)
     prompt = oc._build_codex_prompt([{"role": "user", "content": "hi"}], normalized)
-    key = oc._cache_key({"mode": "codex_local", "model": "gpt-5.2", "prompt": prompt, "text_format": normalized})
+    key = oc._cache_key(oc._codex_cache_payload("gpt-5.2", prompt, normalized, fake_codex_runtime()))
     path = tmp_path / "cache" / f"{key}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"output": [{"type": "output_text", "text": "{\"student_id\":\"s1\"}"}], "usage": {}}), encoding="utf-8")
@@ -144,7 +154,7 @@ def test_responses_create_codex_structured_from_extracted_path(tmp_path, monkeyp
     route_path = tmp_path / "routing.json"
     route_path.write_text(json.dumps({"mode": "codex_local"}), encoding="utf-8")
     monkeypatch.setenv("LLM_MODE", "codex_local")
-    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: fake_codex_runtime())
     fmt = {
         "type": "json_schema",
         "schema": {"type": "object", "required": ["student_id", "rubric_total_points", "criteria_points", "notes"]},
@@ -166,7 +176,7 @@ def test_responses_create_codex_structured_valueerror_repair(tmp_path, monkeypat
     route_path = tmp_path / "routing.json"
     route_path.write_text(json.dumps({"mode": "codex_local"}), encoding="utf-8")
     monkeypatch.setenv("LLM_MODE", "codex_local")
-    monkeypatch.setattr(oc.shutil, "which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: fake_codex_runtime())
     fmt = {"type": "json_schema", "schema": {"type": "object", "required": ["student_id"]}}
     prompts = []
     calls = {"n": 0}

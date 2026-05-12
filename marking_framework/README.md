@@ -7,7 +7,7 @@ Purpose
 Quick Start
 0) Optional Hero Path orchestration
    - `python3 scripts/hero_path.py --verify-consistency --apply-consistency --build-dashboard`
-   - LLM assessors: add `--llm-assessors` (requires OPENAI_API_KEY)
+   - LLM assessors: add `--llm-assessors` (requires Codex OAuth local mode or an API provider key)
 
 1) Place inputs
    - Rubric: `inputs/rubric.docx`, `inputs/rubric.md`, `inputs/rubric.txt`, `inputs/rubric.rtf`, `inputs/rubric.pdf`, or an image-backed rubric file
@@ -70,6 +70,10 @@ Quick Start
 10) Pay-as-you-go job runner (optional)
    - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
    - Minimal API server: `python3 -m uvicorn server.app:app --reload`
+
+11) Human product smoke
+   - Walk the teacher-facing verification path in `docs/PRODUCT_SMOKE_PROCEDURE.md`
+   - This checks upload, run, review, feedback, draft/finalize, reload persistence, and current Classroom readiness boundaries.
 
 Key Outputs
 - `outputs/ranked_list.md` (consensus order + confidence signals)
