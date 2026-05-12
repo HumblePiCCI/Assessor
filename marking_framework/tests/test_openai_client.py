@@ -644,6 +644,24 @@ def test_timeout_seconds_negative_env(monkeypatch):
     assert oc._timeout_seconds() == 180.0
 
 
+def test_codex_timeout_seconds_defaults_longer(monkeypatch):
+    monkeypatch.delenv("CODEX_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+    assert oc._codex_timeout_seconds() == 600.0
+
+
+def test_codex_timeout_seconds_uses_specific_override(monkeypatch):
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "900")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "120")
+    assert oc._codex_timeout_seconds() == 900.0
+
+
+def test_codex_timeout_seconds_falls_back_to_llm_override(monkeypatch):
+    monkeypatch.delenv("CODEX_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "240")
+    assert oc._codex_timeout_seconds() == 240.0
+
+
 def test_codex_timeout_raises_runtime_error(tmp_path, monkeypatch):
     routing = {"mode": "codex_local"}
     route_path = tmp_path / "routing.json"

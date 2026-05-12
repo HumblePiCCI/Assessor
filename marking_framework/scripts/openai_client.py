@@ -14,18 +14,35 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
     from codex_runtime import resolve_codex_runtime
 
+DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+DEFAULT_CODEX_TIMEOUT_SECONDS = 600.0
+
 
 def load_routing(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
-def _timeout_seconds() -> float:
-    # Conservative default: avoid hanging the UI/pipeline indefinitely.
-    raw = os.environ.get("LLM_TIMEOUT_SECONDS", "180").strip()
+
+def _env_timeout_seconds(name: str, default: float) -> float:
+    raw = os.environ.get(name, str(default)).strip()
     try:
         value = float(raw)
     except ValueError:
-        return 180.0
-    return value if value > 0 else 180.0
+        return default
+    return value if value > 0 else default
+
+
+def _timeout_seconds() -> float:
+    # Conservative API default: avoid hanging the UI/pipeline indefinitely.
+    return _env_timeout_seconds("LLM_TIMEOUT_SECONDS", DEFAULT_LLM_TIMEOUT_SECONDS)
+
+
+def _codex_timeout_seconds() -> float:
+    # Codex exec includes process startup and can receive larger structured prompts.
+    if "CODEX_TIMEOUT_SECONDS" in os.environ:
+        return _env_timeout_seconds("CODEX_TIMEOUT_SECONDS", DEFAULT_CODEX_TIMEOUT_SECONDS)
+    if "LLM_TIMEOUT_SECONDS" in os.environ:
+        return _env_timeout_seconds("LLM_TIMEOUT_SECONDS", DEFAULT_LLM_TIMEOUT_SECONDS)
+    return DEFAULT_CODEX_TIMEOUT_SECONDS
 
 
 def _retry_attempts() -> int:
@@ -308,7 +325,7 @@ def _run_codex_exec(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
         prompt,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=_timeout_seconds())
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=_codex_timeout_seconds())
         last_message = ""
         if output_path.exists():
             last_message = output_path.read_text(encoding="utf-8", errors="replace")
@@ -324,7 +341,7 @@ def _run_codex_exec(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
 
 def _run_codex_legacy_q(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
     cmd = [runtime["path"], "-q", "--model", model, "--approval-mode", "suggest", "--no-project-doc", prompt]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_timeout_seconds())
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_codex_timeout_seconds())
     if result.returncode != 0:
         raise RuntimeError(f"Codex CLI failed: {result.stderr.strip() or 'unknown error'}")
     return "", result.stdout or ""
@@ -336,7 +353,7 @@ def _run_codex(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
             return _run_codex_exec(runtime, model, prompt)
         return _run_codex_legacy_q(runtime, model, prompt)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Codex CLI timed out after {_timeout_seconds():.0f}s") from exc
+        raise RuntimeError(f"Codex CLI timed out after {_codex_timeout_seconds():.0f}s") from exc
 
 
 def _codex_response(model: str, messages: list, text_format: dict | None = None) -> dict:
