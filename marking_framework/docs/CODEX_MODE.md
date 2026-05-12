@@ -16,4 +16,5 @@ Recommended Setup
 Notes
 - Codex sign-in is specific to Codex tools and does not automatically grant API access to third-party apps.
 - Local development can run on the current Codex/ChatGPT subscription through `codex_local`.
+- Codex local execution uses `CODEX_TIMEOUT_SECONDS` when set. If unset, it uses a 600 second default so larger multi-essay adjudication prompts can finish; `LLM_TIMEOUT_SECONDS` still controls API-provider calls and remains the fallback override for Codex when explicitly set.
 - Production pay-as-you-go runs should use the API provider path configured in `config/llm_routing.json`.
