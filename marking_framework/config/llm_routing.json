@@ -61,6 +61,28 @@
     "enforce_exemplar_hash_match": true,
     "reject_synthetic": false
   },
+  "api_provider": "openai",
+  "providers": {
+    "openai": {
+      "kind": "openai_responses",
+      "base_url": "https://api.openai.com/v1",
+      "responses_endpoint": "/responses",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "anthropic": {
+      "kind": "anthropic_messages",
+      "base_url": "https://api.anthropic.com/v1",
+      "messages_endpoint": "/messages",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "anthropic_version": "2023-06-01"
+    },
+    "kimi": {
+      "kind": "openai_chat",
+      "base_url": "https://api.moonshot.ai/v1",
+      "chat_completions_endpoint": "/chat/completions",
+      "api_key_env": "KIMI_API_KEY"
+    }
+  },
   "openai": {
     "base_url": "https://api.openai.com/v1",
     "responses_endpoint": "/responses"

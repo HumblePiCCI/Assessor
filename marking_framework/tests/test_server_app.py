@@ -162,42 +162,63 @@ def test_create_job_missing_key(tmp_path, monkeypatch):
 
 def test_codex_status_unavailable(monkeypatch):
     client = TestClient(app)
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: None)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": False, "connected": False, "reason": "Codex CLI not found"})
     resp = client.get("/codex/status")
     assert resp.status_code == 200
-    assert resp.json() == {"available": False, "connected": False}
+    payload = resp.json()
+    assert payload["available"] is False
+    assert payload["connected"] is False
+    assert payload["reason"] == "Codex CLI not found"
 
 
-def test_codex_status_connected(tmp_path, monkeypatch):
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+def test_codex_status_oauth_exec_ready(monkeypatch):
+    monkeypatch.setattr(
+        appmod,
+        "codex_status_payload",
+        lambda: {
+            "available": True,
+            "connected": True,
+            "auth_source": "codex_oauth",
+            "oauth_tokens_present": True,
+            "oauth_supported": True,
+            "runtime_kind": "exec",
+            "runtime_path": "/Applications/Codex.app/Contents/Resources/codex",
+            "reason": "Codex OAuth runtime ready",
+        },
+    )
     client = TestClient(app)
     resp = client.get("/codex/status")
     assert resp.status_code == 200
     assert resp.json()["available"] is True
     assert resp.json()["connected"] is True
+    assert resp.json()["auth_source"] == "codex_oauth"
+    assert resp.json()["oauth_tokens_present"] is True
+    assert resp.json()["runtime_kind"] == "exec"
 
 
-def test_codex_status_bad_json(tmp_path, monkeypatch):
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text("{", encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+def test_codex_status_connected_with_api_key(monkeypatch):
+    monkeypatch.setattr(
+        appmod,
+        "codex_status_payload",
+        lambda: {"available": True, "connected": True, "auth_source": "auth_file_api_key", "reason": "Codex CLI ready"},
+    )
+    client = TestClient(app)
+    resp = client.get("/codex/status")
+    assert resp.status_code == 200
+    assert resp.json()["connected"] is True
+    assert resp.json()["auth_source"] == "auth_file_api_key"
+
+
+def test_codex_status_bad_json(monkeypatch):
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False, "reason": "Invalid Codex auth file"})
     client = TestClient(app)
     resp = client.get("/codex/status")
     assert resp.status_code == 200
     assert resp.json()["connected"] is False
 
 
-def test_codex_status_missing_auth_file(tmp_path, monkeypatch):
-    codex_home = tmp_path / "codex_home"
-    codex_home.mkdir()
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(appmod.shutil, "which", lambda _: "/usr/bin/codex")
+def test_codex_status_missing_auth_file(monkeypatch):
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": False, "reason": "Codex not connected"})
     client = TestClient(app)
     resp = client.get("/codex/status")
     assert resp.status_code == 200
@@ -219,13 +240,14 @@ def test_codex_login_starts(monkeypatch):
     resp = client.post("/codex/login")
     assert resp.status_code == 200
     assert resp.json()["status"] == "started"
-    assert started["cmd"][0] == "codex"
+    assert started["cmd"][0] == "/usr/bin/codex"
     assert started["cmd"][1] == "login"
 
 
 def test_codex_login_missing(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(appmod.shutil, "which", lambda _: None)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": False, "connected": False})
     resp = client.post("/codex/login")
     assert resp.status_code == 400
 

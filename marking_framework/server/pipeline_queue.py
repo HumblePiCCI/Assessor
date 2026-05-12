@@ -1133,6 +1133,7 @@ class PipelineQueue:
         env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
         api_key = self.get_api_key()
         if api_key:
+            env["LLM_API_KEY"] = api_key
             env["OPENAI_API_KEY"] = api_key
         self._append_event(job_dir, "anchor_resume", "Teacher anchor scores received", event="message")
         self._update_job(job_id, "running", stage="anchor_resume", message="Applying anchor calibration", completed_at="")
@@ -1677,6 +1678,7 @@ class PipelineQueue:
             env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
             api_key = self.get_api_key()
             if api_key:
+                env["LLM_API_KEY"] = api_key
                 env["OPENAI_API_KEY"] = api_key
 
             if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, steps, start_completed=0, tenant_id=tenant_id):
