@@ -349,10 +349,7 @@ def google_oauth_service() -> GoogleOAuthService:
 
 def google_classroom_adapter(identity: dict, project: dict) -> tuple[GoogleClassroomAdapter, dict]:
     service = google_oauth_service()
-    status = service.status(identity, project)
-    if not status.get("connected"):
-        raise GoogleOAuthError("Google is not connected for this teacher and project.", code="missing_oauth_grant")
-    token = service.access_token(identity, project)
+    token, status = service.fresh_access_token(identity, project)
     return GoogleClassroomAdapter(token), status
 
 
@@ -595,12 +592,14 @@ async def projects_classroom_google_courses(request: Request):
 
 
 @router.get("/projects/classroom/google/courses/{course_id}/coursework")
-async def projects_classroom_google_coursework(course_id: str, request: Request):
+async def projects_classroom_google_coursework(course_id: str, request: Request, include_drafts: bool = False):
     identity = identity_context(request)
     project = project_meta_for_product(identity)
+    if include_drafts and _strict_identity(identity) and str(identity.get("role", "")) != "admin":
+        raise HTTPException(status_code=403, detail={"code": "admin_required", "message": "Draft coursework visibility is admin-only."})
     try:
         adapter, status = google_classroom_adapter(identity, project)
-        return {"google_auth": status, "course_id": course_id, "coursework": adapter.list_coursework(course_id)}
+        return {"google_auth": status, "course_id": course_id, "coursework": adapter.list_coursework(course_id, include_drafts=include_drafts)}
     except (GoogleOAuthError, GoogleClassroomError) as exc:
         google_error_response(exc)
 

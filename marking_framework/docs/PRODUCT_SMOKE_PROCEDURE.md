@@ -9,6 +9,8 @@ Related docs:
 - [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md)
 - [WORKFLOW.md](./WORKFLOW.md)
 - [LIVE_COHORT_RUNTIME.md](./LIVE_COHORT_RUNTIME.md)
+- [GOOGLE_CLASSROOM_LOCAL_SETUP.md](./GOOGLE_CLASSROOM_LOCAL_SETUP.md)
+- [GOOGLE_CLASSROOM_LIVE_SMOKE.md](./GOOGLE_CLASSROOM_LIVE_SMOKE.md)
 
 ## Purpose
 
@@ -130,19 +132,31 @@ Product judgment:
 Use a low-risk test Classroom course only. Do not use real student-private data
 for committed screenshots or fixtures.
 
+Before this step, run:
+
+```bash
+python3 scripts/google_classroom_setup_check.py
+```
+
 Expected:
 
 - `Connect Google Classroom` opens the Google OAuth flow when the server has
   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
   `GOOGLE_OAUTH_REDIRECT_URI`
+- the OAuth callback returns to the app without exposing the authorization code
 - after connection, the app shows connected/not connected in plain language
+- expired access tokens refresh before live Classroom reads when a refresh token
+  is available; failed refresh tells the teacher to reconnect
 - the teacher can choose a class and assignment from dropdowns
 - `Sync submissions` imports supported attachments into server-side
   `inputs/submissions`
+- `inputs/class_metadata.json` is present after sync
 - counts show roster, submitted, imported, and blocked submissions
 - blockers appear in Exceptions with remedies
 - the run button becomes available when runtime, rubric, outline, and either
   local uploads or synced Classroom submissions are ready
+- saved `inputs/rubric.*` and `inputs/assignment_outline.*` can be reused for a
+  Classroom-imported run; the UI names whichever input is missing
 
 Fail if raw OAuth tokens, raw Google file IDs, stack traces, or queue internals
 are exposed in the routine path.

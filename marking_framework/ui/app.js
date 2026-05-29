@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, googleAuth = null, googleCourses = [], googleCoursework = [];
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, projectInputsStatus = null, googleAuth = null, googleCourses = [], googleCoursework = [];
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -64,6 +64,30 @@ function inferPipelineState(text) {
   if (low.includes('need') || low.includes('add ') || low.includes('checking') || low.includes('idle')) return 'warn';
   return 'idle';
 }
+function savedRubricReady() {
+  return !!projectInputsStatus?.rubric?.ready;
+}
+function savedOutlineReady() {
+  return !!projectInputsStatus?.outline?.ready;
+}
+function importedSubmissionCount() {
+  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
+  return Math.max(
+    Number(projectInputsStatus?.submissions?.count || 0),
+    Number(projectInputsStatus?.class_metadata?.imported_submission_count || 0),
+    Number(latestSync.imported_count || 0)
+  );
+}
+function classroomImportsReady() {
+  return !!(classroomState?.classroom_link?.course_id && importedSubmissionCount() > 0);
+}
+function missingClassroomRunInputs(rubricFileReady, outlineFileReady) {
+  const missing = [];
+  if (!classroomImportsReady()) missing.push('sync Classroom submissions');
+  if (!rubricFileReady && !savedRubricReady()) missing.push('add rubric');
+  if (!outlineFileReady && !savedOutlineReady()) missing.push('add assignment outline');
+  return missing;
+}
 function updateWorkflowState() {
   const authText = document.getElementById('authStatus')?.textContent || 'Offline';
   const projectText = currentProject ? currentProject.name : 'unsaved';
@@ -71,14 +95,11 @@ function updateWorkflowState() {
   const authState = inferConnectionState(authText);
   const pipelineState = inferPipelineState(pipelineText);
   const essayCount = document.getElementById('uploadEssays')?.files?.length || 0;
-  const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
-  const outlineReady = !!document.getElementById('uploadOutline')?.files?.[0];
-  const classroomSummary = classroomState?.summary || {};
-  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
-  const classroomImported = !!(
-    classroomState?.classroom_link?.course_id &&
-    ((classroomSummary.ready_for_analysis_count || 0) > 0 || (latestSync.imported_count || 0) > 0)
-  );
+  const rubricFileReady = !!document.getElementById('uploadRubric')?.files?.[0];
+  const outlineFileReady = !!document.getElementById('uploadOutline')?.files?.[0];
+  const rubricReady = rubricFileReady || savedRubricReady();
+  const outlineReady = outlineFileReady || savedOutlineReady();
+  const classroomImported = classroomImportsReady();
   const students = getStudents();
   const hasReview = !!(data?.students?.length);
   const filesReady = essayCount > 0 && rubricReady && outlineReady;
@@ -92,7 +113,8 @@ function updateWorkflowState() {
     if (hasReview) {
       hint.textContent = `${students.length} essays loaded. Review the order, correct the exceptions, then finalize.`;
     } else if (classroomImported && !essayCount) {
-      hint.textContent = `Classroom submissions are synced. Add rubric and outline, then run the assessment.`;
+      const missing = missingClassroomRunInputs(rubricFileReady, outlineFileReady).filter(item => item !== 'sync Classroom submissions');
+      hint.textContent = missing.length ? `Classroom submissions are synced. ${missing.join(' and ')}.` : 'Classroom submissions are synced. Run the assessment.';
     } else if (!essayCount && !rubricReady && !outlineReady) {
       hint.textContent = 'Add essays, rubric, and outline. Then run the assessment.';
     } else {
@@ -350,6 +372,15 @@ async function refreshClassroomState() {
     const res = await fetch(apiUrl('/projects/classroom'));
     if (!res.ok) return;
     renderClassroomState(await res.json());
+    await refreshProjectInputsStatus();
+  } catch (_) {}
+}
+async function refreshProjectInputsStatus() {
+  try {
+    const res = await fetch(apiUrl('/pipeline/v2/project-inputs/status'));
+    if (!res.ok) return;
+    projectInputsStatus = await res.json();
+    updateWorkflowState();
   } catch (_) {}
 }
 function setGoogleStatus(text, state = 'idle') {
@@ -379,6 +410,28 @@ function selectedRow(selectId) {
   if (!option?.dataset?.row) return {};
   try { return JSON.parse(option.dataset.row); } catch (_) { return {}; }
 }
+function currentAppPathForOAuth() {
+  const params = new URLSearchParams(location.search);
+  params.delete('google');
+  params.delete('google_error');
+  const query = params.toString();
+  return `${location.pathname}${query ? `?${query}` : ''}${location.hash || ''}`;
+}
+function handleGoogleReturnParams() {
+  const params = new URLSearchParams(location.search);
+  const google = params.get('google');
+  if (!google) return;
+  if (google === 'connected') {
+    setGoogleStatus('Google connected. Loading classes...', 'ready');
+  } else {
+    const code = params.get('google_error') || 'google_oauth_error';
+    setGoogleStatus(`Google connection failed: ${code}.`, 'danger');
+  }
+  params.delete('google');
+  params.delete('google_error');
+  const query = params.toString();
+  history.replaceState({}, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash || ''}`);
+}
 async function refreshGoogleAuth() {
   try {
     const res = await fetch(apiUrl('/google/auth/status'));
@@ -387,13 +440,29 @@ async function refreshGoogleAuth() {
     const connectBtn = document.getElementById('googleConnect');
     const disconnectBtn = document.getElementById('googleDisconnect');
     if (googleAuth.connected) {
+      const missingScopes = googleAuth.missing_scopes || [];
       const who = googleAuth.teacher_display_email || 'Google connected';
-      setGoogleStatus(`${who}. Choose a class.`, 'ready');
+      if (missingScopes.length) {
+        setGoogleStatus('Google permission missing - reconnect with Classroom/Drive read access.', 'danger');
+      } else if (googleAuth.expired && googleAuth.refresh_available) {
+        setGoogleStatus(`${who}. Refreshing Google access...`, 'warn');
+      } else {
+        setGoogleStatus(`${who}. Choose a class.`, 'ready');
+      }
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
-      await loadGoogleCourses();
+      if (!missingScopes.length) await loadGoogleCourses();
     } else {
-      setGoogleStatus(googleAuth.configured ? 'Google not connected.' : 'Google OAuth is not configured on this server.', googleAuth.configured ? 'idle' : 'warn');
+      let message = 'Google not connected.';
+      let tone = 'idle';
+      if (!googleAuth.configured) {
+        message = 'Google setup missing - run scripts/google_classroom_setup_check.py.';
+        tone = 'warn';
+      } else if (googleAuth.expired) {
+        message = 'Google connection expired - reconnect.';
+        tone = 'danger';
+      }
+      setGoogleStatus(message, tone);
       if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
       if (disconnectBtn) disconnectBtn.disabled = true;
     }
@@ -407,7 +476,7 @@ async function startGoogleConnect() {
     const res = await fetch(apiUrl('/google/auth/start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ redirect_after: location.pathname }),
+      body: JSON.stringify({ redirect_after: currentAppPathForOAuth() }),
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok || !payload.authorization_url) throw new Error(payload.detail?.message || 'Google connection is not configured');
@@ -438,7 +507,7 @@ async function loadGoogleCourses() {
     if (!res.ok) throw new Error(payload.detail?.message || 'Could not load classes');
     googleCourses = payload.courses || [];
     populateSelect(select, googleCourses, 'Choose class', 'course_id', 'course_name');
-    if (!googleCourses.length) setGoogleStatus('Google connected, but no active teacher classes were returned.', 'warn');
+    setGoogleStatus(googleCourses.length ? 'Choose a class.' : 'Google connected, but no active teacher classes were returned.', googleCourses.length ? 'ready' : 'warn');
   } catch (err) {
     setGoogleStatus(err.message || 'Could not load Google classes.', 'danger');
   }
@@ -510,6 +579,7 @@ async function syncGoogleSubmissions() {
     if (!res.ok) throw new Error(payload.detail?.message || 'Google sync failed');
     classroomPreflight = null;
     renderClassroomState(payload);
+    await refreshProjectInputsStatus();
     const latest = (payload.sync_history || []).slice(-1)[0] || {};
     setGoogleStatus(`Synced ${latest.imported_count || 0} submissions; ${latest.blocker_count || 0} blocked.`, latest.blocker_count ? 'warn' : 'ready');
     renderExceptions();
@@ -1747,14 +1817,26 @@ async function runPipeline() {
   const essays = document.getElementById('uploadEssays');
   const rubric = document.getElementById('uploadRubric');
   const outline = document.getElementById('uploadOutline');
-  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
-  const classroomImported = !!(
-    classroomState?.classroom_link?.course_id &&
-    ((classroomState?.summary?.ready_for_analysis_count || 0) > 0 || (latestSync.imported_count || 0) > 0)
-  );
   const hasLocalEssays = !!essays?.files?.length;
-  if (!rubric?.files?.[0] || !outline?.files?.[0] || (!hasLocalEssays && !classroomImported)) {
-    setPipelineStatus(classroomImported ? 'Add rubric and outline' : 'Add essays, rubric, outline', 'warn');
+  const rubricFileReady = !!rubric?.files?.[0];
+  const outlineFileReady = !!outline?.files?.[0];
+  const classroomImported = classroomImportsReady();
+  if (hasLocalEssays && (!rubricFileReady || !outlineFileReady)) {
+    const missing = [];
+    if (!rubricFileReady) missing.push('rubric');
+    if (!outlineFileReady) missing.push('assignment outline');
+    setPipelineStatus(`Add ${missing.join(' and ')}`, 'warn');
+    return;
+  }
+  if (!hasLocalEssays) {
+    const missing = missingClassroomRunInputs(rubricFileReady, outlineFileReady);
+    if (missing.length) {
+      setPipelineStatus(missing.join(' · '), 'warn');
+      return;
+    }
+  }
+  if (!hasLocalEssays && !classroomImported) {
+    setPipelineStatus('Sync Classroom submissions or add essays', 'warn');
     return;
   }
   if (hasLocalEssays && !previewStudents.length) updatePreviewFromUploads();
@@ -1774,8 +1856,8 @@ async function runPipeline() {
     return;
   }
   const form = new FormData();
-  form.append('rubric', rubric.files[0]);
-  form.append('outline', outline.files[0]);
+  if (rubricFileReady) form.append('rubric', rubric.files[0]);
+  if (outlineFileReady) form.append('outline', outline.files[0]);
   if (hasLocalEssays) Array.from(essays.files).forEach(f => form.append('submissions', f));
   form.append('mode', mode);
   if (currentProject?.id) form.append('project_id', currentProject.id);
@@ -1970,6 +2052,7 @@ function setupControls() {
   const saveRubricEdits = document.getElementById('saveRubricEdits'); if (saveRubricEdits) saveRubricEdits.addEventListener('click', () => submitRubricReview('edit'));
   const rejectRubric = document.getElementById('rejectRubric'); if (rejectRubric) rejectRubric.addEventListener('click', () => submitRubricReview('reject'));
   const submitAnchors = document.getElementById('submitAnchors'); if (submitAnchors) submitAnchors.addEventListener('click', submitAnchorReview);
+  handleGoogleReturnParams();
   updateWorkflowState();
   refreshClassroomState();
   refreshGoogleAuth();

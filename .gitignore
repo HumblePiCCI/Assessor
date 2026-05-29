@@ -18,3 +18,7 @@ marking_framework/inputs/*.docx
 .coverage
 marking_framework/.env
 marking_framework/.env.local
+marking_framework/.env.google
+marking_framework/.env.google.local
+marking_framework/client_secret*.json
+marking_framework/google_oauth_client*.json

@@ -1,9 +1,10 @@
 import json
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthService
+from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthError, GoogleOAuthService
 from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError
 
 
@@ -34,6 +35,11 @@ class OAuthTransport:
                 "token_type": "Bearer",
             },
         )
+
+
+class FailingRefreshTransport:
+    def post(self, url, *, data=None, params=None, timeout=20.0):
+        return Response(400, {"error": "invalid_grant"})
 
 
 def identity():
@@ -97,3 +103,74 @@ def test_oauth_callback_status_and_disconnect_never_leak_tokens(tmp_path):
     assert disconnected["cleared"] is True
     assert transport.posts[-1]["params"]["token"] == "refresh-secret"
     assert svc.status(identity(), project())["connected"] is False
+
+
+def test_expired_token_refreshes_without_exposing_secret(tmp_path):
+    transport = OAuthTransport()
+    svc = service(tmp_path, transport)
+    expired_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    svc.token_store.save_token(
+        identity(),
+        project(),
+        {
+            "access_token": "old-access-secret",
+            "refresh_token": "refresh-secret",
+            "expires_at": expired_at,
+            "scope": " ".join(DEFAULT_GOOGLE_SCOPES),
+        },
+        granted_scopes=list(DEFAULT_GOOGLE_SCOPES),
+    )
+
+    status = svc.status(identity(), project())
+    assert status["expired"] is True
+    assert status["connected"] is True
+    assert status["refresh_available"] is True
+
+    token, refreshed_status = svc.fresh_access_token(identity(), project())
+    assert token == "access-secret"
+    assert transport.posts[-1]["data"]["grant_type"] == "refresh_token"
+    assert refreshed_status["connected"] is True
+    assert "refresh-secret" not in json.dumps(refreshed_status)
+
+
+def test_expired_token_without_refresh_requires_reconnect(tmp_path):
+    svc = service(tmp_path)
+    expired_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    svc.token_store.save_token(
+        identity(),
+        project(),
+        {
+            "access_token": "old-access-secret",
+            "expires_at": expired_at,
+            "scope": " ".join(DEFAULT_GOOGLE_SCOPES),
+        },
+        granted_scopes=list(DEFAULT_GOOGLE_SCOPES),
+    )
+
+    status = svc.status(identity(), project())
+    assert status["connected"] is False
+    assert status["expired"] is True
+    assert status["refresh_available"] is False
+    with pytest.raises(GoogleOAuthError) as exc:
+        svc.fresh_access_token(identity(), project())
+    assert exc.value.code == "missing_oauth_grant"
+
+
+def test_refresh_failure_maps_to_reconnect_needed(tmp_path):
+    svc = service(tmp_path, FailingRefreshTransport())
+    expired_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    svc.token_store.save_token(
+        identity(),
+        project(),
+        {
+            "access_token": "old-access-secret",
+            "refresh_token": "refresh-secret",
+            "expires_at": expired_at,
+            "scope": " ".join(DEFAULT_GOOGLE_SCOPES),
+        },
+        granted_scopes=list(DEFAULT_GOOGLE_SCOPES),
+    )
+    with pytest.raises(GoogleOAuthError) as exc:
+        svc.fresh_access_token(identity(), project())
+    assert exc.value.code == "missing_oauth_grant"
+    assert "Reconnect Google Classroom" in str(exc.value)

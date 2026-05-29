@@ -77,4 +77,7 @@ Classroom read sync does not change those gates. Unsupported, missing, empty,
 permission-blocked, OCR-required, or external-link submissions are blockers and
 are not materialized as zero-text essays. CSV export is available only after the
 same review/current-validation/clear-blocker/evidence/confirmation sequence.
-Live Classroom write modes stay fail-closed in this slice.
+Live Classroom write modes stay fail-closed in this slice. A local Google live
+smoke also requires a redacted setup-check pass, exact redirect URI matching,
+and ignored local secret/token paths; these checks prove smoke readiness, not
+production launch readiness.

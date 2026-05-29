@@ -23,6 +23,8 @@ This repo is launchable only when the production contract is satisfied in code, 
 - Google OAuth token state isolated under ignored private server data or an
   approved secret store; raw Google tokens and credential files are never launch
   artifacts
+- Google OAuth setup preflight is redacted and passes for the deployment
+  environment; exact redirect URIs are registered with Google
 
 ## Required Release Bars
 
@@ -42,6 +44,8 @@ This repo is launchable only when the production contract is satisfied in code, 
 - Classroom live write modes remain unavailable unless a future verified write
   adapter, admin approval, write-scope posture, and teacher-confirmed preflight
   are all proven. This read-sync slice ships CSV export only.
+- Token refresh failures fail closed to reconnect-required states; they never
+  downgrade into anonymous Classroom reads or live writes.
 
 ## Required Validation
 
