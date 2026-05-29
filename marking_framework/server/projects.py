@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from scripts.aggregate_review_learning import default_aggregate_learning_policy, normalize_aggregate_learning_policy
 from server import classroom
+from server.google_classroom_adapter import GoogleClassroomAdapter, GoogleClassroomError
+from server.google_oauth import GoogleOAuthError, GoogleOAuthService
 from server import review_store
 from server.runtime_context import identity_can_access, project_owner, resolve_request_identity
 
@@ -60,6 +63,7 @@ class ClassroomSnapshotPayload(BaseModel):
 
 
 class ClassroomReadSyncPayload(BaseModel):
+    adapter: str | None = None
     course_id: str | None = None
     course_name: str | None = None
     coursework_id: str | None = None
@@ -94,6 +98,22 @@ class ClassroomPassbackPreflightPayload(BaseModel):
 class ClassroomPassbackConfirmPayload(BaseModel):
     preflight_id: str
     confirmed: bool = False
+
+
+class GoogleClassroomSelectPayload(BaseModel):
+    course_id: str
+    coursework_id: str
+    course_name: str | None = None
+    coursework_title: str | None = None
+    passback_mode: str | None = "csv_export"
+
+
+class GoogleClassroomReadSyncPayload(BaseModel):
+    course_id: str | None = None
+    coursework_id: str | None = None
+    course_name: str | None = None
+    coursework_title: str | None = None
+    passback_mode: str | None = "csv_export"
 
 
 def identity_context(request: Request | None) -> dict:
@@ -316,6 +336,24 @@ def project_meta_for_product(identity: dict | None = None) -> dict:
 
 def classroom_error_response(exc: classroom.ClassroomStateError):
     raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+def google_error_response(exc: Exception):
+    code = getattr(exc, "code", "google_classroom_error")
+    raise HTTPException(status_code=400, detail={"code": code, "message": str(exc)}) from exc
+
+
+def google_oauth_service() -> GoogleOAuthService:
+    return GoogleOAuthService(BASE_DIR)
+
+
+def google_classroom_adapter(identity: dict, project: dict) -> tuple[GoogleClassroomAdapter, dict]:
+    service = google_oauth_service()
+    status = service.status(identity, project)
+    if not status.get("connected"):
+        raise GoogleOAuthError("Google is not connected for this teacher and project.", code="missing_oauth_grant")
+    token = service.access_token(identity, project)
+    return GoogleClassroomAdapter(token), status
 
 
 def copy_tree(src: Path, dst: Path):
@@ -545,6 +583,123 @@ async def projects_classroom_read_sync(payload: ClassroomReadSyncPayload, reques
         classroom_error_response(exc)
 
 
+@router.get("/projects/classroom/google/courses")
+async def projects_classroom_google_courses(request: Request):
+    identity = identity_context(request)
+    project = project_meta_for_product(identity)
+    try:
+        adapter, status = google_classroom_adapter(identity, project)
+        return {"google_auth": status, "courses": adapter.list_courses()}
+    except (GoogleOAuthError, GoogleClassroomError) as exc:
+        google_error_response(exc)
+
+
+@router.get("/projects/classroom/google/courses/{course_id}/coursework")
+async def projects_classroom_google_coursework(course_id: str, request: Request):
+    identity = identity_context(request)
+    project = project_meta_for_product(identity)
+    try:
+        adapter, status = google_classroom_adapter(identity, project)
+        return {"google_auth": status, "course_id": course_id, "coursework": adapter.list_coursework(course_id)}
+    except (GoogleOAuthError, GoogleClassroomError) as exc:
+        google_error_response(exc)
+
+
+@router.post("/projects/classroom/google/select")
+async def projects_classroom_google_select(payload: GoogleClassroomSelectPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        status = google_oauth_service().status(identity, project)
+        link_payload = {
+            "course_id": payload.course_id,
+            "course_name": payload.course_name or payload.course_id,
+            "coursework_id": payload.coursework_id,
+            "coursework_title": payload.coursework_title or payload.coursework_id,
+            "google_integration_path": "live_google",
+            "passback_mode": payload.passback_mode or "csv_export",
+            "policy": {
+                "policy_state": "operator_supervised_pilot",
+                "app_approval_status": "operator_supervised_pilot",
+                "oauth_scope_posture": "connected_read_only" if status.get("connected") else "not_connected",
+                "classroom_write_adapter_status": "not_configured",
+                "external_writes_enabled": False,
+                "read_only_first": True,
+            },
+        }
+        return classroom.link_assignment(BASE_DIR, root, project, identity, link_payload)
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/google/read-sync")
+async def projects_classroom_google_read_sync(payload: GoogleClassroomReadSyncPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    course_id = str(payload.course_id or "").strip()
+    coursework_id = str(payload.coursework_id or "").strip()
+    current_state = classroom.state_bundle(BASE_DIR, root, project, identity)
+    link = current_state.get("classroom_link", {}) if isinstance(current_state.get("classroom_link"), dict) else {}
+    course_id = course_id or str(link.get("course_id", "") or "")
+    coursework_id = coursework_id or str(link.get("coursework_id", "") or "")
+    if not course_id or not coursework_id:
+        raise HTTPException(status_code=400, detail={"code": "classroom_link_required", "message": "Select a Google course and assignment before syncing."})
+    service = google_oauth_service()
+    status = service.status(identity, project)
+    try:
+        adapter, status = google_classroom_adapter(identity, project)
+        snapshot = adapter.read_snapshot(
+            course_id,
+            coursework_id,
+            course_name=payload.course_name or str(link.get("course_name", "") or ""),
+            coursework_title=payload.coursework_title or str(link.get("coursework_title", "") or ""),
+        )
+        snapshot.update(
+            {
+                "adapter": "live_google",
+                "google_integration_path": "live_google",
+                "passback_mode": payload.passback_mode or link.get("passback_mode") or "csv_export",
+                "google_auth": status,
+                "policy": {
+                    "policy_state": "operator_supervised_pilot",
+                    "app_approval_status": "operator_supervised_pilot",
+                    "oauth_scope_posture": "connected_read_only",
+                    "classroom_write_adapter_status": "not_configured",
+                    "external_writes_enabled": False,
+                    "read_only_first": True,
+                },
+            }
+        )
+    except (GoogleOAuthError, GoogleClassroomError) as exc:
+        snapshot = {
+            "adapter": "live_google",
+            "google_integration_path": "live_google",
+            "course_id": course_id,
+            "course_name": payload.course_name or str(link.get("course_name", "") or course_id),
+            "coursework_id": coursework_id,
+            "coursework_title": payload.coursework_title or str(link.get("coursework_title", "") or coursework_id),
+            "passback_mode": payload.passback_mode or link.get("passback_mode") or "csv_export",
+            "google_auth": status,
+            "platform_errors": [{"code": getattr(exc, "code", "google_classroom_error"), "message": str(exc)}],
+            "roster": [],
+            "submissions": [],
+            "policy": {
+                "policy_state": "operator_supervised_pilot",
+                "app_approval_status": "operator_supervised_pilot",
+                "oauth_scope_posture": "not_connected" if getattr(exc, "code", "") == "missing_oauth_grant" else "connected_read_only",
+                "classroom_write_adapter_status": "not_configured",
+                "external_writes_enabled": False,
+                "read_only_first": True,
+            },
+        }
+    try:
+        return classroom.read_only_sync(BASE_DIR, root, project, identity, snapshot)
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
 @router.post("/projects/classroom/events")
 async def projects_classroom_events(payload: ClassroomEventPayload, request: Request):
     identity = identity_context(request)
@@ -609,3 +764,19 @@ async def projects_classroom_passback_confirm(payload: ClassroomPassbackConfirmP
         return classroom.confirm_passback(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
     except classroom.ClassroomStateError as exc:
         classroom_error_response(exc)
+
+
+@router.get("/projects/classroom/passback/exports/{action_id}")
+async def projects_classroom_passback_export(action_id: str, request: Request):
+    identity = identity_context(request)
+    project = project_meta_for_product(identity)
+    scope_id = review_store.review_scope_id(project)
+    state = classroom.load_state(BASE_DIR, scope_id, project, identity)
+    for action in state.get("passback", {}).get("actions", []) or []:
+        if not isinstance(action, dict) or str(action.get("action_id", "") or "") != action_id:
+            continue
+        artifact = action.get("export_artifact", {}) if isinstance(action.get("export_artifact"), dict) else {}
+        path = Path(str(artifact.get("path", "") or ""))
+        if path.exists() and review_store.exports_dir(BASE_DIR, scope_id) in path.parents:
+            return FileResponse(path, filename=artifact.get("filename") or path.name, media_type="text/csv")
+    raise HTTPException(status_code=404, detail="Export not found")
