@@ -2,9 +2,10 @@
 
 Status: product contract and implementation notes for the Classroom-facing hero
 path. The live product surface is implemented as a project-scoped Classroom
-state model, API, and dashboard controls. It is intentionally read-only-first:
-no Google Classroom write is performed by this repository without a future
-adapter that proves OAuth, scopes, tenancy, and teacher confirmation end to end.
+state model, Google OAuth connection, Classroom/Drive read adapters, API, and
+dashboard controls. It is intentionally read-only-first: no Google Classroom
+write is performed by this repository without a future adapter that proves
+OAuth, scopes, tenancy, admin approval, and teacher confirmation end to end.
 
 ## Product Invariant
 
@@ -25,9 +26,17 @@ materializes the current state into `outputs/classroom_state.json`.
 
 API endpoints:
 
+- `GET /google/auth/status`
+- `POST /google/auth/start`
+- `GET /google/auth/callback`
+- `POST /google/auth/disconnect`
 - `GET /projects/classroom`
 - `POST /projects/classroom/link`
 - `POST /projects/classroom/read-sync`
+- `GET /projects/classroom/google/courses`
+- `GET /projects/classroom/google/courses/{course_id}/coursework`
+- `POST /projects/classroom/google/select`
+- `POST /projects/classroom/google/read-sync`
 - `POST /projects/classroom/reconcile`
 - `POST /projects/classroom/events`
 - `POST /projects/classroom/audit/complete`
@@ -35,18 +44,41 @@ API endpoints:
 - `GET /projects/classroom/evidence-packet`
 - `POST /projects/classroom/passback/preflight`
 - `POST /projects/classroom/passback/confirm`
+- `GET /projects/classroom/passback/exports/{action_id}`
+- `POST /pipeline/v2/run-project-inputs`
 
-The UI exposes these controls inside Session details. A teacher or operator can
-link a Classroom assignment, run read-only fixture/local sync into normal
-submission inputs, reconcile the current cohort snapshot, see product state and
-blockers, refresh validation after teacher revision, generate the evidence
-packet, and preflight a CSV/Classroom passback action.
+The UI exposes the routine path directly: connect Google Classroom, choose a
+class, choose an assignment, sync submissions, add rubric and outline, run
+assessment, review, finalize, and confirm CSV export. Manual IDs and fixture
+sync remain under Session/Admin details for local proof and CI fixtures.
 
-`read-sync` is the pilot ingestion seam. It accepts roster/submission snapshots
-from a fixture/local adapter, materializes supported extracted text into
-`inputs/submissions`, writes Classroom import metadata to
-`inputs/class_metadata.json`, and records unsupported attachments as blockers.
-It does not require credentials in CI and does not perform external writes.
+`read-sync` is the ingestion seam. It accepts roster/submission snapshots from
+either the fixture/local adapter or the live Google adapter, materializes
+supported extracted text into `inputs/submissions`, writes Classroom import
+metadata to `inputs/class_metadata.json`, and records unsupported attachments
+as blockers. CI uses mocked adapters only and does not call Google.
+
+OAuth configuration is read only from environment/local config:
+
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+- optional `GOOGLE_OAUTH_CLIENT_SECRETS_FILE`
+- optional `GOOGLE_TOKEN_ENCRYPTION_KEY`
+
+Local development token state is stored under ignored
+`server/data/google_oauth/`. Public status exposes only connected state,
+granted scopes, expiry, and a teacher email/hash when available. Raw access and
+refresh tokens are never returned to the browser or written to outputs/projects.
+Strict staging/production must use encrypted local storage or an approved secret
+store before launch.
+
+Default Google scopes are read-only:
+
+- Classroom courses read-only
+- Classroom coursework/submissions read-only
+- Classroom rosters read-only
+- Drive read-only for attachment export/download
 
 ## Product States
 
@@ -74,10 +106,15 @@ that revision.
 Reconciliation treats Classroom events as hints, not a durable ledger. Duplicate
 event IDs are counted and ignored, and reconciliation remains mandatory.
 
-Attachment states are normalized per submission. Unsupported links, unsupported
-Google file types, image/OCR gaps, missing Drive scope, or empty extraction
-become explicit blockers. Empty or unsupported attachments are never treated as
-zero-text essays.
+Attachment states are normalized per submission. Supported Google Docs are
+exported as text, text/Markdown/HTML/RTF are extracted as text, and DOCX/PDF
+attachments are downloaded into the existing extraction path where possible.
+Multiple supported attachments are combined with internal separators.
+
+Unsupported links, Forms, Slides, Sheets, Drawings, image/OCR gaps, missing
+Drive scope, permission failures, quota failures, or empty extraction become
+explicit blockers. Empty or unsupported attachments are never treated as
+zero-text essays and are not materialized for grading.
 
 ## Export And Passback Rules
 
@@ -88,11 +125,13 @@ preserves Classroom grade semantics:
 - returning a submission is separate from grade updates
 - Classroom rubric scores are not treated as writable
 
-`passback/confirm` records the explicit teacher action and updates the evidence
-packet. It does not perform a live Classroom write in this implementation. Live
-Classroom write modes stay fail-closed unless policy, OAuth scope posture, admin
-approval, and a verified write adapter are all present; CSV export remains the
-read-only-first path.
+`passback/confirm` records the explicit teacher action, writes a downloadable
+CSV artifact under review export storage, records the export artifact hash, and
+updates the evidence packet. It does not perform a live Classroom write in this
+implementation. Live Classroom write modes stay fail-closed with
+`external_writes_disabled`, `classroom_write_adapter_not_configured`,
+`insufficient_scope` when applicable, and `admin_approval_required` when policy
+is absent. CSV export is the shipped passback path for this slice.
 
 ## Evidence Packet
 

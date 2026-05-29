@@ -16,6 +16,8 @@ The pilot asks:
 
 - Can a teacher complete the upload, rubric confirmation, scoring, review,
   adjustment, feedback, and finalization flow?
+- Can a teacher connect Google Classroom, choose a class and assignment, sync
+  supported submissions, and run without downloading/re-uploading essays?
 - Do the confidence, anchor, and disagreement surfaces point the teacher to the
   right places?
 - Do teacher overrides concentrate around a specific failure mode that should
@@ -54,6 +56,8 @@ Before the first teacher cohort:
 - The cohort has permission for supervised product testing.
 - No grades are published to students, guardians, or school systems directly
   from the pilot output.
+- Live Classroom writes are disabled. CSV export is the only shipped passback
+  path for Classroom-linked work in this slice.
 - Any retained aggregate-learning record must pass the engagement and collection
   policy gates already implemented in `server/review_store.py`.
 
@@ -94,6 +98,15 @@ Recommended cohort shape:
    - assignment outline
    - class metadata if available
    - student submissions
+
+   Or, for the Google Classroom read pilot:
+
+   - connect Google Classroom
+   - choose a class
+   - choose an assignment
+   - sync submissions
+   - confirm imported/blocked counts
+   - add rubric and assignment outline
 
 5. Run the queue-backed pipeline. The teacher-review dashboard should appear
    after the fast review phase; background validation then continues behind it.
@@ -140,6 +153,9 @@ Keep the project and job identifiers with these artifacts:
 - `outputs/engagement_signal.json`
 - `outputs/local_learning_profile.json`
 - `server/data/reviews/<project_id>/latest_review.json`
+- `inputs/class_metadata.json` when Classroom import is used
+- `outputs/classroom_state.json` when Classroom import is used
+- review export CSV artifact hash when CSV export is confirmed
 
 When present, also capture:
 
@@ -176,6 +192,7 @@ Primary product signals:
 - final-order moves concentrated by grade band, genre, rubric family, or source
   family
 - feedback edit rate
+- Classroom sync imported count and blocker count
 - quote-validation failures
 - teacher trust/usability notes
 
@@ -216,6 +233,8 @@ Do not treat pilot success as production launch.
 Do not:
 
 - auto-publish grades externally
+- perform live `draftGrade`, `assignedGrade`, `return`, or Classroom comment
+  writes
 - bypass teacher final authority
 - treat draft review edits as learning signal
 - retain product-wide aggregate data unless engagement and collection-policy

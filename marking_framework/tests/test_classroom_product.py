@@ -144,6 +144,10 @@ def test_classroom_state_tracks_reconciliation_revisions_evidence_and_passback(t
     action = classroom.confirm_passback(base_dir, root, project, {}, {"preflight_id": preflight["preflight_id"], "confirmed": True})
     assert action["status"] == "prepared_for_export"
     assert action["external_write_performed"] is False
+    assert action["export_artifact"]["sha256"]
+    assert Path(action["export_artifact"]["path"]).exists()
+    packet_after_export = classroom.assessment_evidence_packet(base_dir, root, project, {})
+    assert packet_after_export["export_and_passback"]["export_artifacts"][0]["sha256"] == action["export_artifact"]["sha256"]
 
 
 def test_classroom_read_only_sync_materializes_supported_text_and_blocks_unsupported(tmp_path):
@@ -231,6 +235,22 @@ def test_classroom_finalization_is_reopened_by_later_teacher_revision(tmp_path):
     assert ready["product_state"] == "final_ready"
 
 
+def test_csv_preflight_blocks_when_attachment_blockers_remain(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    write_workspace(root)
+    project = {"id": "project-a", "name": "Project A"}
+    classroom.link_assignment(base_dir, root, project, {}, classroom_link_payload())
+    classroom.reconcile_snapshot(base_dir, root, project, {}, classroom_snapshot(include_blocker=True))
+    finalize_review(base_dir, root, project)
+    classroom.complete_background_audit(base_dir, root, project, {}, {"gate_status": "pass"})
+
+    preflight = classroom.passback_preflight(base_dir, root, project, {}, {"mode": "csv_export"})
+    assert preflight["blocked"] is True
+    assert "external_link_unsupported" in preflight["blockers"]
+
+
 def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -288,6 +308,10 @@ def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypa
     )
     assert confirm.status_code == 200
     assert confirm.json()["status"] == "prepared_for_export"
+    assert confirm.json()["export_artifact"]["row_count"] == 2
+    download = client.get(confirm.json()["download_url"])
+    assert download.status_code == 200
+    assert "student_display_name" in download.text
 
 
 def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(tmp_path, monkeypatch):

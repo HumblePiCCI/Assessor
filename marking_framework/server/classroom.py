@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import csv
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from server import review_store
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PASSBACK_ORDER = ["no_passback", "csv_export", "draft_grade", "assigned_grade", "return_submission"]
 PASSBACK_MODES = set(PASSBACK_ORDER)
 LIVE_WRITE_MODES = {"draft_grade", "assigned_grade", "return_submission"}
@@ -40,10 +41,20 @@ CLASSROOM_REMEDIES = {
     "full_validation_current_required": "Run background validation against the latest teacher revision before export or passback.",
     "missing_oauth_grant": "Reconnect Google so the app can refresh the teacher's Classroom grant.",
     "insufficient_scope": "Reconnect with the Classroom and Drive scopes required by the selected workflow.",
+    "requires_drive_scope": "Reconnect Google with Drive read access so the app can export or download the selected attachment.",
     "teacher_removed_from_course": "Have a course teacher or admin restore access before retrying reconciliation.",
     "course_archived": "Restore or duplicate the course before linking it to a live assessment run.",
     "resource_not_found": "Refresh the course-work list and relink the assignment.",
     "quota_exhausted": "Retry after quota reset or move the job to the operator retry queue.",
+    "forms_unsupported": "Ask the student to submit the essay as a Google Doc, DOCX, PDF, text, Markdown, HTML, or RTF attachment.",
+    "slides_unsupported": "Ask the student to submit the essay in a supported document format, not Slides.",
+    "sheets_unsupported": "Ask the student to submit prose work in a supported document format, not Sheets.",
+    "drawing_unsupported": "Ask the student to submit prose work in a supported document format, not Drawings.",
+    "ocr_not_configured": "Image-only submissions need manual handling; OCR is not enabled in this slice.",
+    "external_link_unsupported": "Ask the student to attach the work directly rather than linking an external site.",
+    "no_extractable_text": "Open the attachment and confirm it contains readable text, then resync.",
+    "empty_attachment": "Ask the student to resubmit a non-empty document, then resync.",
+    "external_writes_disabled": "Use CSV export for this slice; live Classroom writes are deliberately disabled.",
 }
 
 
@@ -122,6 +133,14 @@ def default_state(scope_id: str, current_project: dict | None, identity: dict | 
         "registration": default_registration(),
         "roster": [],
         "submissions": {},
+        "sync_history": [],
+        "google_auth": {
+            "connected": False,
+            "granted_scopes": [],
+            "expires_at": "",
+            "teacher_display_email": "",
+            "teacher_identity_hash": "",
+        },
         "event_log": [],
         "event_ids": [],
         "event_counters": {"accepted": 0, "duplicate": 0, "ignored": 0},
@@ -209,6 +228,14 @@ def load_state(base_dir: Path, scope_id: str, current_project: dict | None = Non
     merged.setdefault("policy", default_policy(identity))
     merged.setdefault("registration", default_registration())
     merged.setdefault("summary", empty_summary())
+    merged.setdefault("sync_history", [])
+    merged.setdefault("google_auth", {})
+    merged["google_auth"].setdefault("connected", False)
+    merged["google_auth"].setdefault("granted_scopes", [])
+    merged["google_auth"].setdefault("expires_at", "")
+    merged["google_auth"].setdefault("teacher_display_email", "")
+    merged["google_auth"].setdefault("teacher_identity_hash", "")
+    merged.setdefault("platform_errors", [])
     merged.setdefault("passback", {"mode": "no_passback", "preflights": {}, "actions": []})
     merged.setdefault("audit", {})
     merged["audit"].setdefault("status", "not_started")
@@ -238,8 +265,25 @@ def materialize_workspace_state(root: Path, state: dict) -> None:
 
 
 def public_state(state: dict) -> dict:
-    payload = dict(state)
+    payload = json.loads(json.dumps(state, ensure_ascii=True))
     payload["event_ids"] = list(payload.get("event_ids", [])[-20:])
+    submissions = payload.get("submissions", {})
+    if isinstance(submissions, dict):
+        for submission in submissions.values():
+            if not isinstance(submission, dict):
+                continue
+            submission.pop("extracted_text", None)
+            for attachment in submission.get("attachments", []) or []:
+                if isinstance(attachment, dict):
+                    attachment.pop("text", None)
+    auth = payload.get("google_auth", {}) if isinstance(payload.get("google_auth"), dict) else {}
+    payload["google_auth"] = {
+        "connected": bool(auth.get("connected", False)),
+        "granted_scopes": list(auth.get("granted_scopes", []) or []),
+        "expires_at": str(auth.get("expires_at", "") or ""),
+        "teacher_display_email": str(auth.get("teacher_display_email", "") or ""),
+        "teacher_identity_hash": str(auth.get("teacher_identity_hash", "") or ""),
+    }
     passback = dict(payload.get("passback", {}))
     preflights = passback.get("preflights", {})
     if isinstance(preflights, dict):
@@ -280,6 +324,9 @@ def normalize_link_payload(payload: dict, current_project: dict | None, identity
         for key in policy:
             if key in raw_policy:
                 policy[key] = raw_policy[key]
+    google_integration_path = str(payload.get("google_integration_path", "") or payload.get("adapter", "") or "fixture_local").strip()
+    if google_integration_path not in {"fixture_local", "live_google"}:
+        google_integration_path = "fixture_local"
     return {
         "tenant_id": str((identity or {}).get("tenant_id", "") or ""),
         "teacher_id": str((identity or {}).get("teacher_id", "") or ""),
@@ -287,9 +334,11 @@ def normalize_link_payload(payload: dict, current_project: dict | None, identity
         "course_name": course_name,
         "coursework_id": coursework_id,
         "coursework_title": coursework_title,
+        "google_course_state": str(payload.get("google_course_state", "") or payload.get("course_state", "") or ""),
+        "coursework_state": str(payload.get("coursework_state", "") or ""),
         "selected_project_id": project_ref(current_project)["id"],
         "selected_rubric_source": str(payload.get("selected_rubric_source", "") or "project_rubric"),
-        "google_integration_path": str(payload.get("google_integration_path", "") or "standalone_oauth_classroom_api"),
+        "google_integration_path": google_integration_path,
         "roster_sync_state": "pending",
         "attachment_support_state": "pending",
         "passback_mode": passback_mode,
@@ -344,7 +393,12 @@ def normalize_attachment(raw: dict) -> dict:
     blockers: list[str] = []
     support_state = "supported"
     extraction_status = "pending_extraction"
-    if text.strip():
+    provided_blockers = [str(item) for item in raw.get("blockers", []) or [] if str(item).strip()]
+    if provided_blockers:
+        blockers.extend(provided_blockers)
+        support_state = str(raw.get("support_state", "") or "unsupported")
+        extraction_status = str(raw.get("extraction_status", "") or "blocked")
+    elif text.strip():
         extraction_status = "extractable_text_available"
     elif mime_type in TEXT_MIME_TYPES:
         extraction_status = "pending_extraction"
@@ -392,6 +446,9 @@ def normalize_attachment(raw: dict) -> dict:
         "file_hash": file_hash,
         "export_mime_type": export_mime_type,
         "text_hash": canonical_hash({"text": text}) if text.strip() else "",
+        "source_file_id_hash": str(raw.get("source_file_id_hash", "") or ""),
+        "source_revision_id": str(raw.get("source_revision_id", "") or ""),
+        "source_modified_at": str(raw.get("source_modified_at", "") or raw.get("modifiedTime", "") or ""),
         "text": text,
     }
 
@@ -430,6 +487,7 @@ def normalize_submission(raw: dict, existing: dict | None = None) -> dict:
         "student_id": student_id,
         "display_name": display_name,
         "classroom_state": classroom_state,
+        "google_submission_state": str(raw.get("google_submission_state", "") or raw.get("state", "") or ""),
         "submitted_at": str(raw.get("submitted_at", "") or ""),
         "updated_at": str(raw.get("updated_at", "") or now_iso()),
         "attachments": attachments,
@@ -494,7 +552,9 @@ def reconcile_snapshot(base_dir: Path, root: Path, current_project: dict | None,
             continue
         submission = normalize_submission(raw, existing_submissions.get(str(raw.get("submission_id", "") or raw.get("id", "") or raw.get("student_id", ""))))
         normalized[submission["submission_id"]] = submission
-    if normalized:
+    if payload.get("authoritative", False):
+        existing_submissions = normalized
+    elif normalized:
         existing_submissions.update(normalized)
     state["submissions"] = existing_submissions
     stamp = now_iso()
@@ -528,13 +588,14 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
         if not isinstance(submission, dict):
             continue
         submission_blockers = list(submission.get("attachment_blockers", []) or [])
+        classroom_state = str(submission.get("classroom_state", "") or "")
         text = str(submission.get("extracted_text", "") or "")
-        if submission_blockers or not text.strip():
+        if classroom_state != "submitted" or submission_blockers or not text.strip():
             blockers.append(
                 {
                     "submission_id": submission.get("submission_id", ""),
                     "student_id": submission.get("student_id", ""),
-                    "blockers": submission_blockers or ["no_extractable_text"],
+                    "blockers": submission_blockers or ([classroom_state] if classroom_state != "submitted" else ["no_extractable_text"]),
                 }
             )
             continue
@@ -557,10 +618,12 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
         "roster": state.get("roster", []),
         "imported_submission_count": len(imported),
         "attachment_blocker_count": len(blockers),
+        "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
+        "sync_history": list(state.get("sync_history", []) or [])[-5:],
     }
     write_json(inputs / "class_metadata.json", metadata)
     return {
-        "adapter": "fixture_or_local_read_only",
+        "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
         "external_write_performed": False,
         "imported_submission_count": len(imported),
         "blocked_submission_count": len(blockers),
@@ -581,16 +644,50 @@ def read_only_sync(base_dir: Path, root: Path, current_project: dict | None, ide
             "coursework_id": payload.get("coursework_id") or coursework.get("id") or "fixture-coursework",
             "coursework_title": payload.get("coursework_title") or payload.get("assignment_title") or coursework.get("title") or "Imported assignment",
             "passback_mode": payload.get("passback_mode") or "csv_export",
+            "google_integration_path": payload.get("adapter") or payload.get("google_integration_path") or "fixture_local",
+            "google_course_state": payload.get("google_course_state") or payload.get("course_state") or "",
+            "coursework_state": payload.get("coursework_state") or "",
             "policy": payload.get("policy", {}),
         }
         link_assignment(base_dir, root, current_project, identity, link_payload)
     snapshot = {
         "roster": payload.get("roster", []) or [],
         "submissions": payload.get("submissions", []) or [],
+        "authoritative": True,
     }
     bundle = reconcile_snapshot(base_dir, root, current_project, identity, snapshot)
     state = load_state(base_dir, scope_id, current_project, identity)
+    state["platform_errors"] = [
+        item for item in payload.get("platform_errors", []) or [] if isinstance(item, dict) or str(item).strip()
+    ]
+    if isinstance(payload.get("google_auth"), dict):
+        safe_auth = payload["google_auth"]
+        state["google_auth"] = {
+            "connected": bool(safe_auth.get("connected", False)),
+            "granted_scopes": list(safe_auth.get("granted_scopes", []) or []),
+            "expires_at": str(safe_auth.get("expires_at", "") or ""),
+            "teacher_display_email": str(safe_auth.get("teacher_display_email", "") or ""),
+            "teacher_identity_hash": str(safe_auth.get("teacher_identity_hash", "") or ""),
+        }
     sync = materialize_read_only_submissions(root, state)
+    history = {
+        "timestamp": now_iso(),
+        "adapter": sync.get("adapter", "fixture_local"),
+        "snapshot_hash": canonical_hash(snapshot),
+        "roster_count": len(snapshot.get("roster", []) or []),
+        "submission_count": len(snapshot.get("submissions", []) or []),
+        "imported_count": int(sync.get("imported_submission_count", 0) or 0),
+        "blocker_count": int(sync.get("blocked_submission_count", 0) or 0),
+        "external_write_performed": False,
+    }
+    state.setdefault("sync_history", []).append(history)
+    state["sync_history"] = list(state.get("sync_history", []) or [])[-25:]
+    metadata_path = root / "inputs" / "class_metadata.json"
+    metadata = load_json(metadata_path)
+    if metadata:
+        metadata["sync_history"] = list(state.get("sync_history", []) or [])[-5:]
+        metadata["latest_sync"] = history
+        write_json(metadata_path, metadata)
     state["summary"] = summarize_state(state)
     state["product_state"] = derive_product_state(state, root, current_project, base_dir)
     save_state(base_dir, scope_id, state, root)
@@ -754,6 +851,11 @@ def unresolved_blockers(state: dict) -> list[str]:
     for submission in (state.get("submissions", {}) or {}).values():
         for blocker in submission.get("attachment_blockers", []) or []:
             blockers.append(str(blocker))
+    for error in state.get("platform_errors", []) or []:
+        if isinstance(error, dict):
+            blockers.append(str(error.get("code", "") or ""))
+        else:
+            blockers.append(str(error))
     audit = state.get("audit", {}) if isinstance(state.get("audit"), dict) else {}
     blockers.extend(str(item) for item in audit.get("blocked_reasons", []) or [])
     return sorted(set(item for item in blockers if item))
@@ -916,6 +1018,11 @@ def assessment_evidence_packet(base_dir: Path, root: Path, current_project: dict
         "export_and_passback": {
             "mode": state.get("passback", {}).get("mode", "no_passback"),
             "actions": state.get("passback", {}).get("actions", []),
+            "export_artifacts": [
+                action.get("export_artifact", {})
+                for action in state.get("passback", {}).get("actions", [])
+                if isinstance(action, dict) and action.get("export_artifact")
+            ],
             "automatic_publication": False,
         },
         "artifact_hashes": artifact_hashes(root),
@@ -923,6 +1030,53 @@ def assessment_evidence_packet(base_dir: Path, root: Path, current_project: dict
     packet["packet_id"] = short_hash(packet)
     write_json(root / "outputs" / "assessment_evidence_packet.json", packet)
     return packet
+
+
+CSV_EXPORT_FIELDS = [
+    "student_display_name",
+    "classroom_student_id",
+    "safe_student_id",
+    "submission_id",
+    "assigned_mark",
+    "feedback_star1",
+    "feedback_star2",
+    "feedback_wish",
+    "final_review_timestamp",
+    "project_id",
+    "project_name",
+    "course_id",
+    "course_name",
+    "coursework_id",
+    "coursework_title",
+]
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_csv_export(base_dir: Path, scope_id: str, action_id: str, preflight: dict) -> dict:
+    export_dir = review_store.exports_dir(base_dir, scope_id)
+    path = export_dir / f"classroom_csv_export_{action_id}.csv"
+    rows = sorted(
+        [row for row in preflight.get("diff_rows", []) or [] if isinstance(row, dict)],
+        key=lambda row: (str(row.get("student_display_name", "") or row.get("display_name", "") or "").lower(), str(row.get("safe_student_id", "") or row.get("student_id", ""))),
+    )
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_EXPORT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in CSV_EXPORT_FIELDS})
+    return {
+        "path": str(path),
+        "filename": path.name,
+        "sha256": file_sha256(path),
+        "row_count": len(rows),
+    }
 
 
 def finalize_by_teacher(base_dir: Path, root: Path, current_project: dict | None, identity: dict | None = None) -> dict:
@@ -969,15 +1123,12 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
         blockers.append("final_ready_required")
     policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
     if mode in LIVE_WRITE_MODES:
-        if not bool(policy.get("external_writes_enabled", False)):
-            blockers.append("external_writes_disabled")
-        else:
-            if policy.get("classroom_write_adapter_status") != "verified":
-                blockers.append("classroom_write_adapter_not_configured")
-            if policy.get("oauth_scope_posture") not in {"write_ready", "classroom_write_ready", "connected_with_write_scopes"}:
-                blockers.append("insufficient_scope")
-            if policy.get("app_approval_status") != "approved":
-                blockers.append("admin_approval_required")
+        blockers.append("external_writes_disabled")
+        blockers.append("classroom_write_adapter_not_configured")
+        if policy.get("oauth_scope_posture") not in {"write_ready", "classroom_write_ready", "connected_with_write_scopes"}:
+            blockers.append("insufficient_scope")
+        if policy.get("app_approval_status") != "approved":
+            blockers.append("admin_approval_required")
     submissions_by_student = {
         str(item.get("student_id", "") or ""): item
         for item in (state.get("submissions", {}) or {}).values()
@@ -988,21 +1139,38 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
         for item in latest_review.get("feedback_drafts", []) or []
         if isinstance(item, dict) and item.get("student_id")
     }
+    project = state.get("project", {}) if isinstance(state.get("project"), dict) else {}
+    link = state.get("classroom_link", {}) if isinstance(state.get("classroom_link"), dict) else {}
     rows = []
     for mark in latest_review.get("assigned_marks", []) or []:
         if not isinstance(mark, dict) or not mark.get("student_id"):
             continue
         sid = str(mark["student_id"])
         submission = submissions_by_student.get(sid, {})
+        feedback = feedback_by_student.get(sid, {})
         rows.append(
             {
                 "student_id": sid,
+                "safe_student_id": sid,
+                "classroom_student_id": submission.get("student_id", sid),
                 "submission_id": submission.get("submission_id", ""),
                 "display_name": submission.get("display_name", sid),
+                "student_display_name": submission.get("display_name", sid),
+                "assigned_mark": mark.get("mark"),
                 "draft_grade": mark.get("mark") if mode in {"draft_grade", "assigned_grade", "return_submission"} else None,
                 "assigned_grade": mark.get("mark") if mode in {"assigned_grade", "return_submission"} else None,
                 "return_submission": mode == "return_submission",
-                "feedback_ready": bool(feedback_by_student.get(sid)),
+                "feedback_ready": bool(feedback),
+                "feedback_star1": feedback.get("star1", ""),
+                "feedback_star2": feedback.get("star2", ""),
+                "feedback_wish": feedback.get("wish", ""),
+                "final_review_timestamp": latest_review.get("saved_at", ""),
+                "project_id": project.get("id", ""),
+                "project_name": project.get("name", ""),
+                "course_id": link.get("course_id", ""),
+                "course_name": link.get("course_name", ""),
+                "coursework_id": link.get("coursework_id", ""),
+                "coursework_title": link.get("coursework_title", ""),
                 "classroom_state": submission.get("classroom_state", ""),
             }
         )
@@ -1051,6 +1219,10 @@ def confirm_passback(base_dir: Path, root: Path, current_project: dict | None, i
         "external_write_performed": False,
         "row_count": int(preflight.get("row_count", 0) or 0),
     }
+    if preflight.get("mode") == "csv_export":
+        artifact = write_csv_export(base_dir, scope_id, action["action_id"], preflight)
+        action["export_artifact"] = artifact
+        action["download_url"] = f"/projects/classroom/passback/exports/{action['action_id']}"
     state.setdefault("passback", {}).setdefault("actions", []).append(action)
     save_state(base_dir, scope_id, state, root)
     assessment_evidence_packet(base_dir, root, current_project, identity)

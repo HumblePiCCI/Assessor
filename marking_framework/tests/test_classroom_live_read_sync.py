@@ -1,0 +1,200 @@
+import json
+import shutil
+import types
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+import server.app as appmod
+from server.app import app
+import server.projects as projmod
+from server.pipeline_queue import PipelineQueue
+
+
+class FakeGoogleAdapter:
+    def list_courses(self):
+        return [{"course_id": "course-1", "course_name": "Period 2", "course_state": "ACTIVE"}]
+
+    def list_coursework(self, course_id):
+        assert course_id == "course-1"
+        return [{"course_id": "course-1", "coursework_id": "cw-1", "coursework_title": "Essay", "coursework_state": "PUBLISHED"}]
+
+    def read_snapshot(self, course_id, coursework_id, *, course_name="", coursework_title=""):
+        return {
+            "adapter": "live_google",
+            "course_id": course_id,
+            "course_name": course_name or "Period 2",
+            "coursework_id": coursework_id,
+            "coursework_title": coursework_title or "Essay",
+            "roster": [
+                {"student_id": "s1", "display_name": "Student One"},
+                {"student_id": "s2", "display_name": "Student Two"},
+            ],
+            "submissions": [
+                {
+                    "submission_id": "sub-1",
+                    "student_id": "s1",
+                    "display_name": "Student One",
+                    "classroom_state": "submitted",
+                    "attachments": [{"attachment_id": "a1", "mime_type": "text/plain", "text": "First imported essay."}],
+                },
+                {
+                    "submission_id": "sub-2",
+                    "student_id": "s2",
+                    "display_name": "Student Two",
+                    "classroom_state": "submitted",
+                    "attachments": [{"attachment_id": "a2", "type": "external_link", "title": "Portfolio"}],
+                },
+            ],
+        }
+
+
+def setup_server(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    monkeypatch.setattr(
+        projmod,
+        "google_classroom_adapter",
+        lambda identity, project: (
+            FakeGoogleAdapter(),
+            {
+                "connected": True,
+                "granted_scopes": ["https://www.googleapis.com/auth/classroom.courses.readonly"],
+                "expires_at": "2026-05-29T00:00:00+00:00",
+                "teacher_identity_hash": "teacher-hash",
+                "teacher_display_email": "",
+            },
+        ),
+    )
+    return TestClient(app)
+
+
+def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_blocks_unsupported(tmp_path, monkeypatch):
+    client = setup_server(tmp_path, monkeypatch)
+    assert client.post("/projects/save", json={"name": "Classroom Live"}).status_code == 200
+    assert client.get("/projects/classroom/google/courses").json()["courses"][0]["course_id"] == "course-1"
+    assert client.get("/projects/classroom/google/courses/course-1/coursework").json()["coursework"][0]["coursework_id"] == "cw-1"
+
+    selected = client.post(
+        "/projects/classroom/google/select",
+        json={"course_id": "course-1", "course_name": "Period 2", "coursework_id": "cw-1", "coursework_title": "Essay"},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["classroom_link"]["google_integration_path"] == "live_google"
+
+    synced = client.post("/projects/classroom/google/read-sync", json={"course_id": "course-1", "coursework_id": "cw-1"})
+    assert synced.status_code == 200
+    payload = synced.json()
+    assert payload["read_sync"]["adapter"] == "live_google"
+    assert payload["read_sync"]["external_write_performed"] is False
+    assert payload["read_sync"]["imported_submission_count"] == 1
+    assert payload["read_sync"]["blocked_submission_count"] == 1
+    assert "external_link_unsupported" in payload["blockers"]
+    assert (tmp_path / "inputs" / "submissions" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
+    assert not (tmp_path / "inputs" / "submissions" / "s2.txt").exists()
+    metadata = json.loads((tmp_path / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["adapter"] == "live_google"
+    assert metadata["latest_sync"]["imported_count"] == 1
+    assert metadata["latest_sync"]["blocker_count"] == 1
+
+
+def seed_runtime(root: Path):
+    for dirname in ["scripts", "config", "prompts", "templates", "docs", "ui", "server", "outputs"]:
+        (root / dirname).mkdir(parents=True, exist_ok=True)
+    (root / "scripts" / "placeholder.py").write_text("print('ok')\n", encoding="utf-8")
+    (root / "server" / "bootstrap.py").write_text("BOOTSTRAP=True\n", encoding="utf-8")
+    (root / "server" / "pipeline_queue.py").write_text("PIPELINE=True\n", encoding="utf-8")
+    (root / "server" / "step_runner.py").write_text("STEP=True\n", encoding="utf-8")
+    (root / "prompts" / "assessor_pass1.md").write_text("prompt", encoding="utf-8")
+    (root / "templates" / "assessor_pass1_template.json").write_text("{}", encoding="utf-8")
+    (root / "docs" / "ASSESSOR_ROLES.md").write_text("roles", encoding="utf-8")
+    (root / "ui" / "app.js").write_text("console.log('ui')", encoding="utf-8")
+    exemplar = root / "inputs" / "exemplars" / "grade_6_7" / "literary_analysis"
+    exemplar.mkdir(parents=True, exist_ok=True)
+    (exemplar / "level_3.md").write_text("anchor", encoding="utf-8")
+    for name, payload in {
+        "llm_routing.json": {"mode": "openai", "tasks": {}},
+        "marking_config.json": {"curve": {"profile": "default"}},
+        "rubric_criteria.json": {"criteria": []},
+        "accuracy_gate.json": {},
+        "sota_gate.json": {},
+        "grade_level_profiles.json": {},
+        "calibration_set.json": {},
+        "cost_limits.json": {},
+        "pricing.json": {},
+    }.items():
+        (root / "config" / name).write_text(json.dumps(payload), encoding="utf-8")
+    (root / "outputs" / "calibration_bias.json").write_text(json.dumps({"bias": 0}), encoding="utf-8")
+
+
+def reset_workspace(root: Path):
+    inputs = root / "inputs"
+    (inputs / "submissions").mkdir(parents=True, exist_ok=True)
+    for folder in ["processing", "assessments", "outputs"]:
+        path = root / folder
+        if path.exists():
+            shutil.rmtree(path)
+
+
+def test_classroom_project_inputs_reach_teacher_review_before_background_validation(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    seed_runtime(root)
+    inputs = root / "inputs"
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    (inputs / "submissions").mkdir(parents=True, exist_ok=True)
+    (inputs / "submissions" / "s1.txt").write_text("First imported essay.", encoding="utf-8")
+    (inputs / "class_metadata.json").write_text(json.dumps({"source": "google_classroom_read_only_sync", "adapter": "live_google"}), encoding="utf-8")
+    calls = []
+    holder = {}
+
+    def run_phased(cmd, env=None, cwd=None, **kwargs):
+        script = " ".join(cmd)
+        calls.append(script)
+        workspace = Path(cwd)
+        assert (workspace / "inputs" / "class_metadata.json").exists()
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "consensus_scores.csv").write_text("student_id,consensus_rank,adjusted_level,rubric_after_penalty_percent\ns1,1,4,88\n", encoding="utf-8")
+        (out / "final_order.csv").write_text("student_id,final_rank,adjusted_level,rubric_after_penalty_percent\ns1,1,4,88\n", encoding="utf-8")
+        (out / "grade_curve.csv").write_text("student_id,final_grade\ns1,92\n", encoding="utf-8")
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1", "rank": 1}]}), encoding="utf-8")
+        if "band_seam_adjudication.py" in script:
+            job = holder["queue"].get_job(holder["job_id"])
+            assert job["teacher_can_review"] is True
+            assert job["validation_status"] == "running"
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    queue = PipelineQueue(
+        root=root,
+        data_dir=tmp_path / "data",
+        reset_workspace_fn=reset_workspace,
+        run_fn=run_phased,
+        log_fn=lambda *_args, **_kwargs: None,
+        api_key_fn=lambda: "key",
+    )
+    holder["queue"] = queue
+    queue._start_worker = lambda: None
+    submitted = queue.submit(
+        "openai",
+        inputs / "rubric.md",
+        inputs / "assignment_outline.md",
+        inputs / "submissions",
+        [root / "config" / "llm_routing.json"],
+        project_id="project-a",
+    )
+    holder["job_id"] = submitted["job_id"]
+    queue._process_job(submitted["job_id"])
+    job = queue.get_job(submitted["job_id"])
+    assert job["status"] == "completed"
+    assert job["teacher_can_review"] is True
+    summary = json.loads((Path(job["workspace_dir"]) / "outputs" / "background_validation_summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "complete"
+    assert any("band_seam_adjudication.py" in call for call in calls)

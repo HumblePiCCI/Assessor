@@ -20,6 +20,9 @@ This repo is launchable only when the production contract is satisfied in code, 
 - Queued job workspaces isolated under `server/data/workspaces/<tenant>/<job_id>`
 - Manifest-keyed artifacts isolated under `server/data/artifacts/<tenant>/<manifest_hash>`
 - Teacher workspace state isolated under `server/data/tenant_workspaces/<tenant>/<teacher>/workspace`
+- Google OAuth token state isolated under ignored private server data or an
+  approved secret store; raw Google tokens and credential files are never launch
+  artifacts
 
 ## Required Release Bars
 
@@ -36,6 +39,9 @@ This repo is launchable only when the production contract is satisfied in code, 
 - Gate failure summaries persisted in queue ops state
 - Retention maintenance available from `/pipeline/v2/ops/maintenance`
 - Incident runbook present in [INCIDENT_RESPONSE.md](/Users/bldt/Desktop/Essays/marking_framework/docs/INCIDENT_RESPONSE.md)
+- Classroom live write modes remain unavailable unless a future verified write
+  adapter, admin approval, write-scope posture, and teacher-confirmed preflight
+  are all proven. This read-sync slice ships CSV export only.
 
 ## Required Validation
 

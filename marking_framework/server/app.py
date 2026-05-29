@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import html
 import json
 import os
 import shutil
@@ -10,12 +11,14 @@ from subprocess import DEVNULL, Popen, run
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
+from server.google_oauth import GoogleOAuthError, GoogleOAuthService, google_oauth_error_payload
 import server.projects as projectsmod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
+from scripts.assessor_utils import resolve_input_path
 from scripts.codex_runtime import codex_status_payload
 from scripts.openai_client import api_provider_status
 app = FastAPI()
@@ -54,6 +57,10 @@ class RubricConfirmationPayload(BaseModel):
 
 class AnchorConfirmationPayload(BaseModel):
     anchors: list[dict] = []
+
+
+class GoogleAuthStartPayload(BaseModel):
+    redirect_after: str | None = None
 def save_upload(upload: UploadFile, dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
@@ -156,6 +163,68 @@ async def auth_context(request: Request):
         "runtime_mode": identity.get("auth_mode", "development"),
         "strict_auth": bool(identity.get("strict_auth", False)),
     }
+
+
+def google_oauth_service() -> GoogleOAuthService:
+    return GoogleOAuthService(BASE_DIR)
+
+
+def google_project_for_identity(identity: dict) -> dict:
+    return projectsmod.get_current_project(identity) or projectsmod.workspace_project(identity)
+
+
+@app.get("/google/auth/status")
+async def google_auth_status(request: Request):
+    identity = request_identity(request)
+    project = google_project_for_identity(identity)
+    return google_oauth_service().status(identity, project)
+
+
+@app.post("/google/auth/start")
+async def google_auth_start(payload: GoogleAuthStartPayload, request: Request):
+    identity = request_identity(request)
+    project = google_project_for_identity(identity)
+    try:
+        return google_oauth_service().start(identity, project, redirect_after=payload.redirect_after or "/")
+    except GoogleOAuthError as exc:
+        raise HTTPException(status_code=400, detail=google_oauth_error_payload(exc)) from exc
+
+
+@app.get("/google/auth/start")
+async def google_auth_start_get(request: Request, redirect_after: str = "/"):
+    identity = request_identity(request)
+    project = google_project_for_identity(identity)
+    try:
+        payload = google_oauth_service().start(identity, project, redirect_after=redirect_after)
+    except GoogleOAuthError as exc:
+        raise HTTPException(status_code=400, detail=google_oauth_error_payload(exc)) from exc
+    return RedirectResponse(payload["authorization_url"], status_code=302)
+
+
+@app.get("/google/auth/callback")
+async def google_auth_callback(state: str = "", code: str = "", error: str = ""):
+    try:
+        payload = google_oauth_service().callback(state=state, code=code, error=error or None)
+    except GoogleOAuthError as exc:
+        safe = google_oauth_error_payload(exc)
+        return HTMLResponse(
+            f"<!doctype html><title>Google Classroom connection failed</title><p>Google Classroom connection failed: {safe['code']}.</p>",
+            status_code=400,
+        )
+    redirect_after = html.escape(str(payload.get("redirect_after") or "/"), quote=True)
+    return HTMLResponse(
+        "<!doctype html><title>Google Classroom connected</title>"
+        "<p>Google Classroom connected. You can close this tab and return to Assessor.</p>"
+        f"<p><a href=\"{redirect_after}\">Return to Assessor</a></p>",
+        status_code=200,
+    )
+
+
+@app.post("/google/auth/disconnect")
+async def google_auth_disconnect(request: Request):
+    identity = request_identity(request)
+    project = google_project_for_identity(identity)
+    return google_oauth_service().disconnect(identity, project)
 def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
@@ -296,6 +365,50 @@ async def run_pipeline_v2(
     project_id: str = Form(""),
 ):
     return submit_pipeline_job(request=request, rubric=rubric, outline=outline, submissions=submissions, mode=mode, project_id=project_id)
+
+
+def _project_input_path(root: Path, preferred: str, label: str) -> Path:
+    candidate = root / "inputs" / preferred
+    return resolve_input_path(candidate, label)
+
+
+@app.post("/pipeline/v2/run-project-inputs")
+async def run_pipeline_project_inputs(
+    request: Request,
+    rubric: UploadFile | None = File(None),
+    outline: UploadFile | None = File(None),
+    mode: str = Form("codex_local"),
+    project_id: str = Form(""),
+):
+    mode = validate_pipeline_mode(mode)
+    identity = request_identity(request)
+    root = projectsmod.workspace_root(identity)
+    inputs = root / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    if rubric is not None:
+        save_upload(rubric, inputs / f"rubric{Path(rubric.filename or '').suffix or '.md'}")
+    if outline is not None:
+        save_upload(outline, inputs / f"assignment_outline{Path(outline.filename or '').suffix or '.md'}")
+    rubric_path = _project_input_path(root, "rubric.md", "rubric")
+    outline_path = _project_input_path(root, "assignment_outline.md", "assignment_outline")
+    submissions_dir = inputs / "submissions"
+    if not rubric_path.exists() or not rubric_path.is_file():
+        raise HTTPException(status_code=400, detail="Rubric is required before running imported Classroom submissions")
+    if not outline_path.exists() or not outline_path.is_file():
+        raise HTTPException(status_code=400, detail="Assignment outline is required before running imported Classroom submissions")
+    if not submissions_dir.exists() or not any(item.is_file() for item in submissions_dir.iterdir()):
+        raise HTTPException(status_code=400, detail="No imported Classroom submissions are ready to assess")
+    selected_project = projectsmod.get_current_project(identity)
+    effective_project_id = project_id or str((selected_project or {}).get("id", "") or "")
+    return PIPELINE_QUEUE.submit(
+        mode=mode,
+        rubric_path=rubric_path,
+        outline_path=outline_path,
+        submissions_dir=submissions_dir,
+        extra_paths=[root / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
+        identity=identity,
+        project_id=effective_project_id,
+    )
 @app.get("/pipeline/v2/jobs/{job_id}")
 async def pipeline_v2_status(job_id: str, request: Request):
     job = PIPELINE_QUEUE.get_job(job_id, identity=request_identity(request))

@@ -20,9 +20,9 @@ calls, generate/edit feedback, finalize, and reload without losing the teacher's
 work.
 
 Do not treat this as proof that the product is production-launched or district
-approved. Classroom is read-only pilot ready through the in-app link/read-sync
-fixture/local adapter path, but live Classroom writes remain intentionally
-blocked.
+approved. Classroom is read-only pilot ready through Google OAuth plus
+Classroom/Drive read sync, or through the fixture/local sync path for CI and
+local demos. Live Classroom writes remain intentionally blocked.
 
 ## Smoke Inputs
 
@@ -40,6 +40,7 @@ The smoke needs:
 - one teacher-owned rubric
 - one assignment outline
 - either a connected Codex OAuth runtime or a configured API provider key
+- optional Google OAuth configuration for live Classroom read sync
 - a fresh server process, not an old process left on the same port
 
 ## Start The Product
@@ -124,6 +125,28 @@ Product judgment:
 - A teacher should not need to navigate away from the first screen to prepare a
   run.
 
+### 3a. Optional Google Classroom Read Sync
+
+Use a low-risk test Classroom course only. Do not use real student-private data
+for committed screenshots or fixtures.
+
+Expected:
+
+- `Connect Google Classroom` opens the Google OAuth flow when the server has
+  `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
+  `GOOGLE_OAUTH_REDIRECT_URI`
+- after connection, the app shows connected/not connected in plain language
+- the teacher can choose a class and assignment from dropdowns
+- `Sync submissions` imports supported attachments into server-side
+  `inputs/submissions`
+- counts show roster, submitted, imported, and blocked submissions
+- blockers appear in Exceptions with remedies
+- the run button becomes available when runtime, rubric, outline, and either
+  local uploads or synced Classroom submissions are ready
+
+Fail if raw OAuth tokens, raw Google file IDs, stack traces, or queue internals
+are exposed in the routine path.
+
 ### 4. Run Assessment
 
 Click `Run assessment`.
@@ -135,6 +158,8 @@ Expected:
 - the review-ready dashboard loads as soon as the fast review phase succeeds
 - the app does not require terminal/log inspection while the job runs
 - background validation continues after the review dashboard appears
+- Classroom-imported submissions can run without downloading and re-uploading
+  essays
 - if the rubric interpretation needs confirmation, the rubric review panel
   appears in the main workflow
 - if anchor calibration is required, the anchor panel appears with clear
@@ -174,6 +199,7 @@ Expected:
 - if validation completes, the state changes to "Validation complete."
 - if validation finds exceptions, the Exceptions panel lists the cases to inspect
 - no grade is exported or published automatically
+- no live Google Classroom write occurs
 - the teacher can move through students with the rail and next/previous controls
 - the teacher can understand why the current essay is placed where it is
 
