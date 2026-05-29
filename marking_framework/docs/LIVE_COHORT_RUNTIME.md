@@ -10,6 +10,8 @@ The live-cohort roadmap is now implemented as a real runtime flow, not just a pl
 
 Core additions:
 - deterministic scope grounding before extraction/scoring
+- phased queue execution: fast teacher review first, background validation
+  second
 - runtime cohort-confidence classification
 - anchor-calibration pause/resume workflow
 - live rerank stability metrics in `consistency_report.json`
@@ -62,6 +64,52 @@ These are surfaced into:
 - the teacher UI
 - review-store materialization
 
+## Fast Review And Background Validation
+
+The queue now separates the teacher-facing path from deeper validation.
+
+Fast review phase:
+
+- rubric normalization/confirmation
+- scope grounding
+- extraction
+- conventions scan
+- assessor passes
+- optional usage-cost accounting
+- consensus aggregation
+- boundary recheck and second aggregation
+- pairwise review prep
+- grade curve
+- dashboard build
+
+When `outputs/dashboard_data.json` exists, the queue publishes the workspace,
+sets `teacher_can_review: true`, records `review_ready_at`, and keeps the
+legacy `status` as `running` while validation continues.
+
+Background validation then runs:
+
+- band seam adjudication
+- consistency evidence
+- pairwise escalation
+- evidence map
+- committee-edge resolver
+- rerank
+- hard-pair eval
+- publish quality gate
+- SOTA gate
+- cohort confidence
+- grade/dashboard refresh
+
+Background failures do not erase the teacher dashboard. They are captured in
+`outputs/background_validation_summary.json` and surfaced as validation
+exceptions/admin diagnostics. Required failures before the first dashboard still
+fail the run.
+
+If validation changes the recommended order after teacher review activity has
+started, the queue preserves the fast-review dashboard and writes
+`outputs/dashboard_data.validation_recommendation.json` for inspection instead
+of silently reordering the teacher's active review.
+
 ## Queue States
 
 The job queue now supports more than a single fire-and-forget run.
@@ -73,6 +121,19 @@ Statuses:
 - `awaiting_anchor_scores`
 - `completed`
 - `failed`
+
+Status remains backward-compatible. Product phase fields carry the teacher
+workflow state:
+
+- `product_phase`
+- `review_ready_at`
+- `validation_started_at`
+- `validation_completed_at`
+- `validation_status`
+- `validation_current_for_revision_id`
+- `validation_exception_count`
+- `teacher_can_review`
+- `teacher_can_export_or_passback`
 
 Anchor flow:
 1. Full run completes normally through dashboard build.

@@ -146,6 +146,49 @@ def test_classroom_state_tracks_reconciliation_revisions_evidence_and_passback(t
     assert action["external_write_performed"] is False
 
 
+def test_classroom_read_only_sync_materializes_supported_text_and_blocks_unsupported(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    project = {"id": "project-a", "name": "Project A"}
+    payload = {
+        "course_id": "course-1",
+        "course_name": "Period 2",
+        "coursework_id": "cw-1",
+        "coursework_title": "Macbeth Essay",
+        "passback_mode": "csv_export",
+        "roster": [
+            {"student_id": "s1", "display_name": "Student One"},
+            {"student_id": "s2", "display_name": "Student Two"},
+        ],
+        "submissions": [
+            {
+                "submission_id": "sub-1",
+                "student_id": "s1",
+                "display_name": "Student One",
+                "attachments": [{"attachment_id": "a1", "mime_type": "text/plain", "text": "First essay text."}],
+            },
+            {
+                "submission_id": "sub-2",
+                "student_id": "s2",
+                "display_name": "Student Two",
+                "attachments": [{"attachment_id": "a2", "type": "external_link", "title": "Portfolio"}],
+            },
+        ],
+    }
+
+    bundle = classroom.read_only_sync(base_dir, root, project, {}, payload)
+    assert bundle["read_sync"]["external_write_performed"] is False
+    assert bundle["read_sync"]["imported_submission_count"] == 1
+    assert bundle["read_sync"]["blocked_submission_count"] == 1
+    assert (root / "inputs" / "submissions" / "s1.txt").read_text(encoding="utf-8").strip() == "First essay text."
+    assert not (root / "inputs" / "submissions" / "s2.txt").exists()
+    assert "external_link_unsupported" in bundle["blockers"]
+    metadata = json.loads((root / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["source"] == "google_classroom_read_only_sync"
+    assert metadata["imported_submission_count"] == 1
+
+
 def test_classroom_finalization_is_reopened_by_later_teacher_revision(tmp_path):
     root = tmp_path
     base_dir = root / "server"
@@ -245,3 +288,42 @@ def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypa
     )
     assert confirm.status_code == 200
     assert confirm.json()["status"] == "prepared_for_export"
+
+
+def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+
+    client = TestClient(app)
+    save = client.post("/projects/save", json={"name": "Read Sync Pilot"})
+    assert save.status_code == 200
+    resp = client.post(
+        "/projects/classroom/read-sync",
+        json={
+            "course_id": "course-1",
+            "course_name": "Period 2",
+            "coursework_id": "cw-1",
+            "coursework_title": "Macbeth Essay",
+            "passback_mode": "csv_export",
+            "roster": [{"student_id": "s1", "display_name": "Student One"}],
+            "submissions": [
+                {
+                    "submission_id": "sub-1",
+                    "student_id": "s1",
+                    "display_name": "Student One",
+                    "attachments": [{"attachment_id": "a1", "mime_type": "text/plain", "text": "Essay text."}],
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["read_sync"]["imported_submission_count"] == 1
+    assert payload["read_sync"]["external_write_performed"] is False
+    assert (tmp_path / "inputs" / "submissions" / "s1.txt").exists()

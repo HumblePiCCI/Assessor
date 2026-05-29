@@ -95,7 +95,8 @@ Recommended cohort shape:
    - class metadata if available
    - student submissions
 
-5. Run the full queue-backed pipeline.
+5. Run the queue-backed pipeline. The teacher-review dashboard should appear
+   after the fast review phase; background validation then continues behind it.
 
 6. If the job pauses for rubric confirmation:
 
@@ -113,6 +114,7 @@ Recommended cohort shape:
 8. Teacher reviews:
 
    - final order
+   - exceptions while background validation catches up
    - level/mark suggestions
    - disagreement and confidence signals
    - generated feedback
@@ -164,6 +166,8 @@ Primary product signals:
 
 - teacher completion rate
 - time from upload to reviewable dashboard
+- time from reviewable dashboard to background-validation complete
+- whether review began while validation was still running
 - number of rubric-confirmation edits
 - anchor-calibration required rate
 - anchor patch accepted/reverted rate

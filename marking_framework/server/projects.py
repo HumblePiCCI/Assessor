@@ -59,6 +59,18 @@ class ClassroomSnapshotPayload(BaseModel):
     submissions: list[dict] = Field(default_factory=list)
 
 
+class ClassroomReadSyncPayload(BaseModel):
+    course_id: str | None = None
+    course_name: str | None = None
+    coursework_id: str | None = None
+    coursework_title: str | None = None
+    assignment_title: str | None = None
+    passback_mode: str | None = None
+    policy: dict = Field(default_factory=dict)
+    roster: list[dict] = Field(default_factory=list)
+    submissions: list[dict] = Field(default_factory=list)
+
+
 class ClassroomEventPayload(BaseModel):
     event_id: str | None = None
     event_type: str | None = None
@@ -518,6 +530,17 @@ async def projects_classroom_reconcile(payload: ClassroomSnapshotPayload, reques
     project = project_meta_for_product(identity)
     try:
         return classroom.reconcile_snapshot(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
+    except classroom.ClassroomStateError as exc:
+        classroom_error_response(exc)
+
+
+@router.post("/projects/classroom/read-sync")
+async def projects_classroom_read_sync(payload: ClassroomReadSyncPayload, request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = project_meta_for_product(identity)
+    try:
+        return classroom.read_only_sync(BASE_DIR, root, project, identity, payload.model_dump(exclude_none=True))
     except classroom.ClassroomStateError as exc:
         classroom_error_response(exc)
 

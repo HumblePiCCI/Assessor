@@ -66,3 +66,9 @@ Minimum Workflow Coverage
 - routed hard-pair eval before publish/SOTA gates
 - curve review before finalizing grades
 - quote validation for all feedback
+
+Fast teacher review is not a release-gate bypass. The queue may publish
+`dashboard_data.json` before this full-validation layer finishes so teachers can
+begin review, but export/passback remains blocked until teacher finalization,
+current validation, clear blockers, an evidence packet, and explicit
+confirmation.

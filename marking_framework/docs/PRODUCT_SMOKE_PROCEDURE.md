@@ -2,7 +2,7 @@
 
 Status: human product smoke for the teacher-facing assessment workspace.
 
-Last reviewed: 2026-05-12
+Last reviewed: 2026-05-29
 
 Related docs:
 
@@ -19,10 +19,10 @@ run the assessment, review the ordered cohort, make the few required judgment
 calls, generate/edit feedback, finalize, and reload without losing the teacher's
 work.
 
-Do not treat this as proof that the product is production-launched, district
-approved, or fully connected to Google Classroom. Classroom is currently ready
-at the Google Cloud OAuth/API setup layer; in-app Classroom linking and sync are
-still a separate implementation surface.
+Do not treat this as proof that the product is production-launched or district
+approved. Classroom is read-only pilot ready through the in-app link/read-sync
+fixture/local adapter path, but live Classroom writes remain intentionally
+blocked.
 
 ## Smoke Inputs
 
@@ -132,7 +132,9 @@ Expected:
 
 - the pipeline state changes from idle to running
 - progress is visible in teacher-readable language
+- the review-ready dashboard loads as soon as the fast review phase succeeds
 - the app does not require terminal/log inspection while the job runs
+- background validation continues after the review dashboard appears
 - if the rubric interpretation needs confirmation, the rubric review panel
   appears in the main workflow
 - if anchor calibration is required, the anchor panel appears with clear
@@ -155,7 +157,7 @@ Pass only if every pause is actionable from the UI.
 
 ### 5. Confirm Review-Ready Dashboard
 
-When the run completes, verify the dashboard has:
+When the app reports review ready, verify the dashboard has:
 
 - an ordered cohort rail
 - current essay text
@@ -167,6 +169,10 @@ When the run completes, verify the dashboard has:
 Expected:
 
 - the app says the review is ready, not final
+- if validation is still running, the app says: "Review ready. Validation is
+  checking edge cases in the background."
+- if validation completes, the state changes to "Validation complete."
+- if validation finds exceptions, the Exceptions panel lists the cases to inspect
 - no grade is exported or published automatically
 - the teacher can move through students with the rail and next/previous controls
 - the teacher can understand why the current essay is placed where it is
@@ -343,8 +349,8 @@ Fail if the product feels powerful but cognitively expensive.
 
 ## Google Classroom Readiness Smoke
 
-This is not a live in-app Classroom sync yet. It verifies that the external
-Google side is ready for the next implementation slice.
+This is not a live Classroom write/passback smoke. It verifies the read-only
+pilot path and the external Google setup posture for a future real adapter.
 
 Expected current setup:
 
@@ -357,6 +363,10 @@ Expected current setup:
 - a Web OAuth client exists
 - localhost redirect URIs are configured for the local product ports
 - credentials JSON is stored outside git
+- the in-app `Read sync` control can import fixture/local read-only submissions
+  into `inputs/submissions`
+- unsupported links, Forms/Slides/Sheets/drawings, image/OCR gaps, missing Drive
+  scope, and empty extraction become blockers
 
 Do not commit the credentials JSON or paste the client secret into docs, chat,
 or source files.
@@ -368,12 +378,7 @@ Pass criteria:
 - the downloaded JSON remains local and untracked
 - the pilot still uses read-only posture until passback is explicitly built and
   reviewed
-
-Expected blocker:
-
-- the current product UI does not yet present "Connect Google Classroom" as a
-  working ingestion path. Until that lands, Classroom verification is limited to
-  cloud/API readiness plus product upload-mode smoke.
+- no live Classroom write occurs
 
 ## Operator Checks After The Product Smoke
 
@@ -408,8 +413,16 @@ Record:
 - server URL and port
 - dataset used
 - runtime mode
+- API provider status/proof
+- time to teacher-review-ready
+- time to background validation complete
+- whether teacher review was available while validation was still running
 - whether rubric review appeared
 - whether anchor calibration appeared
+- Classroom read/sync pilot result
+- export/passback preflight result
+- confirmation that no live Classroom write occurred
+- launch validator result and blockers
 - one normal student reviewed with no override
 - one boundary/flagged student reviewed with an override or note
 - one pairwise decision

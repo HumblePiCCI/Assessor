@@ -435,6 +435,7 @@ def normalize_submission(raw: dict, existing: dict | None = None) -> dict:
         "attachments": attachments,
         "attachment_blockers": sorted(set(blockers)),
         "text_hash": text_hash,
+        "extracted_text": extracted_text,
         "analysis_state": analysis_state,
         "scheduled_reason": "new_or_changed_text" if analysis_state == "scheduled" else "",
         "source_revision_id": str(raw.get("source_revision_id", "") or raw.get("draft_id", "") or ""),
@@ -508,6 +509,94 @@ def reconcile_snapshot(base_dir: Path, root: Path, current_project: dict | None,
     state["product_state"] = derive_product_state(state, root, current_project, base_dir)
     save_state(base_dir, scope_id, state, root)
     return state_bundle(base_dir, root, current_project, identity)
+
+
+def safe_submission_filename(submission: dict) -> str:
+    token = str(submission.get("student_id", "") or submission.get("submission_id", "") or "submission").strip()
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in token)
+    cleaned = "-".join(part for part in cleaned.split("-") if part)
+    return f"{cleaned or short_hash(submission)}.txt"
+
+
+def materialize_read_only_submissions(root: Path, state: dict) -> dict:
+    inputs = root / "inputs"
+    submissions_dir = inputs / "submissions"
+    submissions_dir.mkdir(parents=True, exist_ok=True)
+    imported = []
+    blockers = []
+    for submission in (state.get("submissions", {}) or {}).values():
+        if not isinstance(submission, dict):
+            continue
+        submission_blockers = list(submission.get("attachment_blockers", []) or [])
+        text = str(submission.get("extracted_text", "") or "")
+        if submission_blockers or not text.strip():
+            blockers.append(
+                {
+                    "submission_id": submission.get("submission_id", ""),
+                    "student_id": submission.get("student_id", ""),
+                    "blockers": submission_blockers or ["no_extractable_text"],
+                }
+            )
+            continue
+        filename = safe_submission_filename(submission)
+        path = submissions_dir / filename
+        path.write_text(text.strip() + "\n", encoding="utf-8")
+        imported.append(
+            {
+                "submission_id": submission.get("submission_id", ""),
+                "student_id": submission.get("student_id", ""),
+                "path": f"inputs/submissions/{filename}",
+                "text_hash": submission.get("text_hash", ""),
+            }
+        )
+        submission["analysis_state"] = "scheduled"
+    metadata = {
+        "source": "google_classroom_read_only_sync",
+        "generated_at": now_iso(),
+        "assignment": state.get("classroom_link", {}),
+        "roster": state.get("roster", []),
+        "imported_submission_count": len(imported),
+        "attachment_blocker_count": len(blockers),
+    }
+    write_json(inputs / "class_metadata.json", metadata)
+    return {
+        "adapter": "fixture_or_local_read_only",
+        "external_write_performed": False,
+        "imported_submission_count": len(imported),
+        "blocked_submission_count": len(blockers),
+        "imported_submissions": imported,
+        "blockers": blockers,
+    }
+
+
+def read_only_sync(base_dir: Path, root: Path, current_project: dict | None, identity: dict | None, payload: dict) -> dict:
+    scope_id = review_store.review_scope_id(current_project)
+    state = load_state(base_dir, scope_id, current_project, identity)
+    if not state.get("classroom_link"):
+        course = payload.get("course", {}) if isinstance(payload.get("course", {}), dict) else {}
+        coursework = payload.get("coursework", {}) if isinstance(payload.get("coursework", {}), dict) else {}
+        link_payload = {
+            "course_id": payload.get("course_id") or course.get("id") or "fixture-course",
+            "course_name": payload.get("course_name") or course.get("name") or "Read-only Classroom pilot",
+            "coursework_id": payload.get("coursework_id") or coursework.get("id") or "fixture-coursework",
+            "coursework_title": payload.get("coursework_title") or payload.get("assignment_title") or coursework.get("title") or "Imported assignment",
+            "passback_mode": payload.get("passback_mode") or "csv_export",
+            "policy": payload.get("policy", {}),
+        }
+        link_assignment(base_dir, root, current_project, identity, link_payload)
+    snapshot = {
+        "roster": payload.get("roster", []) or [],
+        "submissions": payload.get("submissions", []) or [],
+    }
+    bundle = reconcile_snapshot(base_dir, root, current_project, identity, snapshot)
+    state = load_state(base_dir, scope_id, current_project, identity)
+    sync = materialize_read_only_submissions(root, state)
+    state["summary"] = summarize_state(state)
+    state["product_state"] = derive_product_state(state, root, current_project, base_dir)
+    save_state(base_dir, scope_id, state, root)
+    bundle = state_bundle(base_dir, root, current_project, identity)
+    bundle["read_sync"] = sync
+    return bundle
 
 
 def record_event_hint(base_dir: Path, root: Path, current_project: dict | None, identity: dict | None, payload: dict) -> dict:

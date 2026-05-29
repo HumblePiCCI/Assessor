@@ -26,7 +26,11 @@ Committee-Edge Routing Notes
 
 Operational Notes
 - Local proof/dev mode is `codex_local`. It uses the OAuth-capable Codex app CLI (`codex exec`) and does not require an API key.
-- Pay-as-you-go mode is `openai`, which now means "API provider path." The active provider is selected by `api_provider` in `config/llm_routing.json` or by `LLM_API_PROVIDER`.
+- Pay-as-you-go mode is the API provider path. `mode=api` and
+  `mode=api_provider` are accepted aliases; `mode=openai` remains a backward
+  compatible value for existing clients.
+- The active provider is selected by `api_provider` in
+  `config/llm_routing.json` or by `LLM_API_PROVIDER`.
 - Provider keys are read from `LLM_API_KEY` first, then the provider-specific `api_key_env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, etc.).
 - Supported API adapter kinds:
   - `openai_responses`: OpenAI Responses-compatible providers.

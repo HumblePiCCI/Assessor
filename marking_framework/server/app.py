@@ -222,6 +222,8 @@ async def codex_login():
 
 def validate_pipeline_mode(mode: str) -> str:
     normalized = mode.strip().lower()
+    if normalized in {"api", "api_provider", "payg"}:
+        normalized = "openai"
     if normalized not in {"codex_local", "openai"}:
         raise HTTPException(status_code=400, detail="Invalid mode")
     if normalized == "codex_local":
@@ -231,7 +233,10 @@ def validate_pipeline_mode(mode: str) -> str:
         if not status["connected"]:
             raise HTTPException(status_code=400, detail=status.get("reason") or "Codex not connected")
     if normalized == "openai" and not current_api_key():
-        raise HTTPException(status_code=400, detail="OpenAI API key not configured")
+        provider = api_provider_status(str(BASE_DIR.parent / "config" / "llm_routing.json"))
+        label = provider.get("provider") or "API provider"
+        reason = provider.get("reason") or "API provider key not configured"
+        raise HTTPException(status_code=400, detail=f"{label} key not configured: {reason}")
     return normalized
 
 
@@ -419,11 +424,12 @@ async def create_job(
         "--workdir",
         str(job_dir / "workspace"),
     ]
-    api_key = API_KEY_OVERRIDE["value"] or os.environ.get("OPENAI_API_KEY")
+    api_key = current_api_key()
     if not api_key:
-        raise HTTPException(status_code=400, detail="OpenAI API key not configured")
+        raise HTTPException(status_code=400, detail="API provider key not configured")
     env = os.environ.copy()
-    env["OPENAI_API_KEY"] = api_key
+    env["LLM_API_KEY"] = api_key
+    env.setdefault("OPENAI_API_KEY", api_key)
     result = run(cmd, env=env)
     if result.returncode != 0:
         raise HTTPException(status_code=500, detail="Job failed")

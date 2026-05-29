@@ -35,6 +35,40 @@ FULL_PIPELINE_STEP_IDS = (
     "dashboard",
 )
 
+INTAKE_RUBRIC_STEP_IDS = (
+    "rubric",
+    "scope_grounding",
+    "extract",
+    "conventions",
+    "assess",
+    "cost",
+    "aggregate_1",
+    "boundary",
+    "aggregate_2",
+)
+
+FAST_REVIEW_STEP_IDS = (
+    *INTAKE_RUBRIC_STEP_IDS,
+    "pairwise",
+    "grade",
+    "dashboard",
+)
+
+BACKGROUND_VALIDATION_STEP_IDS = (
+    "band_seam",
+    "consistency",
+    "pairwise_escalation",
+    "evidence_map",
+    "committee_edge_resolver",
+    "rerank",
+    "pairwise_eval",
+    "quality_gate",
+    "sota_gate",
+    "cohort_confidence",
+    "grade",
+    "dashboard",
+)
+
 ANCHOR_RESUME_STEP_IDS = (
     "aggregate_1",
     "boundary",
@@ -176,6 +210,18 @@ def pipeline_steps_by_ids(step_ids: list[str] | tuple[str, ...]) -> list[dict]:
 
 def anchor_resume_steps() -> list[dict]:
     return pipeline_steps_by_ids(ANCHOR_RESUME_STEP_IDS)
+
+
+def intake_rubric_steps() -> list[dict]:
+    return pipeline_steps_by_ids(INTAKE_RUBRIC_STEP_IDS)
+
+
+def fast_review_steps() -> list[dict]:
+    return pipeline_steps_by_ids(FAST_REVIEW_STEP_IDS)
+
+
+def background_validation_steps() -> list[dict]:
+    return pipeline_steps_by_ids(BACKGROUND_VALIDATION_STEP_IDS)
 
 
 def pipeline_step_command(step_id: str) -> list[str]:

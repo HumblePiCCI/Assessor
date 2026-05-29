@@ -27,6 +27,7 @@ API endpoints:
 
 - `GET /projects/classroom`
 - `POST /projects/classroom/link`
+- `POST /projects/classroom/read-sync`
 - `POST /projects/classroom/reconcile`
 - `POST /projects/classroom/events`
 - `POST /projects/classroom/audit/complete`
@@ -36,9 +37,16 @@ API endpoints:
 - `POST /projects/classroom/passback/confirm`
 
 The UI exposes these controls inside Session details. A teacher or operator can
-link a Classroom assignment, reconcile the current cohort snapshot, see product
-state and blockers, mark the background audit current, generate the evidence
+link a Classroom assignment, run read-only fixture/local sync into normal
+submission inputs, reconcile the current cohort snapshot, see product state and
+blockers, refresh validation after teacher revision, generate the evidence
 packet, and preflight a CSV/Classroom passback action.
+
+`read-sync` is the pilot ingestion seam. It accepts roster/submission snapshots
+from a fixture/local adapter, materializes supported extracted text into
+`inputs/submissions`, writes Classroom import metadata to
+`inputs/class_metadata.json`, and records unsupported attachments as blockers.
+It does not require credentials in CI and does not perform external writes.
 
 ## Product States
 
