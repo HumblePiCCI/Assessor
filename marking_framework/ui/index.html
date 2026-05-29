@@ -85,28 +85,43 @@
             <span id="classroomStatus" class="quick-card-status">No assignment linked</span>
           </summary>
           <div class="quick-card-body classroom auth compact">
-            <div class="classroom-grid">
-              <input id="classroomCourseName" type="text" placeholder="Course name" />
-              <input id="classroomAssignmentTitle" type="text" placeholder="Assignment title" />
-            </div>
             <div class="auth-row">
-              <select id="classroomPassbackMode">
-                <option value="no_passback">Dashboard only</option>
-                <option value="csv_export">CSV export</option>
-                <option value="draft_grade">Classroom draft grades</option>
-                <option value="assigned_grade">Classroom assigned grades</option>
-                <option value="return_submission">Grades and return</option>
+              <button id="googleConnect" class="primary">Connect Google Classroom</button>
+              <button id="googleDisconnect" class="ghost">Disconnect</button>
+            </div>
+            <div id="googleAuthStatus" class="auth-status">Google not connected.</div>
+            <div class="classroom-grid">
+              <select id="googleCourseSelect">
+                <option value="">Choose class</option>
               </select>
-              <button id="linkClassroom" class="ghost">Link</button>
+              <select id="googleCourseworkSelect">
+                <option value="">Choose assignment</option>
+              </select>
             </div>
             <div class="project-actions">
-              <button id="readSyncClassroom" class="ghost">Read sync</button>
+              <button id="selectGoogleAssignment" class="ghost">Use assignment</button>
+              <button id="syncGoogleSubmissions" class="primary">Sync submissions</button>
             </div>
             <details class="advanced-details">
-              <summary>Course IDs</summary>
+              <summary>Session/Admin details</summary>
               <div class="classroom-grid">
+                <input id="classroomCourseName" type="text" placeholder="Course name" />
+                <input id="classroomAssignmentTitle" type="text" placeholder="Assignment title" />
                 <input id="classroomCourseId" type="text" placeholder="Course ID" />
                 <input id="classroomCourseworkId" type="text" placeholder="CourseWork ID" />
+              </div>
+              <div class="auth-row">
+                <select id="classroomPassbackMode">
+                  <option value="no_passback">Dashboard only</option>
+                  <option value="csv_export">CSV export</option>
+                  <option value="draft_grade">Classroom draft grades</option>
+                  <option value="assigned_grade">Classroom assigned grades</option>
+                  <option value="return_submission">Grades and return</option>
+                </select>
+                <button id="linkClassroom" class="ghost">Link fixture/local</button>
+              </div>
+              <div class="project-actions">
+                <button id="readSyncClassroom" class="ghost">Fixture read sync</button>
               </div>
             </details>
             <div class="project-actions classroom-linked-control is-hidden">
@@ -124,7 +139,7 @@
               <button id="passbackPreflight" class="ghost">Preflight</button>
             </div>
             <div class="project-actions classroom-linked-control is-hidden">
-              <button id="confirmPassback" class="ghost">Confirm export</button>
+              <button id="confirmPassback" class="ghost">Confirm CSV export</button>
               <button id="showEvidencePacket" class="ghost">Evidence packet</button>
             </div>
             <div id="classroomCounts" class="classroom-counts classroom-linked-control is-hidden"></div>

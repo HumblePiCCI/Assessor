@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null;
+let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, googleAuth = null, googleCourses = [], googleCoursework = [];
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -73,9 +73,16 @@ function updateWorkflowState() {
   const essayCount = document.getElementById('uploadEssays')?.files?.length || 0;
   const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
   const outlineReady = !!document.getElementById('uploadOutline')?.files?.[0];
+  const classroomSummary = classroomState?.summary || {};
+  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
+  const classroomImported = !!(
+    classroomState?.classroom_link?.course_id &&
+    ((classroomSummary.ready_for_analysis_count || 0) > 0 || (latestSync.imported_count || 0) > 0)
+  );
   const students = getStudents();
   const hasReview = !!(data?.students?.length);
   const filesReady = essayCount > 0 && rubricReady && outlineReady;
+  const projectInputsReady = classroomImported && rubricReady && outlineReady;
   setNodeState(document.getElementById('projectBadge'), `Project · ${compactLabel(projectText, 28)}`, currentProject ? 'ready' : 'idle');
   setNodeState(document.getElementById('connectionBadge'), `Connection · ${compactLabel(authText, 24)}`, authState);
   setNodeState(document.getElementById('runBadge'), `Pipeline · ${compactLabel(pipelineText, 26)}`, pipelineState);
@@ -84,6 +91,8 @@ function updateWorkflowState() {
   if (hint) {
     if (hasReview) {
       hint.textContent = `${students.length} essays loaded. Review the order, correct the exceptions, then finalize.`;
+    } else if (classroomImported && !essayCount) {
+      hint.textContent = `Classroom submissions are synced. Add rubric and outline, then run the assessment.`;
     } else if (!essayCount && !rubricReady && !outlineReady) {
       hint.textContent = 'Add essays, rubric, and outline. Then run the assessment.';
     } else {
@@ -98,16 +107,18 @@ function updateWorkflowState() {
   if (workflowSummary) {
     workflowSummary.textContent = hasReview
       ? `${students.length} essays ready for review`
+      : projectInputsReady
+        ? 'Classroom imports ready'
       : filesReady
         ? 'Files ready'
-        : `${essayCount || 0} essays · ${rubricReady ? 'rubric ready' : 'rubric missing'} · ${outlineReady ? 'outline ready' : 'outline missing'}`;
-    workflowSummary.dataset.state = hasReview || filesReady ? 'ready' : 'idle';
+        : `${classroomImported ? 'Classroom synced' : `${essayCount || 0} essays`} · ${rubricReady ? 'rubric ready' : 'rubric missing'} · ${outlineReady ? 'outline ready' : 'outline missing'}`;
+    workflowSummary.dataset.state = hasReview || filesReady || projectInputsReady ? 'ready' : 'idle';
   }
   const railMeta = document.getElementById('railMeta');
   if (railMeta) railMeta.textContent = students.length ? `${students.length} essays in order` : 'No essays loaded';
   const runButton = document.getElementById('runPipelinePrimary');
   if (runButton) {
-    runButton.disabled = running || !filesReady || authState !== 'ready';
+    runButton.disabled = running || !(filesReady || projectInputsReady) || authState !== 'ready';
     runButton.textContent = running ? 'Running…' : 'Run assessment';
   }
 }
@@ -117,10 +128,11 @@ function setPipelineStatus(text, state = inferPipelineState(text)) {
 }
 function updateControlVisibility() {
   const hasScored = !!(data && data.students && data.students.length);
+  const hasClassroomExceptions = !!(classroomState?.blockers?.length);
   const multipleStudents = hasScored && data.students.length > 1;
   document.getElementById('actionsEmpty')?.classList.toggle('is-hidden', hasScored);
   document.getElementById('teacherSpotlight')?.classList.toggle('is-hidden', !hasScored);
-  document.getElementById('exceptionsSection')?.classList.toggle('is-hidden', !hasScored);
+  document.getElementById('exceptionsSection')?.classList.toggle('is-hidden', !(hasScored || hasClassroomExceptions));
   document.getElementById('feedbackSection')?.classList.toggle('is-hidden', !hasScored);
   document.getElementById('reviewSection')?.classList.toggle('is-hidden', !hasScored);
   const prevBtn = document.getElementById('prevBtn');
@@ -315,11 +327,13 @@ function renderClassroomState(bundle) {
   status.textContent = `${link.course_name || link.course_id} · ${link.coursework_title || link.coursework_id} · ${stateLabel}${blockers.length ? ` · ${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : ''}`;
   status.dataset.state = classroomStateTone(bundle.product_state);
   const summary = bundle.summary || {};
+  const latestSync = (bundle.sync_history || []).slice(-1)[0] || {};
   const cells = [
     ['Roster', summary.roster_count || 0],
     ['Submitted', summary.submitted_count || 0],
+    ['Imported', latestSync.imported_count ?? bundle.read_sync?.imported_submission_count ?? 0],
     ['Scheduled', summary.scheduled_analysis_count || 0],
-    ['Blockers', summary.attachment_blocker_count || 0],
+    ['Blockers', latestSync.blocker_count ?? summary.attachment_blocker_count ?? 0],
     ['Human rev', bundle.latest_human_revision_id || 0],
     ['Audit rev', bundle.audit?.audit_revision_id || 0],
   ];
@@ -337,6 +351,173 @@ async function refreshClassroomState() {
     if (!res.ok) return;
     renderClassroomState(await res.json());
   } catch (_) {}
+}
+function setGoogleStatus(text, state = 'idle') {
+  const node = document.getElementById('googleAuthStatus');
+  if (!node) return;
+  node.textContent = text;
+  node.dataset.state = state;
+}
+function populateSelect(select, rows, placeholder, valueKey, labelKey) {
+  if (!select) return;
+  select.innerHTML = '';
+  const first = document.createElement('option');
+  first.value = '';
+  first.textContent = placeholder;
+  select.appendChild(first);
+  rows.forEach(row => {
+    const opt = document.createElement('option');
+    opt.value = row[valueKey] || '';
+    opt.textContent = row[labelKey] || row[valueKey] || '';
+    opt.dataset.row = JSON.stringify(row);
+    select.appendChild(opt);
+  });
+}
+function selectedRow(selectId) {
+  const select = document.getElementById(selectId);
+  const option = select?.selectedOptions?.[0];
+  if (!option?.dataset?.row) return {};
+  try { return JSON.parse(option.dataset.row); } catch (_) { return {}; }
+}
+async function refreshGoogleAuth() {
+  try {
+    const res = await fetch(apiUrl('/google/auth/status'));
+    if (!res.ok) throw new Error('status unavailable');
+    googleAuth = await res.json();
+    const connectBtn = document.getElementById('googleConnect');
+    const disconnectBtn = document.getElementById('googleDisconnect');
+    if (googleAuth.connected) {
+      const who = googleAuth.teacher_display_email || 'Google connected';
+      setGoogleStatus(`${who}. Choose a class.`, 'ready');
+      if (connectBtn) connectBtn.textContent = 'Reconnect Google';
+      if (disconnectBtn) disconnectBtn.disabled = false;
+      await loadGoogleCourses();
+    } else {
+      setGoogleStatus(googleAuth.configured ? 'Google not connected.' : 'Google OAuth is not configured on this server.', googleAuth.configured ? 'idle' : 'warn');
+      if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
+      if (disconnectBtn) disconnectBtn.disabled = true;
+    }
+  } catch (_) {
+    setGoogleStatus('Google status unavailable.', 'warn');
+  }
+}
+async function startGoogleConnect() {
+  setGoogleStatus('Starting Google connection...', 'warn');
+  try {
+    const res = await fetch(apiUrl('/google/auth/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirect_after: location.pathname }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload.authorization_url) throw new Error(payload.detail?.message || 'Google connection is not configured');
+    location.href = payload.authorization_url;
+  } catch (err) {
+    setGoogleStatus(err.message || 'Google connection failed.', 'danger');
+  }
+}
+async function disconnectGoogle() {
+  setGoogleStatus('Disconnecting Google...', 'warn');
+  try {
+    const res = await fetch(apiUrl('/google/auth/disconnect'), { method: 'POST' });
+    if (!res.ok) throw new Error('disconnect failed');
+    googleCourses = [];
+    googleCoursework = [];
+    populateSelect(document.getElementById('googleCourseSelect'), [], 'Choose class', 'course_id', 'course_name');
+    populateSelect(document.getElementById('googleCourseworkSelect'), [], 'Choose assignment', 'coursework_id', 'coursework_title');
+    await refreshGoogleAuth();
+  } catch (err) {
+    setGoogleStatus(err.message || 'Google disconnect failed.', 'danger');
+  }
+}
+async function loadGoogleCourses() {
+  const select = document.getElementById('googleCourseSelect');
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/google/courses'));
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.detail?.message || 'Could not load classes');
+    googleCourses = payload.courses || [];
+    populateSelect(select, googleCourses, 'Choose class', 'course_id', 'course_name');
+    if (!googleCourses.length) setGoogleStatus('Google connected, but no active teacher classes were returned.', 'warn');
+  } catch (err) {
+    setGoogleStatus(err.message || 'Could not load Google classes.', 'danger');
+  }
+}
+async function loadGoogleCoursework() {
+  const course = document.getElementById('googleCourseSelect')?.value || '';
+  const courseworkSelect = document.getElementById('googleCourseworkSelect');
+  googleCoursework = [];
+  populateSelect(courseworkSelect, [], 'Choose assignment', 'coursework_id', 'coursework_title');
+  if (!course) return;
+  setGoogleStatus('Loading assignments...', 'warn');
+  try {
+    const res = await fetch(apiUrl(`/projects/classroom/google/courses/${encodeURIComponent(course)}/coursework`));
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.detail?.message || 'Could not load assignments');
+    googleCoursework = payload.coursework || [];
+    populateSelect(courseworkSelect, googleCoursework, 'Choose assignment', 'coursework_id', 'coursework_title');
+    setGoogleStatus(googleCoursework.length ? 'Choose an assignment.' : 'No assignments returned for this class.', googleCoursework.length ? 'ready' : 'warn');
+  } catch (err) {
+    setGoogleStatus(err.message || 'Could not load assignments.', 'danger');
+  }
+}
+async function selectGoogleAssignment() {
+  const course = selectedRow('googleCourseSelect');
+  const coursework = selectedRow('googleCourseworkSelect');
+  if (!course.course_id || !coursework.coursework_id) {
+    setGoogleStatus('Choose a class and assignment first.', 'warn');
+    return;
+  }
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/google/select'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        course_id: course.course_id,
+        course_name: course.course_name,
+        coursework_id: coursework.coursework_id,
+        coursework_title: coursework.coursework_title,
+        passback_mode: 'csv_export',
+      }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.detail?.message || 'Could not select assignment');
+    classroomPreflight = null;
+    renderClassroomState(payload);
+    setGoogleStatus('Assignment selected. Sync submissions next.', 'ready');
+  } catch (err) {
+    setGoogleStatus(err.message || 'Could not select assignment.', 'danger');
+  }
+}
+async function syncGoogleSubmissions() {
+  const course = selectedRow('googleCourseSelect');
+  const coursework = selectedRow('googleCourseworkSelect');
+  const status = document.getElementById('classroomStatus');
+  if (status) status.textContent = 'Syncing Google Classroom submissions...';
+  try {
+    const res = await fetch(apiUrl('/projects/classroom/google/read-sync'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        course_id: course.course_id || classroomState?.classroom_link?.course_id || '',
+        course_name: course.course_name || classroomState?.classroom_link?.course_name || '',
+        coursework_id: coursework.coursework_id || classroomState?.classroom_link?.coursework_id || '',
+        coursework_title: coursework.coursework_title || classroomState?.classroom_link?.coursework_title || '',
+        passback_mode: 'csv_export',
+      }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.detail?.message || 'Google sync failed');
+    classroomPreflight = null;
+    renderClassroomState(payload);
+    const latest = (payload.sync_history || []).slice(-1)[0] || {};
+    setGoogleStatus(`Synced ${latest.imported_count || 0} submissions; ${latest.blocker_count || 0} blocked.`, latest.blocker_count ? 'warn' : 'ready');
+    renderExceptions();
+    updateWorkflowState();
+  } catch (err) {
+    if (status) status.textContent = `Google sync failed: ${err.message || 'unknown error'}`;
+    setGoogleStatus(err.message || 'Google sync failed.', 'danger');
+  }
 }
 function classroomLinkPayload() {
   const courseName = (document.getElementById('classroomCourseName')?.value || '').trim();
@@ -548,7 +729,16 @@ async function confirmPassback() {
     });
     if (!res.ok) throw new Error('confirmation failed');
     const action = await res.json();
-    if (node) node.textContent = `Export action recorded: ${action.status.replaceAll('_', ' ')} · ${action.row_count} row${action.row_count === 1 ? '' : 's'}.`;
+    if (node) {
+      node.textContent = `CSV export ready: ${action.row_count} row${action.row_count === 1 ? '' : 's'}${action.export_artifact?.sha256 ? ` · ${action.export_artifact.sha256.slice(0, 12)}` : ''}.`;
+      if (action.download_url) {
+        const link = document.createElement('a');
+        link.href = apiUrl(action.download_url);
+        link.textContent = ' Download CSV';
+        link.download = action.export_artifact?.filename || 'classroom_export.csv';
+        node.appendChild(link);
+      }
+    }
     await refreshClassroomState();
   } catch (err) {
     if (node) node.textContent = `Export confirmation failed: ${err.message || 'unknown error'}`;
@@ -1339,7 +1529,12 @@ function renderExceptions() {
   const listNode = document.getElementById('exceptionsList');
   if (!stateNode || !listNode) return;
   const validation = data?.validation || {};
-  const exceptions = data?.teacher_exceptions || [];
+  const classroomBlockers = (classroomState?.blockers || []).map(code => ({
+    kind: 'Classroom blocker',
+    label: String(code || '').replaceAll('_', ' '),
+    action: classroomState?.classroom_error_remedies?.[code] || 'Resolve this Classroom import issue before export.',
+  }));
+  const exceptions = [...(data?.teacher_exceptions || []), ...classroomBlockers];
   const status = validation.status || 'pending';
   if (validation.teacher_message) {
     stateNode.textContent = validation.teacher_message;
@@ -1406,8 +1601,7 @@ function renderDetail() {
     if (emptyState) emptyState.classList.remove('is-hidden');
     if (essayGrid) essayGrid.classList.add('is-hidden');
     renderReviewPanel(null);
-    const exceptions = document.getElementById('exceptionsList');
-    if (exceptions) exceptions.innerHTML = '';
+    renderExceptions();
     updateControlVisibility();
     updateWorkflowState();
     return;
@@ -1553,11 +1747,17 @@ async function runPipeline() {
   const essays = document.getElementById('uploadEssays');
   const rubric = document.getElementById('uploadRubric');
   const outline = document.getElementById('uploadOutline');
-  if (!rubric?.files?.[0] || !outline?.files?.[0] || !essays?.files?.length) {
-    setPipelineStatus('Add essays, rubric, outline', 'warn');
+  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
+  const classroomImported = !!(
+    classroomState?.classroom_link?.course_id &&
+    ((classroomState?.summary?.ready_for_analysis_count || 0) > 0 || (latestSync.imported_count || 0) > 0)
+  );
+  const hasLocalEssays = !!essays?.files?.length;
+  if (!rubric?.files?.[0] || !outline?.files?.[0] || (!hasLocalEssays && !classroomImported)) {
+    setPipelineStatus(classroomImported ? 'Add rubric and outline' : 'Add essays, rubric, outline', 'warn');
     return;
   }
-  if (!previewStudents.length) updatePreviewFromUploads();
+  if (hasLocalEssays && !previewStudents.length) updatePreviewFromUploads();
   setPipelineStatus('Checking connection...', 'warn');
   let mode = '';
   try {
@@ -1576,7 +1776,7 @@ async function runPipeline() {
   const form = new FormData();
   form.append('rubric', rubric.files[0]);
   form.append('outline', outline.files[0]);
-  Array.from(essays.files).forEach(f => form.append('submissions', f));
+  if (hasLocalEssays) Array.from(essays.files).forEach(f => form.append('submissions', f));
   form.append('mode', mode);
   if (currentProject?.id) form.append('project_id', currentProject.id);
   setPipelineStatus('Running...', 'running');
@@ -1584,7 +1784,8 @@ async function runPipeline() {
   startPipelineNarrative();
   startShuffle();
   try {
-    const res = await fetch(apiUrl('/pipeline/v2/run'), { method: 'POST', body: form });
+    const endpoint = hasLocalEssays ? '/pipeline/v2/run' : '/pipeline/v2/run-project-inputs';
+    const res = await fetch(apiUrl(endpoint), { method: 'POST', body: form });
     if (!res.ok) {
       let msg = 'Run failed';
       try {
@@ -1752,6 +1953,11 @@ function setupControls() {
   const clearBtn = document.getElementById('clearProject'); if (clearBtn) clearBtn.addEventListener('click', clearProject);
   const loadBtn = document.getElementById('loadProject'); if (loadBtn) loadBtn.addEventListener('click', loadProject);
   const delBtn = document.getElementById('deleteProject'); if (delBtn) delBtn.addEventListener('click', deleteProject);
+  const googleConnect = document.getElementById('googleConnect'); if (googleConnect) googleConnect.addEventListener('click', startGoogleConnect);
+  const googleDisconnect = document.getElementById('googleDisconnect'); if (googleDisconnect) googleDisconnect.addEventListener('click', disconnectGoogle);
+  const googleCourseSelect = document.getElementById('googleCourseSelect'); if (googleCourseSelect) googleCourseSelect.addEventListener('change', loadGoogleCoursework);
+  const selectGoogle = document.getElementById('selectGoogleAssignment'); if (selectGoogle) selectGoogle.addEventListener('click', selectGoogleAssignment);
+  const syncGoogle = document.getElementById('syncGoogleSubmissions'); if (syncGoogle) syncGoogle.addEventListener('click', syncGoogleSubmissions);
   const linkClassroom = document.getElementById('linkClassroom'); if (linkClassroom) linkClassroom.addEventListener('click', linkClassroomAssignment);
   const readSyncBtn = document.getElementById('readSyncClassroom'); if (readSyncBtn) readSyncBtn.addEventListener('click', readSyncClassroom);
   const reconcileBtn = document.getElementById('reconcileClassroom'); if (reconcileBtn) reconcileBtn.addEventListener('click', reconcileClassroom);
@@ -1766,6 +1972,7 @@ function setupControls() {
   const submitAnchors = document.getElementById('submitAnchors'); if (submitAnchors) submitAnchors.addEventListener('click', submitAnchorReview);
   updateWorkflowState();
   refreshClassroomState();
+  refreshGoogleAuth();
 }
 async function boot(payload) {
   data = payload;
@@ -1811,6 +2018,7 @@ async function boot(payload) {
   updateControlVisibility();
   updateWorkflowState();
   refreshAuthStatus();
+  refreshGoogleAuth();
 }
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })
   .then(res => res.ok ? res.text() : '')

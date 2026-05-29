@@ -480,7 +480,8 @@ textarea {
   gap: 8px;
 }
 
-.classroom-grid input {
+.classroom-grid input,
+.classroom-grid select {
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
@@ -490,7 +491,8 @@ textarea {
   color: var(--ink);
 }
 
-body[data-theme="dark"] .classroom-grid input {
+body[data-theme="dark"] .classroom-grid input,
+body[data-theme="dark"] .classroom-grid select {
   background: rgba(255, 255, 255, 0.03);
 }
 
