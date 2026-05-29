@@ -72,3 +72,9 @@ Fast teacher review is not a release-gate bypass. The queue may publish
 begin review, but export/passback remains blocked until teacher finalization,
 current validation, clear blockers, an evidence packet, and explicit
 confirmation.
+
+Classroom read sync does not change those gates. Unsupported, missing, empty,
+permission-blocked, OCR-required, or external-link submissions are blockers and
+are not materialized as zero-text essays. CSV export is available only after the
+same review/current-validation/clear-blocker/evidence/confirmation sequence.
+Live Classroom write modes stay fail-closed in this slice.

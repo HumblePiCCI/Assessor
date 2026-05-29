@@ -65,7 +65,7 @@ Quick Start
    - Save exploratory edits as draft state, then finalize the review when the curve is settled
    - Only finalized reviews feed the local teacher prior used on future reranks in the same scope
    - For supervised classroom testing, use `docs/TEACHER_PILOT_RUNBOOK.md`; teacher pilot is not production launch and teachers retain final authority.
-   - For the Classroom-facing product path, use `docs/GOOGLE_CLASSROOM_HERO_PATH.md`; export/passback remains read-only-first and requires explicit teacher preflight.
+   - For the Classroom-facing product path, use `docs/GOOGLE_CLASSROOM_HERO_PATH.md`; Google OAuth + Classroom/Drive read sync can import supported submissions, CSV export is the shipped passback path, and live Classroom writes remain fail-closed.
 
 10) Pay-as-you-go job runner (optional)
    - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`

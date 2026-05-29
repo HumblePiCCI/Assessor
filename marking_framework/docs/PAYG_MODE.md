@@ -37,4 +37,8 @@ Minimal server (optional)
 - `/pipeline/v2/run` is the recommended shipped path. Legacy `/jobs` remains
   available for local non-strict compatibility and uses generic provider key
   handling, but it is not the teacher product path.
+- `/pipeline/v2/run-project-inputs` runs from server-side project inputs. The
+  Google Classroom read-sync path uses this after supported submissions have
+  been materialized into `inputs/submissions`; rubric and assignment outline
+  still must be present through upload or saved project inputs.
 - Use `server/requirements.txt` to install dependencies.

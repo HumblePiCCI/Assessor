@@ -86,6 +86,12 @@ When `outputs/dashboard_data.json` exists, the queue publishes the workspace,
 sets `teacher_can_review: true`, records `review_ready_at`, and keeps the
 legacy `status` as `running` while validation continues.
 
+The same fast-review lane is used for Classroom-imported work. Google
+Classroom/Drive read sync materializes supported attachments into
+`inputs/submissions` and records source counts in `inputs/class_metadata.json`.
+`POST /pipeline/v2/run-project-inputs` then submits those server-side inputs to
+the same queue path as uploaded files; no separate Classroom grading lane exists.
+
 Background validation then runs:
 
 - band seam adjudication

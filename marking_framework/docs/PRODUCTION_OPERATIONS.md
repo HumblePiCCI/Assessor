@@ -19,6 +19,39 @@
   - `projects/<tenant>/projects/<project_id>`
 - Current project selection:
   - `projects/<tenant>/current/<teacher>.json`
+- Google OAuth state and tokens:
+  - `server/data/google_oauth/<tenant>/<teacher>/<project>/token.json`
+  - ignored by git and never copied to outputs or project snapshots
+
+## Google OAuth Operations
+
+Google Classroom read sync is configured only through environment/local config:
+
+```bash
+export GOOGLE_OAUTH_CLIENT_ID=<client-id>
+export GOOGLE_OAUTH_CLIENT_SECRET=<client-secret>
+export GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/google/auth/callback
+# optional local untracked Google client JSON
+export GOOGLE_OAUTH_CLIENT_SECRETS_FILE=/path/to/client_secret.json
+# required for strict staging/production local token storage, unless an
+# approved external secret store replaces local token files
+export GOOGLE_TOKEN_ENCRYPTION_KEY=<local-token-key>
+```
+
+Operational endpoints:
+
+- `GET /google/auth/status`
+- `POST /google/auth/start`
+- `GET /google/auth/callback`
+- `POST /google/auth/disconnect`
+
+Status responses are intentionally redacted: connected state, granted scopes,
+expiry, and teacher display/hash only. Raw access tokens, refresh tokens, Google
+credential JSON, and student-private screenshots must not be committed.
+
+Strict staging/production launch remains blocked unless token storage is
+encrypted with an approved key path or delegated to an approved secret store.
+This slice does not enable live Classroom writes.
 
 ## Observability
 
