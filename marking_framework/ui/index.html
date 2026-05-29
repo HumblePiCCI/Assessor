@@ -99,6 +99,9 @@
               </select>
               <button id="linkClassroom" class="ghost">Link</button>
             </div>
+            <div class="project-actions">
+              <button id="readSyncClassroom" class="ghost">Read sync</button>
+            </div>
             <details class="advanced-details">
               <summary>Course IDs</summary>
               <div class="classroom-grid">
@@ -108,7 +111,7 @@
             </details>
             <div class="project-actions classroom-linked-control is-hidden">
               <button id="reconcileClassroom" class="ghost">Reconcile</button>
-              <button id="completeClassroomAudit" class="ghost">Audit current</button>
+              <button id="completeClassroomAudit" class="ghost">Refresh validation</button>
               <button id="finalizeClassroom" class="primary">Finalize</button>
             </div>
             <div class="auth-row classroom-linked-control is-hidden">
@@ -214,6 +217,12 @@
           </div>
         </details>
       </div>
+
+      <details id="exceptionsSection" class="secondary-details" open>
+        <summary>Exceptions</summary>
+        <div id="validationState" class="auth-status">Validation has not run.</div>
+        <div id="exceptionsList" class="exception-list"></div>
+      </details>
 
       <details id="feedbackSection" class="secondary-details" open>
         <summary>Feedback</summary>

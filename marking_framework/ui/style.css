@@ -449,6 +449,31 @@ textarea {
   color: var(--danger);
 }
 
+.exception-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.exception-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  background: var(--panel-strong);
+}
+
+.exception-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.exception-action {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .classroom-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -844,6 +869,7 @@ body[data-theme="dark"] .editable {
 #workspaceEmpty.is-hidden,
 #actionsEmpty.is-hidden,
 #teacherSpotlight.is-hidden,
+#exceptionsSection.is-hidden,
 #feedbackSection.is-hidden {
   display: none;
 }

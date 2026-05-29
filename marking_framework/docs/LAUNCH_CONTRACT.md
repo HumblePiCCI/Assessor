@@ -53,6 +53,10 @@ Expected outputs:
 
 Launch is blocked if the report is not `ok: true`.
 
+A local product smoke can pass while this validator remains blocked. That is
+expected: the smoke proves the teacher workflow, while this contract proves the
+production release environment and artifacts.
+
 ## Required Rollback Readiness
 
 Every release candidate must be able to generate a rollback plan:

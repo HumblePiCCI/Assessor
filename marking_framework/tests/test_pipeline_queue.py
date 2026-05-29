@@ -240,6 +240,58 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert data_json["students"][0]["student_id"] == "s1"
 
 
+def test_fast_review_dashboard_publishes_before_background_validation_finishes(tmp_path):
+    calls = []
+    holder = {}
+
+    def run_phased(cmd, env=None, cwd=None, **kwargs):
+        script = " ".join(str(part) for part in cmd)
+        calls.append(script)
+        workspace = Path(cwd)
+        out = workspace / "outputs"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "consensus_scores.csv").write_text(
+            "student_id,consensus_rank,adjusted_level,rubric_mean_percent,rubric_after_penalty_percent,conventions_mistake_rate_percent\n"
+            "s1,1,4,88,88,1\n",
+            encoding="utf-8",
+        )
+        (out / "final_order.csv").write_text(
+            "student_id,final_rank,consensus_rank,adjusted_level,rubric_mean_percent,rubric_after_penalty_percent,conventions_mistake_rate_percent\n"
+            "s1,1,1,4,88,88,1\n",
+            encoding="utf-8",
+        )
+        (out / "grade_curve.csv").write_text("student_id,final_grade,curve_top,curve_bottom\ns1,92,92,58\n", encoding="utf-8")
+        (out / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1", "rank": 1}]}), encoding="utf-8")
+        if "band_seam_adjudication.py" in script:
+            job = holder["queue"].get_job(holder["job_id"])
+            assert job["teacher_can_review"] is True
+            assert job["product_phase"] == "background_validating"
+            assert job["validation_status"] == "running"
+            assert holder["queue"].load_dashboard_data(holder["job_id"])["students"][0]["student_id"] == "s1"
+            return types.SimpleNamespace(returncode=1, stderr="slow validation failed", stdout="")
+        if "verify_consistency.py" in script:
+            (out / "consistency_report.json").write_text(json.dumps({"summary": {"swap_rate": 0.0}}), encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path, run_fn=run_phased)
+    holder["queue"] = queue
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    submitted = queue.submit("openai", rubric, outline, subs, _extra_paths(root))
+    holder["job_id"] = submitted["job_id"]
+    queue._process_job(submitted["job_id"])
+    job = queue.get_job(submitted["job_id"])
+    assert job["status"] == "completed"
+    assert job["teacher_can_review"] is True
+    assert job["validation_status"] == "failed_nonblocking"
+    assert job["product_phase"] == "validation_failed_nonblocking"
+    assert job["validation_exception_count"] >= 1
+    assert (root / "outputs" / "dashboard_data.json").exists()
+    summary = json.loads((Path(job["workspace_dir"]) / "outputs" / "background_validation_summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "failed_nonblocking"
+    assert any(item["step"] == "band_seam" for item in summary["exceptions"])
+
+
 def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):
     def run_ok(_cmd, env=None, cwd=None, **kwargs):
         out = Path(cwd) / "outputs"

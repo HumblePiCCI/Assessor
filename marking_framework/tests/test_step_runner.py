@@ -47,6 +47,14 @@ def test_pipeline_steps_structure():
     grade = next(item for item in steps if item["id"] == "grade")
     assert "--non-interactive" in grade["cmd"]
     assert step_runner.pipeline_step_ids() == tuple(ids)
+    fast_ids = [item["id"] for item in step_runner.fast_review_steps()]
+    assert fast_ids[-2:] == ["grade", "dashboard"]
+    assert "band_seam" not in fast_ids
+    assert "quality_gate" not in fast_ids
+    background_ids = [item["id"] for item in step_runner.background_validation_steps()]
+    assert background_ids[:3] == ["band_seam", "consistency", "pairwise_escalation"]
+    assert background_ids[-2:] == ["grade", "dashboard"]
+    assert "extract" not in background_ids
     anchor_ids = [item["id"] for item in step_runner.anchor_resume_steps()]
     assert anchor_ids == list(step_runner.ANCHOR_RESUME_STEP_IDS)
 

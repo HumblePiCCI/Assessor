@@ -21,6 +21,8 @@ from server.runtime_context import identity_can_access, identity_token, launch_c
 from server.step_runner import (
     anchor_resume_steps,
     artifact_watch_roots,
+    background_validation_steps,
+    fast_review_steps,
     pipeline_step_graph_hash,
     pipeline_steps,
     run_step,
@@ -64,6 +66,9 @@ COHORT_CONFIDENCE_ARTIFACT = "outputs/cohort_confidence.json"
 ANCHOR_PACKET_ARTIFACT = "outputs/teacher_anchor_packet.json"
 CONSISTENCY_REPORT_ARTIFACT = "outputs/consistency_report.json"
 FINAL_ORDER_ARTIFACT = "outputs/final_order.csv"
+FAST_REVIEW_DASHBOARD_SNAPSHOT = "outputs/dashboard_data.fast_review.json"
+VALIDATION_DASHBOARD_RECOMMENDATION = "outputs/dashboard_data.validation_recommendation.json"
+BACKGROUND_VALIDATION_SUMMARY_ARTIFACT = "outputs/background_validation_summary.json"
 
 
 def now_iso() -> str:
@@ -443,6 +448,13 @@ class PipelineQueue:
             "cache_status": "TEXT DEFAULT 'miss'",
             "cache_source_job_id": "TEXT DEFAULT ''",
             "gate_summary": "TEXT DEFAULT '{}'",
+            "product_phase": "TEXT DEFAULT 'queued'",
+            "review_ready_at": "TEXT DEFAULT ''",
+            "validation_started_at": "TEXT DEFAULT ''",
+            "validation_completed_at": "TEXT DEFAULT ''",
+            "validation_status": "TEXT DEFAULT 'pending'",
+            "validation_current_for_revision_id": "INTEGER DEFAULT 0",
+            "validation_exception_count": "INTEGER DEFAULT 0",
         }
         existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         for name, ddl in required.items():
@@ -748,6 +760,13 @@ class PipelineQueue:
         cache_status: str | None = None,
         cache_source_job_id: str | None = None,
         gate_summary: dict | None = None,
+        product_phase: str | None = None,
+        review_ready_at: str | None = None,
+        validation_started_at: str | None = None,
+        validation_completed_at: str | None = None,
+        validation_status: str | None = None,
+        validation_current_for_revision_id: int | None = None,
+        validation_exception_count: int | None = None,
     ):
         fields = ["status=?", "updated_at=?"]
         values = [status, now_iso()]
@@ -784,6 +803,27 @@ class PipelineQueue:
         if gate_summary is not None:
             fields.append("gate_summary=?")
             values.append(json.dumps(gate_summary, sort_keys=True))
+        if product_phase is not None:
+            fields.append("product_phase=?")
+            values.append(product_phase)
+        if review_ready_at is not None:
+            fields.append("review_ready_at=?")
+            values.append(review_ready_at)
+        if validation_started_at is not None:
+            fields.append("validation_started_at=?")
+            values.append(validation_started_at)
+        if validation_completed_at is not None:
+            fields.append("validation_completed_at=?")
+            values.append(validation_completed_at)
+        if validation_status is not None:
+            fields.append("validation_status=?")
+            values.append(validation_status)
+        if validation_current_for_revision_id is not None:
+            fields.append("validation_current_for_revision_id=?")
+            values.append(int(validation_current_for_revision_id))
+        if validation_exception_count is not None:
+            fields.append("validation_exception_count=?")
+            values.append(int(validation_exception_count))
         values.append(job_id)
         with self._conn() as conn:
             conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id=?", tuple(values))
@@ -825,6 +865,37 @@ class PipelineQueue:
             return None
         return {"job_id": row[0], "artifact_path": str(artifact)}
 
+    def _teacher_export_ready(self, job_payload: dict) -> bool:
+        project_id = str(job_payload.get("project_id", "") or "").strip()
+        if not project_id:
+            return False
+        try:
+            from server import classroom
+            from server import projects as projectsmod
+
+            identity = self._job_identity(
+                str(job_payload.get("tenant_id", "") or "local-dev-tenant"),
+                str(job_payload.get("teacher_id", "") or "local-dev-teacher"),
+            )
+            root = self.root if not identity.get("strict_auth", False) else projectsmod.workspace_root(identity)
+            meta_path = projectsmod.project_dir(project_id, identity) / "project.json"
+            current = projectsmod.get_current_project(identity)
+            if current and str(current.get("id", "") or "") != project_id:
+                current = None
+            if current is None and meta_path.exists():
+                current = projectsmod.normalize_project_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+            project = current or {"id": project_id, "name": project_id}
+            bundle = classroom.state_bundle(projectsmod.BASE_DIR, root, project, identity)
+            gates = bundle.get("launch_gates", {}) if isinstance(bundle, dict) else {}
+            return bool(
+                gates.get("teacher_review_finalized")
+                and gates.get("full_validation_current")
+                and gates.get("attachment_blockers_clear")
+                and bundle.get("finalization", {}).get("evidence_packet_id")
+            )
+        except Exception:
+            return False
+
     def get_job(self, job_id: str, identity: dict | None = None) -> dict | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -833,7 +904,10 @@ class PipelineQueue:
                        created_at, updated_at, progress_current, progress_total,
                        progress_stage, progress_message, tenant_id, teacher_id,
                        project_id, started_at, completed_at, cache_status,
-                       cache_source_job_id, gate_summary
+                       cache_source_job_id, gate_summary, product_phase,
+                       review_ready_at, validation_started_at, validation_completed_at,
+                       validation_status, validation_current_for_revision_id,
+                       validation_exception_count
                 FROM jobs WHERE id=?
                 """,
                 (job_id,),
@@ -862,6 +936,13 @@ class PipelineQueue:
             "cache_status",
             "cache_source_job_id",
             "gate_summary",
+            "product_phase",
+            "review_ready_at",
+            "validation_started_at",
+            "validation_completed_at",
+            "validation_status",
+            "validation_current_for_revision_id",
+            "validation_exception_count",
         )
         payload = dict(zip(keys, row))
         owner = {
@@ -876,6 +957,8 @@ class PipelineQueue:
         payload["manifest_hash"] = payload["snapshot_hash"]
         payload["manifest_path"] = str(self._manifest_path(Path(payload["job_dir"])))
         payload["workspace_dir"] = str(self._workspace_dir(job_id, payload.get("tenant_id", "")))
+        payload["teacher_can_review"] = bool(payload.get("review_ready_at") or payload.get("artifact_path"))
+        payload["teacher_can_export_or_passback"] = self._teacher_export_ready(payload)
         try:
             payload["gate_summary"] = json.loads(payload.get("gate_summary") or "{}")
         except json.JSONDecodeError:
@@ -1365,7 +1448,7 @@ class PipelineQueue:
         )
         projectsmod.set_current_project(meta, identity)
 
-    def _publish_completed_workspace(self, job: dict, workspace_dir: Path, manifest: dict, *, total_steps: int):
+    def _copy_outputs_to_artifact(self, job: dict, workspace_dir: Path, manifest: dict) -> tuple[Path, list[str]]:
         artifact_dir = self._artifact_dir(job["snapshot_hash"], str(job.get("tenant_id", "") or "local-dev-tenant"))
         if artifact_dir.exists():
             shutil.rmtree(artifact_dir)
@@ -1374,8 +1457,47 @@ class PipelineQueue:
         shutil.copytree(workspace_dir / "outputs", artifact_outputs_dir)
         self._write_json(artifact_dir / "pipeline_manifest.json", manifest)
         artifact_path = artifact_outputs_dir / "dashboard_data.json"
+        return artifact_path, self._artifact_listing(artifact_dir)
+
+    def _publish_review_ready_workspace(self, job: dict, workspace_dir: Path, manifest: dict, *, current_steps: int, total_steps: int) -> str:
+        dashboard = self._workspace_dashboard_path(workspace_dir)
+        snapshot_path = workspace_dir / FAST_REVIEW_DASHBOARD_SNAPSHOT
+        if dashboard.exists():
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dashboard, snapshot_path)
+        artifact_path, published = self._copy_outputs_to_artifact(job, workspace_dir, manifest)
+        self._sync_completed_project_state(job, workspace_dir)
+        ready_at = now_iso()
+        self._append_event(Path(job["job_dir"]), "teacher_review_ready", "Teacher review dashboard ready", event="artifact", artifacts=published)
+        self._update_job(
+            str(job["id"]),
+            "running",
+            artifact=artifact_path,
+            current=current_steps,
+            total=total_steps,
+            stage="teacher_review_ready",
+            message="Review ready. Validation is checking edge cases in the background.",
+            product_phase="background_validating",
+            review_ready_at=ready_at,
+            validation_started_at=ready_at,
+            validation_status="running",
+        )
+        return ready_at
+
+    def _publish_completed_workspace(
+        self,
+        job: dict,
+        workspace_dir: Path,
+        manifest: dict,
+        *,
+        total_steps: int,
+        product_phase: str = "validation_complete",
+        validation_status: str = "complete",
+        validation_exception_count: int = 0,
+        validation_current_for_revision_id: int = 0,
+    ):
+        artifact_path, published = self._copy_outputs_to_artifact(job, workspace_dir, manifest)
         gate_summary = self._gate_summary(workspace_dir)
-        published = self._artifact_listing(artifact_dir)
         self._sync_completed_project_state(job, workspace_dir)
         self._append_event(Path(job["job_dir"]), "completed", "Published artifacts", event="artifact", artifacts=published)
         self._update_job(
@@ -1385,12 +1507,180 @@ class PipelineQueue:
             current=total_steps,
             total=total_steps,
             stage="completed",
-            message="Pipeline complete",
+            message="Validation complete" if validation_status == "complete" else "Review ready; validation needs attention",
             completed_at=now_iso(),
             gate_summary=gate_summary,
+            product_phase=product_phase,
+            validation_completed_at=now_iso(),
+            validation_status=validation_status,
+            validation_exception_count=validation_exception_count,
+            validation_current_for_revision_id=validation_current_for_revision_id,
         )
         self._record_gate_summary(str(job["id"]), gate_summary)
         self._append_event(Path(job["job_dir"]), "completed", "Pipeline complete", event="complete")
+
+    def _project_context_for_job(self, job: dict) -> tuple[dict, Path, dict, Path] | None:
+        project_id = str(job.get("project_id", "") or "").strip()
+        if not project_id:
+            return None
+        try:
+            from server import projects as projectsmod
+
+            identity = self._job_identity(
+                str(job.get("tenant_id", "") or "local-dev-tenant"),
+                str(job.get("teacher_id", "") or "local-dev-teacher"),
+            )
+            root = self.root if not identity.get("strict_auth", False) else projectsmod.workspace_root(identity)
+            current = projectsmod.get_current_project(identity)
+            if current and str(current.get("id", "") or "") != project_id:
+                current = None
+            if current is None:
+                meta_path = projectsmod.project_dir(project_id, identity) / "project.json"
+                if meta_path.exists():
+                    current = projectsmod.normalize_project_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+            return identity, root, current or {"id": project_id, "name": project_id}, projectsmod.BASE_DIR
+        except Exception:
+            return None
+
+    def _review_activity_started(self, job: dict) -> bool:
+        context = self._project_context_for_job(job)
+        if not context:
+            return False
+        identity, root, project, base_dir = context
+        del identity
+        try:
+            from server import review_store
+
+            bundle = review_store.load_review_bundle(base_dir, root, project)
+        except Exception:
+            return False
+        for key in ("draft_review", "latest_review"):
+            record = bundle.get(key, {}) if isinstance(bundle, dict) else {}
+            if not isinstance(record, dict):
+                continue
+            if record.get("review_id") or record.get("review_notes"):
+                return True
+            if any(record.get(list_key) for list_key in ("students", "pairwise", "assigned_marks", "feedback_drafts")):
+                return True
+            if record.get("curve_top") is not None or record.get("curve_bottom") is not None:
+                return True
+        return False
+
+    def _student_order(self, dashboard_path: Path) -> list[str]:
+        payload = _load_json(dashboard_path)
+        students = payload.get("students", []) if isinstance(payload, dict) else []
+        return [str(item.get("student_id", "") or "") for item in students if isinstance(item, dict) and item.get("student_id")]
+
+    def _preserve_teacher_dashboard_if_needed(self, job: dict, workspace_dir: Path, validation_exceptions: list[dict]) -> bool:
+        dashboard = self._workspace_dashboard_path(workspace_dir)
+        fast_snapshot = workspace_dir / FAST_REVIEW_DASHBOARD_SNAPSHOT
+        if not dashboard.exists() or not fast_snapshot.exists() or not self._review_activity_started(job):
+            return False
+        fast_order = self._student_order(fast_snapshot)
+        validation_order = self._student_order(dashboard)
+        if fast_order == validation_order:
+            return False
+        recommendation_path = workspace_dir / VALIDATION_DASHBOARD_RECOMMENDATION
+        shutil.copy2(dashboard, recommendation_path)
+        shutil.copy2(fast_snapshot, dashboard)
+        validation_exceptions.append(
+            {
+                "step": "dashboard_refresh",
+                "label": "Validation order differs after teacher activity",
+                "required": False,
+                "action": "inspect_changed_order_recommendation",
+                "artifact": VALIDATION_DASHBOARD_RECOMMENDATION,
+                "message": "Validation produced a different recommended order after teacher review had started. The teacher dashboard kept the reviewed order; inspect the recommendation before changing it.",
+            }
+        )
+        self._append_event(
+            Path(job["job_dir"]),
+            "dashboard_refresh",
+            "Validation changed the recommended order after teacher activity; preserved the teacher dashboard",
+            level="warning",
+            event="message",
+            artifacts=[VALIDATION_DASHBOARD_RECOMMENDATION],
+        )
+        return True
+
+    def _validation_summary(self, job: dict, workspace_dir: Path, *, status: str, exceptions: list[dict], changed_order_preserved: bool) -> dict:
+        artifacts = [
+            "outputs/band_seam_report.json",
+            "outputs/consistency_checks.json",
+            "outputs/consistency_checks.committee_edge.json",
+            "outputs/pairwise_escalation_candidates.json",
+            "outputs/pairwise_escalations.json",
+            "outputs/evidence_map.json",
+            "outputs/committee_edge_report.json",
+            "outputs/final_order.csv",
+            "outputs/pairwise_matrix.json",
+            "outputs/rerank_scores.csv",
+            "outputs/consistency_report.json",
+            "outputs/cohort_confidence.json",
+            "outputs/grade_curve.csv",
+            "outputs/dashboard_data.json",
+        ]
+        payload = {
+            "schema_version": 1,
+            "job_id": str(job.get("id", "") or ""),
+            "generated_at": now_iso(),
+            "status": status,
+            "changed_order_preserved": bool(changed_order_preserved),
+            "exception_count": len(exceptions),
+            "exceptions": exceptions,
+            "artifacts": {
+                rel: {
+                    "exists": (workspace_dir / rel).exists(),
+                    "sha256": _file_sha256(workspace_dir / rel),
+                }
+                for rel in artifacts
+            },
+        }
+        self._write_json(workspace_dir / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT, payload)
+        self._write_json(Path(job["job_dir"]) / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT, payload)
+        return payload
+
+    def _latest_human_revision_for_job(self, job: dict) -> int:
+        context = self._project_context_for_job(job)
+        if not context:
+            return 0
+        identity, root, project, base_dir = context
+        try:
+            from server import classroom
+
+            state = classroom.state_bundle(base_dir, root, project, identity)
+            return int(state.get("latest_human_revision_id", 0) or 0)
+        except Exception:
+            return 0
+
+    def _complete_classroom_background_audit(self, job: dict, workspace_dir: Path, summary: dict) -> int:
+        context = self._project_context_for_job(job)
+        if not context:
+            return 0
+        identity, root, project, base_dir = context
+        try:
+            from server import classroom
+
+            state = classroom.state_bundle(base_dir, root, project, identity)
+            if not state.get("classroom_link"):
+                return int(state.get("latest_human_revision_id", 0) or 0)
+            latest_revision = int(state.get("latest_human_revision_id", 0) or 0)
+            gate_status = "pass" if summary.get("status") == "complete" and not summary.get("exceptions") else "needs_review"
+            completed = classroom.complete_background_audit(
+                base_dir,
+                root,
+                project,
+                identity,
+                {
+                    "audit_revision_id": latest_revision,
+                    "gate_status": gate_status,
+                    "blocked_reasons": ["validation_exceptions_present"] if gate_status != "pass" else [],
+                    "audit_artifact_hash": _file_sha256(workspace_dir / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT),
+                },
+            )
+            return int(completed.get("audit", {}).get("audit_revision_id", latest_revision) or 0)
+        except Exception:
+            return 0
 
     def _pause_for_anchor_scores(self, job: dict, workspace_dir: Path, *, total_steps: int):
         job_dir = Path(job["job_dir"])
@@ -1425,7 +1715,19 @@ class PipelineQueue:
         )
         return metrics
 
-    def _run_pipeline_steps(self, job_id: str, job_dir: Path, workspace_dir: Path, env: dict, steps: list[dict], *, start_completed: int = 0, tenant_id: str = "") -> bool:
+    def _run_pipeline_steps(
+        self,
+        job_id: str,
+        job_dir: Path,
+        workspace_dir: Path,
+        env: dict,
+        steps: list[dict],
+        *,
+        start_completed: int = 0,
+        tenant_id: str = "",
+        force_nonblocking: bool = False,
+        validation_exceptions: list[dict] | None = None,
+    ) -> bool:
         total = start_completed + len(steps)
         run_id = job_id[:8]
         for offset, step in enumerate(steps, start=1):
@@ -1454,7 +1756,17 @@ class PipelineQueue:
                 self._append_event(job_dir, stage, "Produced artifacts", event="artifact", artifacts=produced)
             if code != 0:
                 detail = (f"step={stage}\nstdout:\n{stdout}\n\nstderr:\n{stderr}").strip()
-                if step.get("required", True):
+                if validation_exceptions is not None:
+                    validation_exceptions.append(
+                        {
+                            "step": stage,
+                            "label": label,
+                            "required": bool(step.get("required", True)),
+                            "stdout_preview": stdout[:1000],
+                            "stderr_preview": stderr[:1000],
+                        }
+                    )
+                if step.get("required", True) and not force_nonblocking:
                     self._append_event(job_dir, stage, f"Step failed: {label}", level="error", event="failed")
                     self.log(self.root, run_id, f"QUEUE ERROR step {stage} failed", detail=detail[:8000])
                     self._record_incident(
@@ -1474,7 +1786,12 @@ class PipelineQueue:
                     )
                     return False
                 self._append_event(job_dir, stage, f"Non-blocking step failed: {label}", level="warning", event="failed")
-                self.log(self.root, run_id, f"QUEUE WARN step {stage} failed (non-blocking)", detail=detail[:8000])
+                warn_message = (
+                    f"QUEUE WARN step {stage} required step failed during non-blocking phase"
+                    if step.get("required", True)
+                    else f"QUEUE WARN step {stage} failed (non-blocking)"
+                )
+                self.log(self.root, run_id, warn_message, detail=detail[:8000])
                 self._update_job(job_id, "running", current=index, total=total, stage=stage, message=f"Skipped failed step: {label}")
                 continue
             self._update_job(job_id, "running", current=index, total=total, stage=stage, message=f"Complete: {label}")
@@ -1624,16 +1941,29 @@ class PipelineQueue:
         tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         manifest = _load_json(self._manifest_path(job_dir))
-        steps = pipeline_steps()
+        all_steps = pipeline_steps()
+        all_step_ids = {str(step.get("id", "") or "") for step in all_steps}
+        if {"rubric", "dashboard", "band_seam", "cohort_confidence"}.issubset(all_step_ids):
+            fast_steps = fast_review_steps()
+            validation_steps = background_validation_steps()
+        else:
+            # Tests and legacy embedders sometimes monkeypatch pipeline_steps()
+            # to a tiny custom graph. Treat that custom graph as a single
+            # fast-review lane so the old extension point still works.
+            fast_steps = all_steps
+            validation_steps = []
+        total_steps = len(fast_steps) + len(validation_steps)
         self._update_job(
             job_id,
             "running",
             current=0,
-            total=len(steps),
+            total=total_steps,
             stage="queued",
             message="Job queued",
             started_at=now_iso(),
             cache_status="miss",
+            product_phase="running_fast_review",
+            validation_status="pending",
         )
         self.log(self.root, run_id, f"QUEUE START mode={mode} manifest={job['snapshot_hash']} workspace={workspace_dir}")
         try:
@@ -1681,7 +2011,7 @@ class PipelineQueue:
                 env["LLM_API_KEY"] = api_key
                 env["OPENAI_API_KEY"] = api_key
 
-            if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, steps, start_completed=0, tenant_id=tenant_id):
+            if not self._run_pipeline_steps(job_id, job_dir, workspace_dir, env, fast_steps, start_completed=0, tenant_id=tenant_id):
                 return
 
             dashboard = workspace_dir / "outputs" / "dashboard_data.json"
@@ -1697,22 +2027,77 @@ class PipelineQueue:
                     job_id,
                     "failed",
                     error="Dashboard data not found",
-                    current=len(steps),
-                    total=len(steps),
+                    current=len(fast_steps),
+                    total=total_steps,
                     stage="dashboard",
                     message="Failed: Dashboard output missing",
                     completed_at=now_iso(),
+                    product_phase="failed",
+                    validation_status="not_started",
                 )
                 return
 
+            refreshed_job = self.get_job(job_id)
+            if not refreshed_job:
+                return
+            self._publish_review_ready_workspace(refreshed_job, workspace_dir, manifest, current_steps=len(fast_steps), total_steps=total_steps)
+            self._append_event(job_dir, "background_validation", "Background validation started", event="start")
+
+            validation_exceptions: list[dict] = []
+            self._run_pipeline_steps(
+                job_id,
+                job_dir,
+                workspace_dir,
+                env,
+                validation_steps,
+                start_completed=len(fast_steps),
+                tenant_id=tenant_id,
+                force_nonblocking=True,
+                validation_exceptions=validation_exceptions,
+            )
+
+            refreshed_job = self.get_job(job_id)
+            if not refreshed_job:
+                return
+
+            changed_order_preserved = self._preserve_teacher_dashboard_if_needed(refreshed_job, workspace_dir, validation_exceptions)
+            validation_status = "complete" if not validation_exceptions else "failed_nonblocking"
+            product_phase = "validation_complete" if validation_status == "complete" else "validation_failed_nonblocking"
+            summary = self._validation_summary(
+                refreshed_job,
+                workspace_dir,
+                status=validation_status,
+                exceptions=validation_exceptions,
+                changed_order_preserved=changed_order_preserved,
+            )
+
             if self._should_pause_for_anchors(workspace_dir):
-                self._pause_for_anchor_scores(job, workspace_dir, total_steps=len(steps))
+                self._pause_for_anchor_scores(refreshed_job, workspace_dir, total_steps=total_steps)
+                self._update_job(
+                    job_id,
+                    "awaiting_anchor_scores",
+                    product_phase="background_validating",
+                    validation_status="anchor_scores_required",
+                    validation_exception_count=len(validation_exceptions),
+                )
                 self.log(self.root, run_id, "QUEUE PAUSED awaiting_anchor_scores")
                 return
 
             refreshed_job = self.get_job(job_id)
             if refreshed_job:
-                self._publish_completed_workspace(refreshed_job, workspace_dir, manifest, total_steps=len(steps))
+                validation_revision = self._complete_classroom_background_audit(refreshed_job, workspace_dir, summary)
+                if not validation_revision:
+                    validation_revision = self._latest_human_revision_for_job(refreshed_job)
+                self._publish_completed_workspace(
+                    refreshed_job,
+                    workspace_dir,
+                    manifest,
+                    total_steps=total_steps,
+                    product_phase=product_phase,
+                    validation_status=validation_status,
+                    validation_exception_count=len(validation_exceptions),
+                    validation_current_for_revision_id=validation_revision,
+                )
             self.log(self.root, run_id, "QUEUE SUCCESS")
         except Exception as exc:  # pragma: no cover - defensive
             self._append_event(job_dir, "unhandled", f"Unhandled error: {exc}", level="error", event="failed")
@@ -1729,4 +2114,6 @@ class PipelineQueue:
                 stage="unhandled",
                 message="Failed with unhandled error",
                 completed_at=now_iso(),
+                product_phase="failed",
+                validation_status="failed",
             )

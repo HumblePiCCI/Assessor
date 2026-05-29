@@ -119,6 +119,28 @@ def test_auth_status_and_set(monkeypatch):
     assert resp2.json()["connected"] is True
 
 
+def test_validate_pipeline_mode_accepts_provider_generic_api_alias(monkeypatch):
+    appmod.API_KEY_OVERRIDE["value"] = None
+    monkeypatch.setenv("LLM_API_KEY", "generic-key")
+    assert appmod.validate_pipeline_mode("api") == "openai"
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    try:
+        appmod.validate_pipeline_mode("api")
+    except Exception as exc:
+        assert "API" in str(exc.detail) or "key not configured" in str(exc.detail)
+        assert "OpenAI API key not configured" not in str(exc.detail)
+    else:
+        raise AssertionError("missing provider key should fail")
+
+
+def test_validate_pipeline_mode_codex_local_does_not_require_api_key(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": True, "connected": True})
+    assert appmod.validate_pipeline_mode("codex_local") == "codex_local"
+
+
 def test_reset_workspace_preserves_exemplars_and_clears_inputs(tmp_path):
     root = tmp_path
     exemplars = root / "inputs" / "exemplars"

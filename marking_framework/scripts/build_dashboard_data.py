@@ -300,6 +300,89 @@ def build_uncertainty_summary(students: list[dict]) -> dict:
     return summary
 
 
+def validation_artifact_status(root: Path) -> dict:
+    paths = {
+        "band_seam": root / "outputs" / "band_seam_report.json",
+        "consistency": root / "outputs" / "consistency_report.json",
+        "pairwise_matrix": root / "outputs" / "pairwise_matrix.json",
+        "pairwise_eval": root / "outputs" / "pairwise_adjudicator_eval.json",
+        "quality_gate": root / "outputs" / "publish_gate.json",
+        "sota_gate": root / "outputs" / "sota_gate.json",
+        "cohort_confidence": root / "outputs" / "cohort_confidence.json",
+    }
+    return {
+        name: {
+            "path": str(path),
+            "state": "ready" if path.exists() else "pending",
+            "sha256": file_sha256(path),
+        }
+        for name, path in paths.items()
+    }
+
+
+def validation_state(root: Path) -> dict:
+    summary = load_json(root / "outputs" / "background_validation_summary.json")
+    artifacts = validation_artifact_status(root)
+    if summary:
+        status = str(summary.get("status", "") or "complete")
+        exceptions = list(summary.get("exceptions", []) or [])
+    else:
+        status = "pending" if any(item["state"] == "pending" for item in artifacts.values()) else "complete"
+        exceptions = []
+    return {
+        "status": status,
+        "pending": status == "pending",
+        "exception_count": len(exceptions),
+        "exceptions": exceptions,
+        "artifacts": artifacts,
+        "teacher_message": (
+            "Review ready. Validation is checking edge cases in the background."
+            if status == "pending"
+            else ("Validation found cases to inspect." if exceptions else "Validation complete.")
+        ),
+    }
+
+
+def teacher_exception_items(validation: dict, uncertainty: dict, classroom_state: dict) -> list[dict]:
+    items = []
+    for key, label in (
+        ("boundary_cases", "Boundary case"),
+        ("high_disagreement_cases", "Disagreement"),
+        ("low_confidence_rerank_moves", "Low-confidence move"),
+    ):
+        for sid in uncertainty.get(key, []) or []:
+            items.append(
+                {
+                    "kind": key,
+                    "student_id": sid,
+                    "label": label,
+                    "action": "Inspect the essay and keep or adjust the teacher judgment.",
+                }
+            )
+    for exc in validation.get("exceptions", []) or []:
+        items.append(
+            {
+                "kind": str(exc.get("step", "validation_exception") or "validation_exception"),
+                "student_id": str(exc.get("student_id", "") or ""),
+                "label": str(exc.get("label", "") or "Validation exception"),
+                "action": str(exc.get("action", "") or "Inspect the admin details if this affects export readiness."),
+                "artifact": str(exc.get("artifact", "") or ""),
+            }
+        )
+    submissions = classroom_state.get("submissions", {}) if isinstance(classroom_state, dict) else {}
+    for submission in submissions.values() if isinstance(submissions, dict) else []:
+        for blocker in submission.get("attachment_blockers", []) or []:
+            items.append(
+                {
+                    "kind": "attachment_blocker",
+                    "student_id": str(submission.get("student_id", "") or ""),
+                    "label": str(blocker).replace("_", " "),
+                    "action": "Resolve the attachment or exclude it before export.",
+                }
+            )
+    return items
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build dashboard JSON for the teacher UI")
     parser.add_argument("--input", default="outputs/final_order.csv", help="Primary ranking CSV")
@@ -349,6 +432,7 @@ def main() -> int:
     rubric_manifest = load_json(Path("outputs/rubric_manifest.json"))
     rubric_validation_report = load_json(Path("outputs/rubric_validation_report.json"))
     rubric_verification = load_json(Path("outputs/rubric_verification.json"))
+    classroom_state = load_json(Path("outputs/classroom_state.json"))
     uncertainty_by_student = movement_map(consistency_report)
     boundaries = level_boundaries(Path("config/marking_config.json"))
 
@@ -418,6 +502,8 @@ def main() -> int:
     curve_top = grades_rows[0].get("curve_top") if grades_rows else None
     curve_bottom = grades_rows[0].get("curve_bottom") if grades_rows else None
 
+    uncertainty_summary = build_uncertainty_summary(data)
+    validation = validation_state(Path("."))
     payload = {
         "students": data,
         "rank_key": rank_key,
@@ -427,7 +513,9 @@ def main() -> int:
         "curve_bottom": curve_bottom,
         "curve_profile": grades_rows[0].get("curve_profile") if grades_rows else None,
         "distribution": build_distribution(data),
-        "uncertainty_summary": build_uncertainty_summary(data),
+        "uncertainty_summary": uncertainty_summary,
+        "validation": validation,
+        "teacher_exceptions": teacher_exception_items(validation, uncertainty_summary, classroom_state),
         "class_metadata": class_metadata,
         "cost_report": cost_report,
         "consistency_report": consistency_report,
@@ -449,6 +537,7 @@ def main() -> int:
         "rubric_manifest": rubric_manifest,
         "rubric_validation_report": rubric_validation_report,
         "rubric_verification": rubric_verification,
+        "classroom_state": classroom_state,
         "review_context": review_context(Path("."), rows_source),
     }
 
