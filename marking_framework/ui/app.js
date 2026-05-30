@@ -78,6 +78,14 @@ function importedSubmissionCount() {
     Number(latestSync.imported_count || 0)
   );
 }
+function importedAttachmentBlockerCount() {
+  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
+  return Math.max(
+    Number(projectInputsStatus?.class_metadata?.attachment_blocker_count || 0),
+    Number(latestSync.blocker_count || 0),
+    Number(classroomState?.summary?.attachment_blocker_count || 0)
+  );
+}
 function classroomImportsReady() {
   return !!(classroomState?.classroom_link?.course_id && importedSubmissionCount() > 0);
 }
@@ -114,7 +122,8 @@ function updateWorkflowState() {
       hint.textContent = `${students.length} essays loaded. Review the order, correct the exceptions, then finalize.`;
     } else if (classroomImported && !essayCount) {
       const missing = missingClassroomRunInputs(rubricFileReady, outlineFileReady).filter(item => item !== 'sync Classroom submissions');
-      hint.textContent = missing.length ? `Classroom submissions are synced. ${missing.join(' and ')}.` : 'Classroom submissions are synced. Run the assessment.';
+      const missingAction = missing.length ? missing.join(' and ').replace(/^add /, 'Add ').replace(/ and add /g, ' and ') : '';
+      hint.textContent = missingAction ? `Classroom submissions are synced. ${missingAction}.` : 'Classroom submissions are synced. Run the assessment.';
     } else if (!essayCount && !rubricReady && !outlineReady) {
       hint.textContent = 'Add essays, rubric, and outline. Then run the assessment.';
     } else {
@@ -137,7 +146,14 @@ function updateWorkflowState() {
     workflowSummary.dataset.state = hasReview || filesReady || projectInputsReady ? 'ready' : 'idle';
   }
   const railMeta = document.getElementById('railMeta');
-  if (railMeta) railMeta.textContent = students.length ? `${students.length} essays in order` : 'No essays loaded';
+  if (railMeta) {
+    const importedCount = importedSubmissionCount();
+    railMeta.textContent = students.length
+      ? `${students.length} essays in order`
+      : importedCount
+        ? `${importedCount} Classroom submissions synced`
+        : 'No essays loaded';
+  }
   const runButton = document.getElementById('runPipelinePrimary');
   if (runButton) {
     runButton.disabled = running || !(filesReady || projectInputsReady) || authState !== 'ready';
@@ -380,6 +396,8 @@ async function refreshProjectInputsStatus() {
     const res = await fetch(apiUrl('/pipeline/v2/project-inputs/status'));
     if (!res.ok) return;
     projectInputsStatus = await res.json();
+    renderRail();
+    renderDetail();
     updateWorkflowState();
   } catch (_) {}
 }
@@ -553,14 +571,15 @@ async function selectGoogleAssignment() {
     if (!res.ok) throw new Error(payload.detail?.message || 'Could not select assignment');
     classroomPreflight = null;
     renderClassroomState(payload);
-    setGoogleStatus('Assignment selected. Sync submissions next.', 'ready');
+    setGoogleStatus('Assignment selected. Syncing submissions...', 'warn');
+    await syncGoogleSubmissions({ course, coursework });
   } catch (err) {
     setGoogleStatus(err.message || 'Could not select assignment.', 'danger');
   }
 }
-async function syncGoogleSubmissions() {
-  const course = selectedRow('googleCourseSelect');
-  const coursework = selectedRow('googleCourseworkSelect');
+async function syncGoogleSubmissions(selection = {}) {
+  const course = selection.course || selectedRow('googleCourseSelect');
+  const coursework = selection.coursework || selectedRow('googleCourseworkSelect');
   const status = document.getElementById('classroomStatus');
   if (status) status.textContent = 'Syncing Google Classroom submissions...';
   try {
@@ -1663,8 +1682,44 @@ function renderDetail() {
   const emptyState = document.getElementById('workspaceEmpty');
   const essayGrid = document.getElementById('essayGrid');
   if (previewStudents.length || !data || !data.students || !data.students.length) {
-    document.getElementById('detailTitle').textContent = previewStudents.length ? 'Files ready. Run the assessment to review the cohort.' : 'Upload essays to begin';
-    document.getElementById('essay').innerHTML = '<p>Once the assessment runs, the essay text and comparison view will appear here.</p>';
+    const importedCount = importedSubmissionCount();
+    const blockerCount = importedAttachmentBlockerCount();
+    const rubricFileReady = !!document.getElementById('uploadRubric')?.files?.[0];
+    const outlineFileReady = !!document.getElementById('uploadOutline')?.files?.[0];
+    const missing = missingClassroomRunInputs(rubricFileReady, outlineFileReady).filter(item => item !== 'sync Classroom submissions');
+    const detailTitle = document.getElementById('detailTitle');
+    if (detailTitle) {
+      detailTitle.textContent = previewStudents.length
+        ? 'Files ready. Run the assessment to review the cohort.'
+        : importedCount
+          ? `${importedCount} Classroom submissions synced`
+          : 'Upload essays to begin';
+    }
+    const essayNode = document.getElementById('essay');
+    const missingAction = missing.length ? missing.join(' and ').replace(/^add /, 'Add ').replace(/ and add /g, ' and ') : '';
+    const emptyCopy = importedCount
+      ? {
+          title: 'Classroom import ready',
+          body: `${importedCount} essays were imported from Google Classroom.${blockerCount ? ` ${blockerCount} submission${blockerCount === 1 ? '' : 's'} need attachment follow-up.` : ''}`,
+          next: missingAction
+            ? `${missingAction} to run the assessment.`
+            : 'Run the assessment to review the imported cohort.',
+        }
+      : {
+          title: 'Run one clean pass, then review the outliers.',
+          body: 'Assessor is designed for a fast teacher check, not a control room. Upload the class set, review the order, and only intervene where the machine is uncertain.',
+          next: '',
+        };
+    if (emptyState) {
+      emptyState.innerHTML = `<h2>${emptyCopy.title}</h2><p>${emptyCopy.body}</p>${emptyCopy.next ? `<p>${emptyCopy.next}</p>` : ''}`;
+    }
+    if (essayNode) {
+      if (importedCount) {
+        essayNode.innerHTML = `<p>${emptyCopy.body}</p><p>${emptyCopy.next}</p>`;
+      } else {
+        essayNode.innerHTML = '<p>Once the assessment runs, the essay text and comparison view will appear here.</p>';
+      }
+    }
     document.getElementById('essayLabelPrimary').textContent = '';
     document.getElementById('essayLabelCompare').textContent = '';
     if (summaryPanel) summaryPanel.classList.add('is-hidden');
