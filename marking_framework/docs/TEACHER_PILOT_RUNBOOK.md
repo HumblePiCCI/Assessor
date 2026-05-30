@@ -58,6 +58,9 @@ Before the first teacher cohort:
   from the pilot output.
 - Live Classroom writes are disabled. CSV export is the only shipped passback
   path for Classroom-linked work in this slice.
+- For Google Classroom pilots, `docs/GOOGLE_CLASSROOM_LOCAL_SETUP.md` has been
+  completed and `python3 scripts/google_classroom_setup_check.py` passes with
+  secrets redacted.
 - Any retained aggregate-learning record must pass the engagement and collection
   policy gates already implemented in `server/review_store.py`.
 
@@ -101,12 +104,14 @@ Recommended cohort shape:
 
    Or, for the Google Classroom read pilot:
 
+   - run the setup checker
    - connect Google Classroom
    - choose a class
    - choose an assignment
    - sync submissions
    - confirm imported/blocked counts
-   - add rubric and assignment outline
+   - add rubric and assignment outline, or reuse saved project inputs
+   - confirm no live Classroom write is possible
 
 5. Run the queue-backed pipeline. The teacher-review dashboard should appear
    after the fast review phase; background validation then continues behind it.

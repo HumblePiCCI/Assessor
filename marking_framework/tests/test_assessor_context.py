@@ -74,6 +74,10 @@ def test_infer_genre_from_text():
     assert infer_genre_from_text("Write a news report headline", "") == "news_report"
     assert infer_genre_from_text("Explain facts and details", "") == "informational_report"
     assert infer_genre_from_text("Analyze theme and character", "") == "literary_analysis"
+    assert infer_genre_from_text(
+        "Rubric expects 2-3 arguments supported by evidence",
+        "Write a five-paragraph literary essay about a theme in the novel Ghost.",
+    ) == "literary_analysis"
     assert infer_genre_from_text("Free writing", "journal entry") is None
 
 

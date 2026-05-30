@@ -1496,6 +1496,9 @@ class PipelineQueue:
         validation_exception_count: int = 0,
         validation_current_for_revision_id: int = 0,
     ):
+        summary = _load_json(workspace_dir / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT)
+        if summary:
+            self._refresh_dashboard_validation_state(workspace_dir, summary)
         artifact_path, published = self._copy_outputs_to_artifact(job, workspace_dir, manifest)
         gate_summary = self._gate_summary(workspace_dir)
         self._sync_completed_project_state(job, workspace_dir)
@@ -1639,6 +1642,65 @@ class PipelineQueue:
         self._write_json(workspace_dir / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT, payload)
         self._write_json(Path(job["job_dir"]) / BACKGROUND_VALIDATION_SUMMARY_ARTIFACT, payload)
         return payload
+
+    def _validation_teacher_message(self, status: str, exception_count: int) -> str:
+        if status == "pending":
+            return "Review ready. Validation is checking edge cases in the background."
+        if status == "complete":
+            return "Validation complete."
+        if status == "anchor_scores_required":
+            return "Review ready. Anchor calibration is needed before export."
+        count = max(0, int(exception_count or 0))
+        label = "case" if count == 1 else "cases"
+        return f"Validation found {count} {label} to inspect."
+
+    def _validation_exception_items(self, exceptions: list[dict]) -> list[dict]:
+        items = []
+        for exc in exceptions:
+            if not isinstance(exc, dict):
+                continue
+            items.append(
+                {
+                    "kind": str(exc.get("step", "validation_exception") or "validation_exception"),
+                    "student_id": str(exc.get("student_id", "") or ""),
+                    "label": str(exc.get("label", "") or "Validation exception"),
+                    "action": str(exc.get("action", "") or "Inspect the admin details before export/passback."),
+                    "artifact": str(exc.get("artifact", "") or ""),
+                }
+            )
+        return items
+
+    def _refresh_dashboard_validation_state(self, workspace_dir: Path, summary: dict):
+        dashboard_path = workspace_dir / "outputs" / "dashboard_data.json"
+        if not dashboard_path.exists():
+            return
+        dashboard = _load_json(dashboard_path)
+        if not dashboard:
+            return
+        exceptions = [item for item in (summary.get("exceptions", []) or []) if isinstance(item, dict)]
+        status = str(summary.get("status", "") or ("failed_nonblocking" if exceptions else "complete"))
+        exception_count = int(summary.get("exception_count", len(exceptions)) or 0)
+        validation = dashboard.get("validation", {}) if isinstance(dashboard.get("validation"), dict) else {}
+        validation.update(
+            {
+                "status": status,
+                "pending": status == "pending",
+                "exception_count": exception_count,
+                "exceptions": exceptions,
+                "teacher_message": self._validation_teacher_message(status, exception_count),
+            }
+        )
+        dashboard["validation"] = validation
+
+        existing = dashboard.get("teacher_exceptions", []) if isinstance(dashboard.get("teacher_exceptions"), list) else []
+        validation_kinds = {str(exc.get("step", "validation_exception") or "validation_exception") for exc in exceptions}
+        retained = [
+            item
+            for item in existing
+            if not (isinstance(item, dict) and str(item.get("kind", "") or "") in validation_kinds and str(item.get("artifact", "") or ""))
+        ]
+        dashboard["teacher_exceptions"] = retained + self._validation_exception_items(exceptions)
+        self._write_json(dashboard_path, dashboard)
 
     def _latest_human_revision_for_job(self, job: dict) -> int:
         context = self._project_context_for_job(job)

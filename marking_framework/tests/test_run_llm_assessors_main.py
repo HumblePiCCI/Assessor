@@ -10,6 +10,43 @@ def write_config(path: Path, data: dict):
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def test_resolve_pass1_contract_prefers_normalized_rubric_criteria():
+    criteria_cfg = {
+        "categories": {
+            "knowledge": {
+                "criteria": [{"id": "K1", "name": "Knowledge", "description": "Generic knowledge"}],
+            },
+        },
+    }
+    normalized = {
+        "criteria": [
+            {
+                "id": "criterion_1",
+                "name": "Content and Ideas",
+                "canonical_label": "Ideas and Analysis",
+                "weight": 0.285714,
+                "raw_line": "Content and Ideas (8)",
+            },
+            {
+                "id": "criterion_2",
+                "name": "Organization and Structure",
+                "canonical_label": "Organization",
+                "weight": 0.285714,
+                "raw_line": "Organization and Structure (8)",
+            },
+        ],
+        "evidence_requirements": {"quote_validation": True, "rationale_min_words": 20},
+    }
+
+    contract = rla.resolve_pass1_contract(criteria_cfg, "literary_analysis", False, normalized)
+
+    assert contract["required_ids"] == ["criterion_1", "criterion_2"]
+    assert "criterion_1: Content and Ideas (29%)" in contract["criteria_block"]
+    assert "K1" not in contract["criteria_block"]
+    assert contract["require_evidence"] is False
+    assert contract["reqs"] == {}
+
+
 def test_run_llm_assessors_no_key(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     routing = {"mode": "openai", "tasks": {"pass1_assessor": {"model": "gpt-5.2"}, "pass2_ranker": {"model": "gpt-5.2"}}}

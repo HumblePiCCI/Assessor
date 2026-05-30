@@ -91,6 +91,11 @@ Classroom/Drive read sync materializes supported attachments into
 `inputs/submissions` and records source counts in `inputs/class_metadata.json`.
 `POST /pipeline/v2/run-project-inputs` then submits those server-side inputs to
 the same queue path as uploaded files; no separate Classroom grading lane exists.
+The endpoint accepts rubric/outline uploads at run time or reuses saved
+`inputs/rubric.*` and `inputs/assignment_outline.*`. It blocks clearly if
+imported submissions or `inputs/class_metadata.json` are missing. The pipeline
+manifest records imported submission files and Classroom metadata alongside the
+normal rubric and outline inputs.
 
 Background validation then runs:
 

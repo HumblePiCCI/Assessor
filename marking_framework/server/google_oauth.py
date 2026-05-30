@@ -3,34 +3,42 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 
-from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError
+from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError, parse_iso
 
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
+GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE = "https://www.googleapis.com/auth/classroom.coursework.students.readonly"
+GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE = "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly"
+
 GOOGLE_CLASSROOM_READ_SCOPES = (
     "https://www.googleapis.com/auth/classroom.courses.readonly",
-    "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+    GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE,
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
 )
 GOOGLE_DRIVE_READ_SCOPES = (
     "https://www.googleapis.com/auth/drive.readonly",
 )
 DEFAULT_GOOGLE_SCOPES = (*GOOGLE_CLASSROOM_READ_SCOPES, *GOOGLE_DRIVE_READ_SCOPES)
+GOOGLE_SCOPE_EQUIVALENTS = {
+    GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE: (GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE,),
+}
 
 
 class GoogleOAuthError(ValueError):
-    def __init__(self, message: str, *, code: str = "google_oauth_error"):
+    def __init__(self, message: str, *, code: str = "google_oauth_error", redirect_after: str = ""):
         super().__init__(message)
         self.code = code
+        self.redirect_after = redirect_after
 
 
 class OAuthTransport:
@@ -84,6 +92,17 @@ def _status_code(response: Any) -> int:
         return 0
 
 
+def missing_google_scopes(granted_scopes: list[str] | tuple[str, ...], required_scopes: list[str] | tuple[str, ...] = DEFAULT_GOOGLE_SCOPES) -> list[str]:
+    granted = {str(scope).strip() for scope in granted_scopes if str(scope).strip()}
+    missing = []
+    for scope in required_scopes:
+        primary = str(scope).strip()
+        accepted = {primary, *GOOGLE_SCOPE_EQUIVALENTS.get(primary, ())}
+        if granted.isdisjoint(accepted):
+            missing.append(primary)
+    return sorted(missing)
+
+
 class GoogleOAuthService:
     def __init__(
         self,
@@ -125,10 +144,11 @@ class GoogleOAuthService:
             "expired": bool(token_status.get("expired")),
             "granted_scopes": list(token_status.get("granted_scopes", []) or []),
             "required_scopes": list(DEFAULT_GOOGLE_SCOPES),
-            "missing_scopes": sorted(set(DEFAULT_GOOGLE_SCOPES) - set(token_status.get("granted_scopes", []) or [])),
+            "missing_scopes": missing_google_scopes(list(token_status.get("granted_scopes", []) or [])),
             "expires_at": str(token_status.get("expires_at", "") or ""),
             "teacher_display_email": str(token_status.get("teacher_display_email", "") or ""),
             "teacher_identity_hash": str(token_status.get("teacher_identity_hash", "") or ""),
+            "refresh_available": bool(token_status.get("refresh_available", False)),
             "storage": token_status.get("storage", {}),
         }
 
@@ -160,12 +180,19 @@ class GoogleOAuthService:
         }
 
     def callback(self, *, state: str, code: str, error: str | None = None) -> dict:
-        state_payload = self.token_store.consume_state(state)
+        try:
+            state_payload = self.token_store.consume_state(state)
+        except GoogleTokenStoreError as exc:
+            raise GoogleOAuthError(str(exc), code=exc.code) from exc
+        redirect_after = str(state_payload.get("redirect_after", "") or "")
         if error:
-            raise GoogleOAuthError(f"Google OAuth failed: {error}", code="google_oauth_denied")
+            raise GoogleOAuthError(f"Google OAuth failed: {error}", code="google_oauth_denied", redirect_after=redirect_after)
         if not code:
-            raise GoogleOAuthError("Missing Google OAuth authorization code.", code="missing_oauth_code")
-        config = self._require_config()
+            raise GoogleOAuthError("Missing Google OAuth authorization code.", code="missing_oauth_code", redirect_after=redirect_after)
+        try:
+            config = self._require_config()
+        except GoogleOAuthError as exc:
+            raise GoogleOAuthError(str(exc), code=exc.code, redirect_after=redirect_after) from exc
         response = self.transport.post(
             TOKEN_ENDPOINT,
             data={
@@ -181,7 +208,7 @@ class GoogleOAuthService:
         payload = _response_json(response)
         if _status_code(response) >= 400 or "access_token" not in payload:
             reason = payload.get("error_description") or payload.get("error") or "token exchange failed"
-            raise GoogleOAuthError(str(reason), code="google_oauth_token_exchange_failed")
+            raise GoogleOAuthError(str(reason), code="google_oauth_token_exchange_failed", redirect_after=redirect_after)
         identity = {
             "tenant_id": state_payload.get("tenant_id", ""),
             "teacher_id": state_payload.get("teacher_id", ""),
@@ -232,6 +259,22 @@ class GoogleOAuthService:
         if not token:
             raise GoogleOAuthError("Google is not connected for this teacher and project.", code="missing_oauth_grant")
         return str(token.get("access_token", "") or "")
+
+    def fresh_access_token(self, identity: dict, project: dict | None = None) -> tuple[str, dict]:
+        token = self.token_store.load_token(identity, project)
+        if not token:
+            raise GoogleOAuthError("Google is not connected for this teacher and project.", code="missing_oauth_grant")
+        expires = parse_iso(str(token.get("expires_at", "") or ""))
+        if expires and expires <= datetime.now(timezone.utc):
+            try:
+                self.refresh_access_token(identity, project)
+            except GoogleOAuthError as exc:
+                raise GoogleOAuthError("Google connection expired. Reconnect Google Classroom.", code=exc.code) from exc
+            token = self.token_store.load_token(identity, project)
+        access_token = str(token.get("access_token", "") or "")
+        if not access_token:
+            raise GoogleOAuthError("Google access token is missing. Reconnect Google Classroom.", code="missing_oauth_grant")
+        return access_token, self.status(identity, project)
 
     def disconnect(self, identity: dict, project: dict | None = None) -> dict:
         token = self.token_store.load_token(identity, project)

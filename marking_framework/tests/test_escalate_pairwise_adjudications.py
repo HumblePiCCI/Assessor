@@ -12,7 +12,7 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def test_pairwise_escalation_routes_only_unstable_pairs_and_merges(tmp_path, monkeypatch):
+def test_pairwise_escalation_routes_only_unstable_pairs_and_merges(tmp_path, monkeypatch, capsys):
     scores = tmp_path / "outputs/consensus_scores.csv"
     write_csv(
         scores,
@@ -135,6 +135,9 @@ def test_pairwise_escalation_routes_only_unstable_pairs_and_merges(tmp_path, mon
     )
 
     assert esc.main() == 0
+    output = capsys.readouterr().out
+    assert "Pairwise escalation selected: 1 pair(s), up to 2 model call(s)." in output
+    assert "Pairwise escalation progress: 1/1 pair(s)." in output
     candidate_payload = json.loads(candidates.read_text(encoding="utf-8"))
     assert candidate_payload["candidate_count"] == 1
     assert candidate_payload["selected_count"] == 1

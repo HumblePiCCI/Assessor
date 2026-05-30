@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import scripts.extract_text as et
@@ -29,6 +30,27 @@ def test_extract_text_no_metadata(tmp_path, monkeypatch):
     out_dir = tmp_path / "out"
     monkeypatch.setattr("sys.argv", ["et", "--inputs", str(in_dir), "--output", str(out_dir)])
     assert et.main() == 0
+
+
+def test_extract_text_uses_classroom_roster_display_names(tmp_path, monkeypatch):
+    inputs = tmp_path / "inputs"
+    in_dir = inputs / "submissions"
+    in_dir.mkdir(parents=True)
+    (in_dir / "google-user-1.txt").write_text("Plain text", encoding="utf-8")
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"roster": [{"student_id": "google-user-1", "display_name": "Jordan Lee"}]}),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+    meta_path = tmp_path / "meta.json"
+    monkeypatch.setattr("sys.argv", ["et", "--inputs", str(in_dir), "--output", str(out_dir), "--metadata", str(meta_path)])
+
+    assert et.main() == 0
+
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert metadata[0]["student_id"] == "s001"
+    assert metadata[0]["display_name"] == "Jordan Lee"
+    assert metadata[0]["source_file"] == "google-user-1.txt"
 
 
 def test_extract_docx_empty(tmp_path):

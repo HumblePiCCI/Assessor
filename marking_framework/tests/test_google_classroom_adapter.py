@@ -53,13 +53,25 @@ def test_classroom_adapter_paginates_courses_coursework_roster_and_submissions()
     )
     adapter = GoogleClassroomAdapter("token", classroom_transport=transport, drive_adapter=Drive())
     assert [row["course_id"] for row in adapter.list_courses()] == ["c1", "c2"]
-    assert [row["coursework_id"] for row in adapter.list_coursework("c1")] == ["cw1", "cw2"]
+    assert [row["coursework_id"] for row in adapter.list_coursework("c1")] == ["cw1"]
     snapshot = adapter.read_snapshot("c1", "cw1")
     assert snapshot["adapter"] == "live_google"
     assert snapshot["roster"][0]["display_name"] == "Student One"
     states = {row["submission_id"]: row["classroom_state"] for row in snapshot["submissions"]}
     assert states == {"s1": "submitted", "s2": "reclaimed", "s3": "returned", "s4": "missing"}
     assert snapshot["submissions"][0]["attachments"][0]["attachment_id"] == "doc"
+
+
+def test_classroom_adapter_can_include_drafts_for_admin_diagnostics():
+    transport = Transport(
+        [
+            {"path": "/courseWork", "payload": {"courseWork": [{"id": "cw1", "courseId": "c1", "title": "Essay", "state": "PUBLISHED"}], "nextPageToken": "n"}},
+            {"path": "/courseWork", "payload": {"courseWork": [{"id": "cw2", "courseId": "c1", "title": "Draft", "state": "DRAFT"}]}},
+        ]
+    )
+    adapter = GoogleClassroomAdapter("token", classroom_transport=transport, drive_adapter=Drive())
+    assert [row["coursework_id"] for row in adapter.list_coursework("c1", include_drafts=True)] == ["cw1", "cw2"]
+    assert transport.calls[0]["params"]["courseWorkStates"] == ["PUBLISHED", "DRAFT"]
 
 
 def test_classroom_adapter_maps_api_errors_to_product_codes():

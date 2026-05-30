@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import DEVNULL, Popen, run
 from typing import List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, RedirectResponse, HTMLResponse
@@ -20,6 +21,7 @@ import server.projects as projectsmod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
 from scripts.assessor_utils import resolve_input_path
 from scripts.codex_runtime import codex_status_payload
+from scripts.google_classroom_setup_check import build_setup_report
 from scripts.openai_client import api_provider_status
 app = FastAPI()
 app.include_router(projects_router)
@@ -180,6 +182,11 @@ async def google_auth_status(request: Request):
     return google_oauth_service().status(identity, project)
 
 
+@app.get("/google/auth/preflight")
+async def google_auth_preflight():
+    return build_setup_report(BASE_DIR.parent)
+
+
 @app.post("/google/auth/start")
 async def google_auth_start(payload: GoogleAuthStartPayload, request: Request):
     identity = request_identity(request)
@@ -201,23 +208,36 @@ async def google_auth_start_get(request: Request, redirect_after: str = "/"):
     return RedirectResponse(payload["authorization_url"], status_code=302)
 
 
+def _oauth_return_url(target: str, params: dict[str, str]) -> str:
+    target = str(target or "/").strip()
+    if not target.startswith("/") or target.startswith("//"):
+        target = "/"
+    parts = urlsplit(target)
+    query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key not in {"google", "google_error"}]
+    for key, value in params.items():
+        if value:
+            query.append((key, value))
+    return urlunsplit(("", "", parts.path or "/", urlencode(query), parts.fragment))
+
+
 @app.get("/google/auth/callback")
 async def google_auth_callback(state: str = "", code: str = "", error: str = ""):
     try:
         payload = google_oauth_service().callback(state=state, code=code, error=error or None)
     except GoogleOAuthError as exc:
         safe = google_oauth_error_payload(exc)
+        if getattr(exc, "redirect_after", ""):
+            return RedirectResponse(
+                _oauth_return_url(exc.redirect_after, {"google": "error", "google_error": safe["code"]}),
+                status_code=302,
+            )
         return HTMLResponse(
-            f"<!doctype html><title>Google Classroom connection failed</title><p>Google Classroom connection failed: {safe['code']}.</p>",
+            "<!doctype html><title>Google Classroom connection failed</title>"
+            f"<p>Google Classroom connection failed: {html.escape(safe['code'])}.</p>"
+            "<p><a href=\"/\">Return to Assessor</a></p>",
             status_code=400,
         )
-    redirect_after = html.escape(str(payload.get("redirect_after") or "/"), quote=True)
-    return HTMLResponse(
-        "<!doctype html><title>Google Classroom connected</title>"
-        "<p>Google Classroom connected. You can close this tab and return to Assessor.</p>"
-        f"<p><a href=\"{redirect_after}\">Return to Assessor</a></p>",
-        status_code=200,
-    )
+    return RedirectResponse(_oauth_return_url(str(payload.get("redirect_after") or "/"), {"google": "connected"}), status_code=302)
 
 
 @app.post("/google/auth/disconnect")
@@ -372,6 +392,43 @@ def _project_input_path(root: Path, preferred: str, label: str) -> Path:
     return resolve_input_path(candidate, label)
 
 
+def _project_inputs_status(root: Path) -> dict:
+    inputs = root / "inputs"
+    rubric_path = _project_input_path(root, "rubric.md", "rubric")
+    outline_path = _project_input_path(root, "assignment_outline.md", "assignment_outline")
+    submissions_dir = inputs / "submissions"
+    submissions = sorted(item for item in submissions_dir.glob("*") if item.is_file()) if submissions_dir.exists() else []
+    class_metadata_path = inputs / "class_metadata.json"
+    metadata = {}
+    if class_metadata_path.exists():
+        try:
+            metadata = json.loads(class_metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            metadata = {}
+    return {
+        "rubric": {"ready": rubric_path.exists() and rubric_path.is_file(), "path": f"inputs/{rubric_path.name}" if rubric_path.exists() else ""},
+        "outline": {"ready": outline_path.exists() and outline_path.is_file(), "path": f"inputs/{outline_path.name}" if outline_path.exists() else ""},
+        "submissions": {
+            "ready": bool(submissions),
+            "count": len(submissions),
+            "paths": [f"inputs/submissions/{item.name}" for item in submissions],
+        },
+        "class_metadata": {
+            "ready": class_metadata_path.exists() and class_metadata_path.is_file(),
+            "path": "inputs/class_metadata.json" if class_metadata_path.exists() else "",
+            "source": str(metadata.get("source", "") or ""),
+            "adapter": str(metadata.get("adapter", "") or ""),
+            "imported_submission_count": int(metadata.get("imported_submission_count", 0) or 0),
+            "attachment_blocker_count": int(metadata.get("attachment_blocker_count", 0) or 0),
+        },
+    }
+
+
+@app.get("/pipeline/v2/project-inputs/status")
+async def pipeline_v2_project_inputs_status(request: Request):
+    return _project_inputs_status(projectsmod.workspace_root(request_identity(request)))
+
+
 @app.post("/pipeline/v2/run-project-inputs")
 async def run_pipeline_project_inputs(
     request: Request,
@@ -398,6 +455,9 @@ async def run_pipeline_project_inputs(
         raise HTTPException(status_code=400, detail="Assignment outline is required before running imported Classroom submissions")
     if not submissions_dir.exists() or not any(item.is_file() for item in submissions_dir.iterdir()):
         raise HTTPException(status_code=400, detail="No imported Classroom submissions are ready to assess")
+    class_metadata_path = inputs / "class_metadata.json"
+    if not class_metadata_path.exists():
+        raise HTTPException(status_code=400, detail="Classroom import metadata is required before running imported submissions")
     selected_project = projectsmod.get_current_project(identity)
     effective_project_id = project_id or str((selected_project or {}).get("id", "") or "")
     return PIPELINE_QUEUE.submit(

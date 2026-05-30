@@ -38,16 +38,26 @@ export GOOGLE_OAUTH_CLIENT_SECRETS_FILE=/path/to/client_secret.json
 export GOOGLE_TOKEN_ENCRYPTION_KEY=<local-token-key>
 ```
 
+For a full local setup runbook, see
+[`GOOGLE_CLASSROOM_LOCAL_SETUP.md`](./GOOGLE_CLASSROOM_LOCAL_SETUP.md). For a
+teacher-owned live smoke, see
+[`GOOGLE_CLASSROOM_LIVE_SMOKE.md`](./GOOGLE_CLASSROOM_LIVE_SMOKE.md).
+
 Operational endpoints:
 
 - `GET /google/auth/status`
+- `GET /google/auth/preflight`
 - `POST /google/auth/start`
 - `GET /google/auth/callback`
 - `POST /google/auth/disconnect`
 
 Status responses are intentionally redacted: connected state, granted scopes,
-expiry, and teacher display/hash only. Raw access tokens, refresh tokens, Google
-credential JSON, and student-private screenshots must not be committed.
+expiry, refresh availability as a boolean, and teacher display/hash only. Raw
+access tokens, refresh tokens, Google credential JSON, and student-private
+screenshots must not be committed. Run `python3
+scripts/google_classroom_setup_check.py` before a local live smoke; it reports
+missing env, redirect URI, required scopes, token storage, and gitignore
+posture without printing secrets.
 
 Strict staging/production launch remains blocked unless token storage is
 encrypted with an approved key path or delegated to an approved secret store.

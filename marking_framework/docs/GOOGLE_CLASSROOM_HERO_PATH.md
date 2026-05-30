@@ -27,6 +27,7 @@ materializes the current state into `outputs/classroom_state.json`.
 API endpoints:
 
 - `GET /google/auth/status`
+- `GET /google/auth/preflight`
 - `POST /google/auth/start`
 - `GET /google/auth/callback`
 - `POST /google/auth/disconnect`
@@ -46,17 +47,30 @@ API endpoints:
 - `POST /projects/classroom/passback/confirm`
 - `GET /projects/classroom/passback/exports/{action_id}`
 - `POST /pipeline/v2/run-project-inputs`
+- `GET /pipeline/v2/project-inputs/status`
 
 The UI exposes the routine path directly: connect Google Classroom, choose a
 class, choose an assignment, sync submissions, add rubric and outline, run
 assessment, review, finalize, and confirm CSV export. Manual IDs and fixture
 sync remain under Session/Admin details for local proof and CI fixtures.
+Teacher course listing defaults to active courses and published assignments;
+draft coursework visibility is reserved for admin diagnostics.
+
+Local setup is documented in `docs/GOOGLE_CLASSROOM_LOCAL_SETUP.md`. The setup
+checker and `/google/auth/preflight` return only redacted readiness data. The
+OAuth callback redirects back to the Assessor app with a safe `google` status
+query parameter and never leaks authorization codes or tokens.
 
 `read-sync` is the ingestion seam. It accepts roster/submission snapshots from
 either the fixture/local adapter or the live Google adapter, materializes
 supported extracted text into `inputs/submissions`, writes Classroom import
 metadata to `inputs/class_metadata.json`, and records unsupported attachments
 as blockers. CI uses mocked adapters only and does not call Google.
+
+`/pipeline/v2/run-project-inputs` reuses saved/imported project inputs. The
+teacher can upload rubric and assignment outline at run time or reuse saved
+`inputs/rubric.*` and `inputs/assignment_outline.*`; imported submissions and
+`inputs/class_metadata.json` must exist before the run starts.
 
 OAuth configuration is read only from environment/local config:
 
@@ -68,8 +82,11 @@ OAuth configuration is read only from environment/local config:
 
 Local development token state is stored under ignored
 `server/data/google_oauth/`. Public status exposes only connected state,
-granted scopes, expiry, and a teacher email/hash when available. Raw access and
-refresh tokens are never returned to the browser or written to outputs/projects.
+granted scopes, expiry, refresh availability as a boolean, and a teacher
+email/hash when available. Raw access and refresh tokens are never returned to
+the browser or written to outputs/projects. Expired tokens are refreshed before
+live Classroom adapter calls when a refresh token is available; failed refresh
+or missing refresh token maps to a reconnect-required blocker.
 Strict staging/production must use encrypted local storage or an approved secret
 store before launch.
 

@@ -76,6 +76,38 @@ def test_drive_adapter_downloads_plain_text_and_docx():
     assert "DOCX essay." in docx_adapter.resolve_drive_file("docx-id")["text"]
 
 
+def test_drive_adapter_downloads_pdf_and_rtf_through_document_extractor(monkeypatch):
+    calls = []
+
+    def fake_extract(path):
+        calls.append(path.suffix)
+        return (f"{path.suffix.upper()} essay.", {"methods": ["fixture"]})
+
+    monkeypatch.setattr("server.google_drive_adapter.extract_document_text", fake_extract)
+    pdf_adapter = GoogleDriveAdapter(
+        "token",
+        transport=Transport(
+            [
+                Response(200, {"id": "pdf-id", "name": "Essay.pdf", "mimeType": "application/pdf"}),
+                Response(200, content=b"%PDF fixture"),
+            ]
+        ),
+    )
+    assert ".PDF essay." in pdf_adapter.resolve_drive_file("pdf-id")["text"]
+
+    rtf_adapter = GoogleDriveAdapter(
+        "token",
+        transport=Transport(
+            [
+                Response(200, {"id": "rtf-id", "name": "Essay.rtf", "mimeType": "application/rtf"}),
+                Response(200, content=b"{\\rtf1 RTF essay.}"),
+            ]
+        ),
+    )
+    assert ".RTF essay." in rtf_adapter.resolve_drive_file("rtf-id")["text"]
+    assert calls == [".pdf", ".rtf"]
+
+
 def test_drive_adapter_blocks_unsupported_empty_image_external_and_missing_scope():
     for mime_type, blocker in [
         ("application/vnd.google-apps.form", "forms_unsupported"),

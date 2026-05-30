@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from server.app import app
 import server.app as appmod
+from server.google_oauth import GoogleOAuthError
 import server.projects as projmod
 
 
@@ -331,6 +332,47 @@ def test_ui_routes(tmp_path, monkeypatch):
     assert resp_missing.status_code == 404
 
 
+def test_google_callback_redirects_back_to_app_without_code_leak(monkeypatch):
+    class ConnectedService:
+        def callback(self, *, state="", code="", error=None):
+            return {"redirect_after": "/?view=classroom", "status": "connected"}
+
+    monkeypatch.setattr(appmod, "google_oauth_service", lambda: ConnectedService())
+    client = TestClient(app)
+    resp = client.get("/google/auth/callback?state=s&code=secret-code", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/?view=classroom&google=connected"
+    assert "secret-code" not in resp.headers["location"]
+
+
+def test_google_callback_failure_redirects_with_safe_error(monkeypatch):
+    class FailedService:
+        def callback(self, *, state="", code="", error=None):
+            raise GoogleOAuthError("denied", code="google_oauth_denied", redirect_after="/classroom?tab=sync")
+
+    monkeypatch.setattr(appmod, "google_oauth_service", lambda: FailedService())
+    client = TestClient(app)
+    resp = client.get("/google/auth/callback?state=s&error=access_denied", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/classroom?tab=sync&google=error&google_error=google_oauth_denied"
+
+
+def test_google_auth_preflight_endpoint_is_redacted(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/google/auth/callback")
+    monkeypatch.setattr("scripts.google_classroom_setup_check._git_ignored", lambda path, repo_root: True)
+    client = TestClient(app)
+    resp = client.get("/google/auth/preflight")
+    assert resp.status_code == 200
+    blob = json.dumps(resp.json())
+    assert resp.json()["configured"]["GOOGLE_OAUTH_CLIENT_SECRET"] is True
+    assert "client-secret" not in blob
+
+
 def test_projects_endpoints(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -382,6 +424,98 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     del_resp = client.delete(f"/projects/{project_id}")
     assert del_resp.status_code == 200
     assert not proj_dir.exists()
+
+
+def test_project_inputs_status_and_run_reuse_saved_classroom_inputs(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    inputs = tmp_path / "inputs"
+    (inputs / "submissions").mkdir(parents=True)
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    (inputs / "submissions" / "s1.txt").write_text("essay", encoding="utf-8")
+    (inputs / "class_metadata.json").write_text(
+        json.dumps({"source": "google_classroom_read_only_sync", "adapter": "live_google", "imported_submission_count": 1}),
+        encoding="utf-8",
+    )
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+    calls = {}
+
+    class Queue:
+        def submit(self, **kwargs):
+            calls.update(kwargs)
+            return {"job_id": "job-1", "status": "queued"}
+
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", Queue())
+    client = TestClient(app)
+    status = client.get("/pipeline/v2/project-inputs/status")
+    assert status.status_code == 200
+    assert status.json()["rubric"]["ready"] is True
+    assert status.json()["outline"]["ready"] is True
+    assert status.json()["submissions"]["count"] == 1
+
+    resp = client.post("/pipeline/v2/run-project-inputs", data={"mode": "openai"})
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == "job-1"
+    assert calls["rubric_path"].name == "rubric.md"
+    assert calls["outline_path"].name == "assignment_outline.md"
+    assert calls["submissions_dir"].name == "submissions"
+
+
+def test_project_input_run_accepts_runtime_rubric_and_outline_uploads(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    inputs = tmp_path / "inputs"
+    (inputs / "submissions").mkdir(parents=True)
+    (inputs / "submissions" / "s1.txt").write_text("essay", encoding="utf-8")
+    (inputs / "class_metadata.json").write_text(json.dumps({"source": "google_classroom_read_only_sync"}), encoding="utf-8")
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+
+    class Queue:
+        def submit(self, **kwargs):
+            return {"job_id": "job-2", "status": "queued", "rubric": kwargs["rubric_path"].name}
+
+    monkeypatch.setattr(appmod, "PIPELINE_QUEUE", Queue())
+    client = TestClient(app)
+    resp = client.post(
+        "/pipeline/v2/run-project-inputs",
+        data={"mode": "openai"},
+        files={
+            "rubric": ("rubric.md", b"rubric"),
+            "outline": ("assignment_outline.md", b"outline"),
+        },
+    )
+    assert resp.status_code == 200
+    assert (inputs / "rubric.md").exists()
+    assert (inputs / "assignment_outline.md").exists()
+
+
+def test_project_input_run_blocks_missing_imported_submissions(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    appmod.API_KEY_OVERRIDE["value"] = "test-key"
+    client = TestClient(app)
+    resp = client.post("/pipeline/v2/run-project-inputs", data={"mode": "openai"})
+    assert resp.status_code == 400
+    assert "No imported Classroom submissions" in resp.json()["detail"]
 
 
 def test_projects_review_endpoints(tmp_path, monkeypatch):

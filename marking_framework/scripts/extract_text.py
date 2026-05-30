@@ -27,6 +27,27 @@ def extract_text(path: Path) -> str:
         return extract_docx_text(path)
     return path.read_text(encoding="utf-8", errors="ignore")
 
+
+def load_classroom_display_names(inputs_dir: Path) -> dict[str, str]:
+    metadata_path = inputs_dir.parent / "class_metadata.json"
+    if not metadata_path.exists():
+        return {}
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    roster = payload.get("roster", []) if isinstance(payload, dict) else []
+    names = {}
+    for row in roster if isinstance(roster, list) else []:
+        if not isinstance(row, dict):
+            continue
+        student_id = str(row.get("student_id", "") or row.get("classroom_user_id", "") or "").strip()
+        display_name = str(row.get("display_name", "") or row.get("name", "") or "").strip()
+        if student_id and display_name:
+            names[student_id] = display_name
+    return names
+
+
 def scrub_personal_headers(text: str) -> str:
     # Best-effort removal of common "Name: ..." header lines before any remote model calls.
     lines = text.splitlines()
@@ -77,6 +98,7 @@ def main() -> int:
     in_dir = Path(args.inputs)
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
+    classroom_display_names = load_classroom_display_names(in_dir)
 
     metadata = []
     files = [p for p in sorted(in_dir.iterdir()) if p.is_file() and p.suffix.lower() in {".docx", ".txt", ".md"}]
@@ -92,7 +114,7 @@ def main() -> int:
         metadata.append(
             {
                 "student_id": anon_id,
-                "display_name": path.stem,
+                "display_name": classroom_display_names.get(path.stem, path.stem),
                 "source_file": path.name,
                 "word_count": len(words),
                 "paragraph_count": len(paras),

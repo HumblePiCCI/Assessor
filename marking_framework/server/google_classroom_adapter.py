@@ -177,15 +177,17 @@ class GoogleClassroomAdapter:
             )
         return result
 
-    def list_coursework(self, course_id: str) -> list[dict]:
+    def list_coursework(self, course_id: str, *, include_drafts: bool = False) -> list[dict]:
+        states = ["PUBLISHED", "DRAFT"] if include_drafts else ["PUBLISHED"]
         rows = self._list_paginated(
             f"/courses/{quote(str(course_id), safe='')}/courseWork",
             "courseWork",
             params={
-                "courseWorkStates": ["PUBLISHED", "DRAFT"],
+                "courseWorkStates": states,
                 "pageSize": 100,
             },
         )
+        allowed_states = {state.upper() for state in states}
         return [
             {
                 "course_id": str(row.get("courseId", "") or course_id),
@@ -198,6 +200,7 @@ class GoogleClassroomAdapter:
                 "due_date": row.get("dueDate", {}) if isinstance(row.get("dueDate"), dict) else {},
             }
             for row in rows
+            if str(row.get("state", "") or "").upper() in allowed_states
         ]
 
     def get_coursework(self, course_id: str, coursework_id: str) -> dict:

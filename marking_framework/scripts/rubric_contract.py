@@ -172,7 +172,9 @@ def _is_level_line(line: str) -> bool:
 
 
 def _is_weight_line(line: str) -> bool:
-    return bool(re.search(r"(?i)\b\d{1,3}\s*(%|pts?|points?)\b", line))
+    return bool(re.search(r"(?i)\b\d{1,3}\s*(%|pts?|points?)\b", line)) or bool(
+        re.search(r"\(\s*\d{1,3}(?:\.\d+)?\s*\)\s*$", line)
+    )
 
 
 def _canonical_dimension(text: str) -> tuple[str, str]:
@@ -197,6 +199,8 @@ def _criterion_from_line(line: str, index: int) -> dict | None:
         return None
     weight = None
     weight_match = re.search(r"(?i)\b(\d{1,3}(?:\.\d+)?)\s*(%|pts?|points?)\b", raw)
+    if not weight_match:
+        weight_match = re.search(r"\(\s*(\d{1,3}(?:\.\d+)?)\s*\)\s*$", raw)
     if weight_match:
         weight = float(weight_match.group(1))
         raw = raw[: weight_match.start()].strip(" :-\t")
@@ -219,9 +223,14 @@ def _criteria_from_text(text: str, criteria_cfg: dict, genre: str | None) -> tup
     lines = _line_tokens(text)
     criteria = []
     seen = set()
-    for line in lines:
-        if not (_is_weight_line(line) or any(token in line.lower() for token in ("ideas", "organization", "evidence", "voice", "style", "grammar", "conventions", "analysis"))):
-            continue
+    weighted_lines = [line for line in lines if _is_weight_line(line) and not _is_level_line(line)]
+    candidate_lines = weighted_lines if len(weighted_lines) >= 2 else [
+        line for line in lines
+        if any(token in line.lower() for token in ("ideas", "organization", "evidence", "voice", "style", "grammar", "conventions", "analysis"))
+    ]
+    if weighted_lines:
+        warnings.append("criteria_preferred_explicit_weight_lines")
+    for line in candidate_lines:
         item = _criterion_from_line(line, len(criteria) + 1)
         if not item:
             continue

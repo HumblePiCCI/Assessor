@@ -281,14 +281,17 @@ class GoogleTokenStore:
         envelope = _load_json(self._token_path(identity, project, scope_id))
         public = dict(envelope.get("public", {}) if isinstance(envelope.get("public"), dict) else {})
         secret_meta = envelope.get("secret", {}) if isinstance(envelope.get("secret"), dict) else {}
+        secret = self._open(secret_meta) if secret_meta else {}
         connected = bool(public.get("connected")) and bool(envelope)
         expires = parse_iso(public.get("expires_at"))
         expired = bool(expires and expires <= datetime.now(timezone.utc))
-        if expired:
+        refresh_available = bool(secret.get("refresh_token"))
+        if expired and not refresh_available:
             connected = False
         return {
             "connected": connected,
             "expired": expired,
+            "refresh_available": refresh_available,
             "granted_scopes": list(public.get("granted_scopes", []) or []),
             "expires_at": str(public.get("expires_at", "") or ""),
             "teacher_display_email": str(public.get("teacher_display_email", "") or ""),

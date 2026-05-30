@@ -290,6 +290,13 @@ def test_fast_review_dashboard_publishes_before_background_validation_finishes(t
     summary = json.loads((Path(job["workspace_dir"]) / "outputs" / "background_validation_summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "failed_nonblocking"
     assert any(item["step"] == "band_seam" for item in summary["exceptions"])
+    dashboard = json.loads((root / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))
+    assert dashboard["validation"]["status"] == "failed_nonblocking"
+    assert dashboard["validation"]["exception_count"] >= 1
+    assert dashboard["validation"]["teacher_message"].startswith("Validation found")
+    assert any(item["kind"] == "band_seam" for item in dashboard["teacher_exceptions"])
+    published = queue.load_dashboard_data(submitted["job_id"])
+    assert published["validation"]["status"] == "failed_nonblocking"
 
 
 def test_low_confidence_rubric_waits_for_confirmation_and_resume(tmp_path):
