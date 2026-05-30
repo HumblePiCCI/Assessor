@@ -194,10 +194,10 @@ def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
         ("persuasive_letter", ("persuasive letter", "opinion letter", "letter to the editor")),
         ("book_review", ("book review", "recommend this book", "would you recommend")),
         ("news_report", ("headline", "news report", "who what when where", "objective tone")),
+        ("literary_analysis", ("literary essay", "literary analysis", "theme", "character", "novel", "textual evidence")),
         ("argumentative", ("persuasive", "convince", "opinion", "letter to the editor", "argument")),
         ("informational_report", ("informational", "report", "explain", "facts and details")),
         ("narrative", ("personal narrative", "story", "tell about a time", "once", "experience")),
-        ("literary_analysis", ("theme", "character", "novel", "textual evidence", "analysis")),
     ]
     for genre, markers in rules:
         if any(marker in merged for marker in markers):

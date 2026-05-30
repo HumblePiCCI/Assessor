@@ -69,6 +69,27 @@ def load_submission_metadata(path: Path) -> dict:
     return {}
 
 
+def classroom_roster_display_names(class_metadata: dict) -> dict[str, str]:
+    roster = class_metadata.get("roster", []) if isinstance(class_metadata, dict) else []
+    names = {}
+    for row in roster if isinstance(roster, list) else []:
+        if not isinstance(row, dict):
+            continue
+        student_id = str(row.get("student_id", "") or row.get("classroom_user_id", "") or "").strip()
+        display_name = str(row.get("display_name", "") or row.get("name", "") or "").strip()
+        if student_id and display_name:
+            names[student_id] = display_name
+    return names
+
+
+def display_name_for_student(sid: str, meta_row: dict, classroom_names: dict[str, str]) -> str:
+    source_stem = Path(str(meta_row.get("source_file", "") or "")).stem
+    if source_stem and classroom_names.get(source_stem):
+        return classroom_names[source_stem]
+    display_name = str(meta_row.get("display_name", "") or "").strip()
+    return display_name or sid
+
+
 def num(value, default=0.0) -> float:
     try:
         return float(value)
@@ -338,7 +359,11 @@ def validation_state(root: Path) -> dict:
         "teacher_message": (
             "Review ready. Validation is checking edge cases in the background."
             if status == "pending"
-            else ("Validation found cases to inspect." if exceptions else "Validation complete.")
+            else (
+                f"Validation found {len(exceptions)} case{'s' if len(exceptions) != 1 else ''} to inspect."
+                if exceptions
+                else "Validation complete."
+            )
         ),
     }
 
@@ -412,6 +437,9 @@ def main() -> int:
     grades = {row["student_id"]: row for row in grades_rows}
     texts = load_texts(texts_dir)
     meta = load_submission_metadata(Path("processing/submission_metadata.json"))
+    metadata_path = Path("inputs/class_metadata.json")
+    class_metadata = load_json(metadata_path)
+    classroom_names = classroom_roster_display_names(class_metadata)
     cost_report = load_json(cost_path)
     consistency_report = load_json(Path("outputs/consistency_report.json"))
     pairwise_matrix = load_json(Path("outputs/pairwise_matrix.json"))
@@ -452,7 +480,7 @@ def main() -> int:
         data.append(
             {
                 "student_id": sid,
-                "display_name": meta_row.get("display_name") or sid,
+                "display_name": display_name_for_student(sid, meta_row, classroom_names),
                 "source_file": meta_row.get("source_file", ""),
                 "word_count": meta_row.get("word_count"),
                 "paragraph_count": meta_row.get("paragraph_count"),
@@ -493,11 +521,6 @@ def main() -> int:
 
     # Sort by rank for UI
     data.sort(key=lambda r: r["rank"])
-
-    metadata_path = Path("inputs/class_metadata.json")
-    class_metadata = {}
-    if metadata_path.exists():
-        class_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 
     curve_top = grades_rows[0].get("curve_top") if grades_rows else None
     curve_bottom = grades_rows[0].get("curve_bottom") if grades_rows else None

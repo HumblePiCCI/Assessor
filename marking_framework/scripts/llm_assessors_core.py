@@ -97,9 +97,22 @@ def preflight_costs(
     }
 
 
+def _criteria_points_example(criteria_example_ids: list[str] | None = None) -> str:
+    ids = [str(cid or "").strip() for cid in (criteria_example_ids or []) if str(cid or "").strip()]
+    if not ids:
+        ids = ["K1", "K2"]
+    rows = []
+    for idx, cid in enumerate(ids[:2]):
+        score = 75 if idx == 0 else 60
+        escaped = cid.replace("\\", "\\\\").replace('"', '\\"')
+        rows.append(f'    {{"criterion_id": "{escaped}", "score": {score}}}')
+    return ",\n".join(rows)
+
+
 def build_pass1_prompt(role_name: str, rubric: str, outline: str, student_id: str, text: str,
                        grade_context: str = "", exemplars: str = "", criteria_block: str = "",
-                       evidence_reqs: dict | None = None, notes_word_limit: int | None = None) -> str:
+                       evidence_reqs: dict | None = None, notes_word_limit: int | None = None,
+                       criteria_example_ids: list[str] | None = None) -> str:
     context = ""
     if grade_context:
         context += grade_context.strip() + "\n\n"
@@ -140,8 +153,7 @@ Return ONLY valid JSON in this exact format:
   "student_id": "{student_id}",
   "rubric_total_points": <number 0-100 percent>,
   "criteria_points": [
-    {{"criterion_id": "K1", "score": 75}},
-    {{"criterion_id": "K2", "score": 60}}
+{_criteria_points_example(criteria_example_ids)}
   ],
 {evidence_field}  "notes": "short justification"
 }}

@@ -55,6 +55,7 @@ CLASSROOM_REMEDIES = {
     "no_extractable_text": "Open the attachment and confirm it contains readable text, then resync.",
     "empty_attachment": "Ask the student to resubmit a non-empty document, then resync.",
     "external_writes_disabled": "Use CSV export for this slice; live Classroom writes are deliberately disabled.",
+    "validation_exceptions_present": "Inspect the validation cases before export or passback.",
 }
 
 

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.llm_assessors_core import looks_like_prompt_echo, parse_pass1_item, pass1_text_format
+from scripts.llm_assessors_core import build_pass1_prompt, looks_like_prompt_echo, parse_pass1_item, pass1_text_format
 
 
 def test_parse_pass1_item_rationale_min_words_notes_branch():
@@ -173,3 +173,19 @@ def test_pass1_text_format_uses_compact_criteria_object():
     assert criteria["type"] == "array"
     assert criteria["items"]["properties"]["criterion_id"]["type"] == "string"
     assert criteria["items"]["properties"]["score"]["type"] == "number"
+
+
+def test_build_pass1_prompt_uses_custom_criteria_example_ids():
+    prompt = build_pass1_prompt(
+        "A",
+        "rubric",
+        "outline",
+        "s1",
+        "essay",
+        criteria_block="CRITERIA (use these verified rubric IDs exactly):\n- criterion_1: Ideas\n- criterion_2: Organization",
+        criteria_example_ids=["criterion_1", "criterion_2"],
+    )
+
+    assert '"criterion_id": "criterion_1"' in prompt
+    assert '"criterion_id": "criterion_2"' in prompt
+    assert '"criterion_id": "K1"' not in prompt

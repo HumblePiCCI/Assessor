@@ -359,6 +359,51 @@ def test_collect_judgments_records_selection_reasons(tmp_path, monkeypatch):
     assert "top_pack" in prompts[0]
 
 
+def test_collect_judgments_reports_progress(capsys, monkeypatch):
+    rows = [
+        {
+            "student_id": "s1",
+            "seed_rank": 1,
+            "level": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": 70.0,
+            "borda_percent": 0.6,
+            "composite_score": 0.6,
+        },
+        {
+            "student_id": "s2",
+            "seed_rank": 2,
+            "level": "3",
+            "adjusted_level": "3",
+            "rubric_after_penalty_percent": 69.0,
+            "borda_percent": 0.7,
+            "composite_score": 0.7,
+        },
+    ]
+
+    def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
+        payload = {"decision": "KEEP", "confidence": "high", "rationale": "A is stronger overall."}
+        return {"model": model, "output": [{"type": "output_text", "text": json.dumps(payload)}]}
+
+    monkeypatch.setattr(vc, "responses_create", fake_create)
+    judgments = vc.collect_judgments(
+        rows,
+        {"s1": "Essay one", "s2": "Essay two"},
+        "rubric",
+        "outline",
+        model="gpt-5.4-mini",
+        routing="routing.json",
+        reasoning="low",
+        max_output_tokens=300,
+        window=1,
+        metadata={},
+    )
+    output = capsys.readouterr().out
+    assert len(judgments) == 1
+    assert "Pairwise consistency checks selected: 1 pairs (1 model judgment(s))." in output
+    assert "Pairwise consistency progress: 1/1 model judgment(s)." in output
+
+
 def test_verify_consistency_build_prompt_includes_literary_priority_contract():
     prompt = vc.build_prompt(
         "rubric",

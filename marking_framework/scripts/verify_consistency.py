@@ -1778,6 +1778,11 @@ def collect_judgments(
         uncertainty_challenger_count=uncertainty_challenger_count,
         uncertainty_anchor_count=uncertainty_anchor_count,
     )
+    total = len(pair_specs) * max(1, int(replicates))
+    progress_interval = max(1, total // 10) if total else 1
+    if total:
+        print(f"Pairwise consistency checks selected: {len(pair_specs)} pairs ({total} model judgment(s)).", flush=True)
+    completed = 0
     for spec in pair_specs:
         higher = spec["higher"]
         lower = spec["lower"]
@@ -1805,6 +1810,9 @@ def collect_judgments(
                 student_count=len(rows),
             )
             judgments.append(judgment)
+            completed += 1
+            if completed == total or completed % progress_interval == 0:
+                print(f"Pairwise consistency progress: {completed}/{total} model judgment(s).", flush=True)
     return judgments
 
 

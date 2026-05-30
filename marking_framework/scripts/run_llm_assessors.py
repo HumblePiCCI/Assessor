@@ -75,6 +75,7 @@ def build_portfolio_piece_prompt(
     criteria_block: str = "",
     evidence_reqs: dict | None = None,
     notes_word_limit: int | None = None,
+    criteria_example_ids: list[str] | None = None,
 ) -> str:
     piece_context = (
         "PORTFOLIO PIECE CONTEXT:\n"
@@ -95,6 +96,7 @@ def build_portfolio_piece_prompt(
         criteria_block,
         evidence_reqs,
         notes_word_limit=notes_word_limit,
+        criteria_example_ids=criteria_example_ids,
     )
 
 
@@ -140,7 +142,67 @@ def guard_bias_for_exemplar_scope(match_quality: str | None, score_delta: float,
     return float(score_delta), int(level_gap), float(anchor_blend)
 
 
-def resolve_pass1_contract(criteria_cfg: dict, genre: str | None, routing_require_evidence: bool) -> dict:
+def _normalized_criteria_block(normalized_rubric: dict) -> tuple[str, list[str]]:
+    criteria = normalized_rubric.get("criteria", []) if isinstance(normalized_rubric, dict) else []
+    if not isinstance(criteria, list):
+        return "", []
+    rows = []
+    required_ids = []
+    for index, item in enumerate(criteria, start=1):
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("id") or f"criterion_{index}").strip()
+        name = str(item.get("name") or f"Criterion {index}").strip()
+        if not cid or not name:
+            continue
+        required_ids.append(cid)
+        weight = item.get("weight")
+        weight_label = f" ({round(float(weight) * 100):d}%)" if isinstance(weight, (int, float)) else ""
+        summary = str(item.get("descriptor_summary") or item.get("canonical_label") or "").strip()
+        raw_line = str(item.get("raw_line") or "").strip()
+        detail = summary or raw_line
+        if raw_line and raw_line != name and raw_line not in detail:
+            detail = f"{detail}; source row: {raw_line}" if detail else f"source row: {raw_line}"
+        rows.append(f"- {cid}: {name}{weight_label}{' — ' + detail if detail else ''}")
+    if not rows:
+        return "", []
+    return "\n".join(["CRITERIA (use these verified rubric IDs exactly):", *rows]), required_ids
+
+
+def _normalized_evidence_requirements(normalized_rubric: dict, routing_require_evidence: bool) -> tuple[bool, dict]:
+    evidence = normalized_rubric.get("evidence_requirements", {}) if isinstance(normalized_rubric, dict) else {}
+    reqs = dict(evidence) if isinstance(evidence, dict) else {}
+    force = bool(
+        reqs.get("force_require_evidence", False)
+        or reqs.get("preserve_validation", False)
+        or reqs.get("hard_fail_on_evidence_errors", False)
+    )
+    require_evidence = bool(routing_require_evidence or force)
+    if reqs and require_evidence:
+        strict_evidence_contract = bool(reqs.get("preserve_validation", False) or reqs.get("hard_fail_on_evidence_errors", False))
+        if not strict_evidence_contract:
+            reqs["quote_validation"] = False
+            reqs["rationale_min_words"] = 0
+    else:
+        reqs = {}
+    return require_evidence, reqs
+
+
+def resolve_pass1_contract(
+    criteria_cfg: dict,
+    genre: str | None,
+    routing_require_evidence: bool,
+    normalized_rubric: dict | None = None,
+) -> dict:
+    normalized_block, normalized_ids = _normalized_criteria_block(normalized_rubric or {})
+    if normalized_ids:
+        require_evidence, reqs = _normalized_evidence_requirements(normalized_rubric or {}, routing_require_evidence)
+        return {
+            "criteria_block": normalized_block,
+            "required_ids": normalized_ids,
+            "require_evidence": require_evidence,
+            "reqs": reqs,
+        }
     if not criteria_cfg:
         return {
             "criteria_block": "",
@@ -1496,6 +1558,7 @@ def main() -> int:
         criteria_cfg,
         genre,
         bool(routing.get("tasks", {}).get("pass1_assessor", {}).get("require_evidence", False)),
+        normalized_rubric,
     )
     criteria_block = contract["criteria_block"]
     required_ids = contract["required_ids"]
@@ -1628,6 +1691,7 @@ def main() -> int:
                         piece_criteria_block,
                         reqs,
                         notes_word_limit=piece_notes_word_limit,
+                        criteria_example_ids=piece_required_ids,
                     )
                     prompt = base_prompt
                     piece_item = None
@@ -1740,6 +1804,7 @@ def main() -> int:
                 criteria_block,
                 reqs,
                 notes_word_limit=pass1_notes_word_limit,
+                criteria_example_ids=required_ids,
             )
             base_prompt = prompt
             item = None

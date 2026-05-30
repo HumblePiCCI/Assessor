@@ -30,7 +30,16 @@ def test_build_dashboard_data(tmp_path, monkeypatch):
     inputs_dir = tmp_path / "inputs"
     inputs_dir.mkdir()
     meta = inputs_dir / "class_metadata.json"
-    meta.write_text(json.dumps({"grade_level": 7}), encoding="utf-8")
+    meta.write_text(
+        json.dumps({"grade_level": 7, "roster": [{"student_id": "google-user-1", "display_name": "Jordan Lee"}]}),
+        encoding="utf-8",
+    )
+    processing_dir = tmp_path / "processing"
+    processing_dir.mkdir()
+    (processing_dir / "submission_metadata.json").write_text(
+        json.dumps([{"student_id": "s1", "display_name": "google-user-1", "source_file": "google-user-1.txt"}]),
+        encoding="utf-8",
+    )
 
     out = tmp_path / "dash.json"
 
@@ -39,6 +48,7 @@ def test_build_dashboard_data(tmp_path, monkeypatch):
     assert bdd.main() == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["students"][0]["student_id"] == "s1"
+    assert payload["students"][0]["display_name"] == "Jordan Lee"
     assert payload["curve_top"] == "92"
     assert payload["students"][0]["feedback_text"] == "Star 1"
 

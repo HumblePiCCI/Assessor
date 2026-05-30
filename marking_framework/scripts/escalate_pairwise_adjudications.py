@@ -586,7 +586,12 @@ def escalate_candidates(
     orientation_audit: bool,
 ) -> list[dict]:
     escalations = []
-    for candidate in candidates:
+    total = len(candidates)
+    progress_interval = max(1, total // 10) if total else 1
+    if total:
+        estimated_calls = total * (2 if orientation_audit else 1)
+        print(f"Pairwise escalation selected: {total} pair(s), up to {estimated_calls} model call(s).", flush=True)
+    for index, candidate in enumerate(candidates, start=1):
         seed_order = candidate.get("seed_order", {}) if isinstance(candidate.get("seed_order"), dict) else {}
         higher_id = str(seed_order.get("higher", "") or "").strip()
         lower_id = str(seed_order.get("lower", "") or "").strip()
@@ -629,6 +634,8 @@ def escalate_candidates(
         model_metadata["supersedes_pair_key"] = candidate.get("pair_key", "")
         model_metadata["cheap_judgment"] = candidate.get("cheap_judgment", {})
         escalations.append(judgment)
+        if index == total or index % progress_interval == 0:
+            print(f"Pairwise escalation progress: {index}/{total} pair(s).", flush=True)
     return escalations
 
 

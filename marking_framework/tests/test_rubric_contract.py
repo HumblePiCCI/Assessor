@@ -34,6 +34,60 @@ def test_build_rubric_artifacts_from_plain_text(tmp_path):
     assert len(artifacts["normalized_rubric"]["criteria"]) >= 4
 
 
+def test_ghost_literary_rubric_prefers_outline_genre_and_weighted_rows(tmp_path):
+    rubric = tmp_path / "rubric.md"
+    rubric.write_text(
+        "\n".join(
+            [
+                "Rubric for Ghost Final Paragraph Assignment",
+                "Criteria",
+                "Level 4 (4 points)",
+                "Level 3 (3 points)",
+                "Level 2 (2 points)",
+                "Level 1 (1 point)",
+                "Content and Ideas (8)",
+                "Insightful and relevant response to the prompt with 2-3 well-developed arguments supported by clear evidence.",
+                "Relevant response to the prompt with 2-3 arguments supported by adequate evidence.",
+                "Partial response to the prompt with underdeveloped arguments or vague evidence.",
+                "Minimal or unclear response to the prompt; little to no evidence.",
+                "Organization and Structure (8)",
+                "Strong topic sentence, logical flow of ideas, and effective conclusion sentence.",
+                "Clear topic sentence, organized ideas, and adequate conclusion.",
+                "Some organization but lacks flow or clear topic/conclusion sentences.",
+                "Poor organization; unclear or missing topic and conclusion sentences.",
+                "Language Use (8)",
+                "Varied sentence structure, precise word choice, and excellent grammar, spelling, and punctuation.",
+                "Clear language, mostly correct grammar, spelling, and punctuation.",
+                "Basic language with some errors in grammar, spelling, and punctuation.",
+                "Repetitive or unclear language with frequent errors.",
+                "Formatting and Requirements (4)",
+                "Fully meets all requirements (5 paragraphs, size 12 font, double-spaced) and uses the RACES model effectively.",
+                "Meets most requirements and uses the RACES model with some effectiveness.",
+                "Partially meets requirements; limited use of the RACES model.",
+                "Rarely meets requirements; little to no evidence of RACES model use.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    outline = tmp_path / "outline.md"
+    outline.write_text(
+        "Write a five-paragraph literary essay exploring a theme in Jason Reynolds' novel Ghost.",
+        encoding="utf-8",
+    )
+
+    artifacts = rc.build_rubric_artifacts(rubric, outline_path=outline)
+    normalized = artifacts["normalized_rubric"]
+
+    assert normalized["genre"] == "literary_analysis"
+    assert [item["name"] for item in normalized["criteria"]] == [
+        "Content and Ideas",
+        "Organization and Structure",
+        "Language Use",
+        "Formatting and Requirements",
+    ]
+    assert [item["weight"] for item in normalized["criteria"]] == [0.285714, 0.285714, 0.285714, 0.142857]
+
+
 def test_extract_document_text_supports_docx_and_rtf(tmp_path):
     docx = make_docx(tmp_path / "rubric.docx", "Docx rubric")
     rtf = tmp_path / "rubric.rtf"
