@@ -17,15 +17,21 @@ AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
+GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE = "https://www.googleapis.com/auth/classroom.coursework.students.readonly"
+GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE = "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly"
+
 GOOGLE_CLASSROOM_READ_SCOPES = (
     "https://www.googleapis.com/auth/classroom.courses.readonly",
-    "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+    GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE,
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
 )
 GOOGLE_DRIVE_READ_SCOPES = (
     "https://www.googleapis.com/auth/drive.readonly",
 )
 DEFAULT_GOOGLE_SCOPES = (*GOOGLE_CLASSROOM_READ_SCOPES, *GOOGLE_DRIVE_READ_SCOPES)
+GOOGLE_SCOPE_EQUIVALENTS = {
+    GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE: (GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE,),
+}
 
 
 class GoogleOAuthError(ValueError):
@@ -86,6 +92,17 @@ def _status_code(response: Any) -> int:
         return 0
 
 
+def missing_google_scopes(granted_scopes: list[str] | tuple[str, ...], required_scopes: list[str] | tuple[str, ...] = DEFAULT_GOOGLE_SCOPES) -> list[str]:
+    granted = {str(scope).strip() for scope in granted_scopes if str(scope).strip()}
+    missing = []
+    for scope in required_scopes:
+        primary = str(scope).strip()
+        accepted = {primary, *GOOGLE_SCOPE_EQUIVALENTS.get(primary, ())}
+        if granted.isdisjoint(accepted):
+            missing.append(primary)
+    return sorted(missing)
+
+
 class GoogleOAuthService:
     def __init__(
         self,
@@ -127,7 +144,7 @@ class GoogleOAuthService:
             "expired": bool(token_status.get("expired")),
             "granted_scopes": list(token_status.get("granted_scopes", []) or []),
             "required_scopes": list(DEFAULT_GOOGLE_SCOPES),
-            "missing_scopes": sorted(set(DEFAULT_GOOGLE_SCOPES) - set(token_status.get("granted_scopes", []) or [])),
+            "missing_scopes": missing_google_scopes(list(token_status.get("granted_scopes", []) or [])),
             "expires_at": str(token_status.get("expires_at", "") or ""),
             "teacher_display_email": str(token_status.get("teacher_display_email", "") or ""),
             "teacher_identity_hash": str(token_status.get("teacher_identity_hash", "") or ""),

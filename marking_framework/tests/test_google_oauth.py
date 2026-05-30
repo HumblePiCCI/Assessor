@@ -4,7 +4,13 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthError, GoogleOAuthService
+from server.google_oauth import (
+    DEFAULT_GOOGLE_SCOPES,
+    GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE,
+    GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE,
+    GoogleOAuthError,
+    GoogleOAuthService,
+)
 from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError
 
 
@@ -103,6 +109,34 @@ def test_oauth_callback_status_and_disconnect_never_leak_tokens(tmp_path):
     assert disconnected["cleared"] is True
     assert transport.posts[-1]["params"]["token"] == "refresh-secret"
     assert svc.status(identity(), project())["connected"] is False
+
+
+def test_status_accepts_google_returned_student_submissions_scope_alias(tmp_path):
+    svc = service(tmp_path)
+    granted_scopes = [
+        GOOGLE_CLASSROOM_STUDENT_SUBMISSIONS_READ_SCOPE
+        if scope == GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE
+        else scope
+        for scope in DEFAULT_GOOGLE_SCOPES
+    ]
+    svc.token_store.save_token(
+        identity(),
+        project(),
+        {
+            "access_token": "access-secret",
+            "refresh_token": "refresh-secret",
+            "expires_in": 3600,
+            "scope": " ".join(granted_scopes),
+        },
+        granted_scopes=granted_scopes,
+    )
+
+    status = svc.status(identity(), project())
+
+    assert status["connected"] is True
+    assert status["required_scopes"] == list(DEFAULT_GOOGLE_SCOPES)
+    assert GOOGLE_CLASSROOM_COURSEWORK_READ_SCOPE not in status["granted_scopes"]
+    assert status["missing_scopes"] == []
 
 
 def test_expired_token_refreshes_without_exposing_secret(tmp_path):

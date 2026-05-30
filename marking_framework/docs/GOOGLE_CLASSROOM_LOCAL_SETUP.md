@@ -119,6 +119,9 @@ This integration requests read-only Classroom scopes for courses, coursework,
 student submissions, and rosters, plus Drive read-only access for attachment
 export/download. Public or distributed use with sensitive or restricted scopes
 may require Google verification, security assessment, or Workspace admin trust.
+Google may report the granted Classroom submissions capability as
+`classroom.student-submissions.students.readonly`; Assessor treats that returned
+grant as satisfying the coursework/submissions read requirement.
 
 Live Classroom writes remain fail-closed in this repository. CSV export is the
 passback path for this pilot slice.
