@@ -1,6 +1,7 @@
 import json
 import shutil
 import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,8 @@ from fastapi.testclient import TestClient
 import server.app as appmod
 from server.app import app
 import server.projects as projmod
+from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthService
+from server.google_token_store import GoogleTokenStore
 from server.pipeline_queue import PipelineQueue
 
 
@@ -15,8 +18,9 @@ class FakeGoogleAdapter:
     def list_courses(self):
         return [{"course_id": "course-1", "course_name": "Period 2", "course_state": "ACTIVE"}]
 
-    def list_coursework(self, course_id):
+    def list_coursework(self, course_id, *, include_drafts=False):
         assert course_id == "course-1"
+        assert include_drafts is False
         return [{"course_id": "course-1", "coursework_id": "cw-1", "coursework_title": "Essay", "coursework_state": "PUBLISHED"}]
 
     def read_snapshot(self, course_id, coursework_id, *, course_name="", coursework_title=""):
@@ -102,6 +106,60 @@ def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_b
     assert metadata["adapter"] == "live_google"
     assert metadata["latest_sync"]["imported_count"] == 1
     assert metadata["latest_sync"]["blocker_count"] == 1
+    assert metadata["latest_sync"]["external_write_performed"] is False
+
+
+class FailingRefreshTransport:
+    def post(self, url, *, data=None, params=None, timeout=20.0):
+        return types.SimpleNamespace(status_code=400, json=lambda: {"error": "invalid_grant", "error_description": "Token expired."})
+
+
+def test_live_google_courses_refresh_failure_requires_reconnect_before_adapter_use(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    store = GoogleTokenStore(server_dir)
+    identity = {"tenant_id": "local-dev-tenant", "teacher_id": "local-dev-teacher", "strict_auth": False}
+    project = {"id": "workspace", "name": "Workspace", "scope_key": "workspace"}
+    store.save_token(
+        identity,
+        project,
+        {
+            "access_token": "stale-token",
+            "refresh_token": "refresh-token",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+            "scope": " ".join(DEFAULT_GOOGLE_SCOPES),
+        },
+        granted_scopes=list(DEFAULT_GOOGLE_SCOPES),
+    )
+    service = GoogleOAuthService(
+        server_dir,
+        token_store=store,
+        transport=FailingRefreshTransport(),
+        config={
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "redirect_uri": "http://127.0.0.1:8000/google/auth/callback",
+        },
+    )
+    adapter_calls = []
+
+    def forbidden_adapter(_token):
+        adapter_calls.append(_token)
+        raise AssertionError("Classroom adapter must not be built after refresh failure")
+
+    monkeypatch.setattr(projmod, "google_oauth_service", lambda: service)
+    monkeypatch.setattr(projmod, "GoogleClassroomAdapter", forbidden_adapter)
+    client = TestClient(app)
+    response = client.get("/projects/classroom/google/courses")
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "refresh_failed_reconnect_required"
+    assert adapter_calls == []
 
 
 def seed_runtime(root: Path):

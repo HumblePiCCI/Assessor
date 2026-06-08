@@ -42,6 +42,8 @@ This repo is launchable only when the production contract is satisfied in code, 
 - Classroom live write modes remain unavailable unless a future verified write
   adapter, admin approval, write-scope posture, and teacher-confirmed preflight
   are all proven. This read-sync slice ships CSV export only.
+- A local owner-run Google Classroom OAuth smoke is pilot evidence only. It is
+  not a launch gate substitute and must not be used to mark this contract green.
 
 ## Required Validation
 

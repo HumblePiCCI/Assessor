@@ -35,7 +35,7 @@ def test_classroom_adapter_paginates_courses_coursework_roster_and_submissions()
             {"path": "/courses", "payload": {"courses": [{"id": "c1", "name": "Period 2", "courseState": "ACTIVE"}], "nextPageToken": "n"}},
             {"path": "/courses", "payload": {"courses": [{"id": "c2", "name": "Period 3", "courseState": "ACTIVE"}]}},
             {"path": "/courseWork", "payload": {"courseWork": [{"id": "cw1", "courseId": "c1", "title": "Essay", "state": "PUBLISHED"}], "nextPageToken": "n"}},
-            {"path": "/courseWork", "payload": {"courseWork": [{"id": "cw2", "courseId": "c1", "title": "Draft", "state": "DRAFT"}]}},
+            {"path": "/courseWork", "payload": {"courseWork": []}},
             {"path": "/courseWork/cw1", "payload": {"id": "cw1", "courseId": "c1", "title": "Essay", "state": "PUBLISHED"}},
             {"path": "/students", "payload": {"students": [{"userId": "u1", "profile": {"id": "u1", "name": {"fullName": "Student One"}}}]}},
             {
@@ -53,13 +53,33 @@ def test_classroom_adapter_paginates_courses_coursework_roster_and_submissions()
     )
     adapter = GoogleClassroomAdapter("token", classroom_transport=transport, drive_adapter=Drive())
     assert [row["course_id"] for row in adapter.list_courses()] == ["c1", "c2"]
-    assert [row["coursework_id"] for row in adapter.list_coursework("c1")] == ["cw1", "cw2"]
+    assert [row["coursework_id"] for row in adapter.list_coursework("c1")] == ["cw1"]
+    assert transport.calls[2]["params"]["courseWorkStates"] == ["PUBLISHED"]
     snapshot = adapter.read_snapshot("c1", "cw1")
     assert snapshot["adapter"] == "live_google"
     assert snapshot["roster"][0]["display_name"] == "Student One"
     states = {row["submission_id"]: row["classroom_state"] for row in snapshot["submissions"]}
     assert states == {"s1": "submitted", "s2": "reclaimed", "s3": "returned", "s4": "missing"}
     assert snapshot["submissions"][0]["attachments"][0]["attachment_id"] == "doc"
+
+
+def test_classroom_adapter_can_include_drafts_only_when_explicit():
+    transport = Transport(
+        [
+            {
+                "path": "/courseWork",
+                "payload": {
+                    "courseWork": [
+                        {"id": "cw1", "courseId": "c1", "title": "Essay", "state": "PUBLISHED"},
+                        {"id": "cw2", "courseId": "c1", "title": "Draft", "state": "DRAFT"},
+                    ]
+                },
+            }
+        ]
+    )
+    rows = GoogleClassroomAdapter("token", classroom_transport=transport, drive_adapter=Drive()).list_coursework("c1", include_drafts=True)
+    assert [row["coursework_id"] for row in rows] == ["cw1", "cw2"]
+    assert transport.calls[0]["params"]["courseWorkStates"] == ["PUBLISHED", "DRAFT"]
 
 
 def test_classroom_adapter_maps_api_errors_to_product_codes():
@@ -87,3 +107,11 @@ def test_classroom_adapter_maps_api_errors_to_product_codes():
         assert exc.code == "quota_exhausted"
     else:
         raise AssertionError("quota failure should map to blocker")
+
+    unavailable = Transport([{"path": "/courses", "status": 503, "payload": {"error": {"message": "backend unavailable"}}}])
+    try:
+        GoogleClassroomAdapter("token", classroom_transport=unavailable, drive_adapter=Drive()).list_courses()
+    except GoogleClassroomError as exc:
+        assert exc.code == "google_api_unavailable"
+    else:
+        raise AssertionError("service failures should map to unavailable blocker")

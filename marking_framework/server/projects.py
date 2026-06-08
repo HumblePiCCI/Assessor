@@ -349,10 +349,10 @@ def google_oauth_service() -> GoogleOAuthService:
 
 def google_classroom_adapter(identity: dict, project: dict) -> tuple[GoogleClassroomAdapter, dict]:
     service = google_oauth_service()
+    token = service.access_token(identity, project, refresh_if_needed=True)
     status = service.status(identity, project)
-    if not status.get("connected"):
-        raise GoogleOAuthError("Google is not connected for this teacher and project.", code="missing_oauth_grant")
-    token = service.access_token(identity, project)
+    if status.get("missing_scopes"):
+        raise GoogleOAuthError("Google Classroom connection is missing required scopes. Reconnect Google.", code="insufficient_scope")
     return GoogleClassroomAdapter(token), status
 
 
@@ -595,12 +595,12 @@ async def projects_classroom_google_courses(request: Request):
 
 
 @router.get("/projects/classroom/google/courses/{course_id}/coursework")
-async def projects_classroom_google_coursework(course_id: str, request: Request):
+async def projects_classroom_google_coursework(course_id: str, request: Request, include_drafts: bool = False):
     identity = identity_context(request)
     project = project_meta_for_product(identity)
     try:
         adapter, status = google_classroom_adapter(identity, project)
-        return {"google_auth": status, "course_id": course_id, "coursework": adapter.list_coursework(course_id)}
+        return {"google_auth": status, "course_id": course_id, "coursework": adapter.list_coursework(course_id, include_drafts=include_drafts)}
     except (GoogleOAuthError, GoogleClassroomError) as exc:
         google_error_response(exc)
 
@@ -673,6 +673,8 @@ async def projects_classroom_google_read_sync(payload: GoogleClassroomReadSyncPa
             }
         )
     except (GoogleOAuthError, GoogleClassroomError) as exc:
+        code = getattr(exc, "code", "")
+        oauth_posture = "reconnect_required" if code in {"missing_oauth_grant", "oauth_token_expired", "refresh_failed_reconnect_required"} else "connected_read_only"
         snapshot = {
             "adapter": "live_google",
             "google_integration_path": "live_google",
@@ -688,7 +690,7 @@ async def projects_classroom_google_read_sync(payload: GoogleClassroomReadSyncPa
             "policy": {
                 "policy_state": "operator_supervised_pilot",
                 "app_approval_status": "operator_supervised_pilot",
-                "oauth_scope_posture": "not_connected" if getattr(exc, "code", "") == "missing_oauth_grant" else "connected_read_only",
+                "oauth_scope_posture": oauth_posture,
                 "classroom_write_adapter_status": "not_configured",
                 "external_writes_enabled": False,
                 "read_only_first": True,

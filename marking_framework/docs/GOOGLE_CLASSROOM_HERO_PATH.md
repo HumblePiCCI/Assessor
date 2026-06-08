@@ -1,11 +1,15 @@
 # Google Classroom Hero Path
 
-Status: product contract and implementation notes for the Classroom-facing hero
-path. The live product surface is implemented as a project-scoped Classroom
-state model, Google OAuth connection, Classroom/Drive read adapters, API, and
-dashboard controls. It is intentionally read-only-first: no Google Classroom
+Status: local read-only Classroom pilot surface plus product contract. The
+live product surface is implemented as a project-scoped Classroom state model,
+Google OAuth connection, Classroom/Drive read adapters, API, and dashboard
+controls. A repository owner can configure local OAuth, authenticate as a
+teacher, choose a real course and published assignment, sync supported written
+submissions, run the existing assessment pipeline, review/finalize, and produce
+CSV export evidence. It is intentionally read-only-first: no Google Classroom
 write is performed by this repository without a future adapter that proves
-OAuth, scopes, tenancy, admin approval, and teacher confirmation end to end.
+OAuth, scopes, tenancy, admin approval, preflight diff, audit records, tests,
+docs, and explicit teacher confirmation end to end.
 
 ## Product Invariant
 
@@ -48,15 +52,21 @@ API endpoints:
 - `POST /pipeline/v2/run-project-inputs`
 
 The UI exposes the routine path directly: connect Google Classroom, choose a
-class, choose an assignment, sync submissions, add rubric and outline, run
-assessment, review, finalize, and confirm CSV export. Manual IDs and fixture
-sync remain under Session/Admin details for local proof and CI fixtures.
+class, choose a published assignment, sync submissions, review imported/blocked
+counts, add rubric and outline, run assessment, review normal and
+flagged/boundary students, save draft/finalize review, and confirm CSV export.
+Manual IDs, fixture sync, fake audit completion, validation internals, and live
+write-looking controls are not part of the routine teacher path.
 
 `read-sync` is the ingestion seam. It accepts roster/submission snapshots from
 either the fixture/local adapter or the live Google adapter, materializes
 supported extracted text into `inputs/submissions`, writes Classroom import
 metadata to `inputs/class_metadata.json`, and records unsupported attachments
-as blockers. CI uses mocked adapters only and does not call Google.
+as blockers. The latest sync records `roster_count`, `submitted_count`,
+`imported_count`, `blocked_count`, `missing_count`, `reclaimed_count`,
+`returned_count`, `platform_error_count`, and `external_write_performed: false`.
+Zero-import syncs are blocked with a remedy instead of being treated as success.
+CI uses mocked adapters only and does not call Google.
 
 OAuth configuration is read only from environment/local config:
 
@@ -67,11 +77,15 @@ OAuth configuration is read only from environment/local config:
 - optional `GOOGLE_TOKEN_ENCRYPTION_KEY`
 
 Local development token state is stored under ignored
-`server/data/google_oauth/`. Public status exposes only connected state,
-granted scopes, expiry, and a teacher email/hash when available. Raw access and
-refresh tokens are never returned to the browser or written to outputs/projects.
-Strict staging/production must use encrypted local storage or an approved secret
-store before launch.
+`server/data/google_oauth/`. Public status exposes only configured, connected,
+expired/expiring, granted scopes, missing scopes, expiry, remediation, storage
+posture, and a teacher email/hash when available. Raw access tokens, refresh
+tokens, ID tokens, auth codes, client secrets, and credential JSON are never
+returned to the browser or written to outputs/projects. Before each live Google
+API call the service refreshes an expired/near-expiry access token; refresh
+failure returns `refresh_failed_reconnect_required` and no Classroom/Drive call
+is made with the stale token. Strict staging/production must use encrypted
+local storage or an approved secret store before launch.
 
 Default Google scopes are read-only:
 
@@ -114,7 +128,10 @@ Multiple supported attachments are combined with internal separators.
 Unsupported links, Forms, Slides, Sheets, Drawings, image/OCR gaps, missing
 Drive scope, permission failures, quota failures, or empty extraction become
 explicit blockers. Empty or unsupported attachments are never treated as
-zero-text essays and are not materialized for grading.
+zero-text essays and are not materialized for grading. Mixed supported and
+unsupported attachments are blocked as `partial_unsupported_attachments` in
+this slice; the app does not import the supported portion until the unsupported
+attachments are resolved by the teacher/operator.
 
 ## Export And Passback Rules
 
@@ -132,6 +149,10 @@ implementation. Live Classroom write modes stay fail-closed with
 `external_writes_disabled`, `classroom_write_adapter_not_configured`,
 `insufficient_scope` when applicable, and `admin_approval_required` when policy
 is absent. CSV export is the shipped passback path for this slice.
+
+Confirming CSV export records `external_write_performed: false`. The UI states
+that no live Classroom write occurred, and backend confirmation rejects
+tampered live-write preflights even if a caller bypasses the routine UI.
 
 ## Evidence Packet
 

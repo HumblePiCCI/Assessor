@@ -16,6 +16,7 @@ from server.runtime_context import identity_token, strict_auth_enabled
 
 STATE_TTL_MINUTES = 15
 TOKEN_STORE_SCHEMA_VERSION = 1
+TOKEN_REFRESH_SKEW_SECONDS = 300
 
 
 class GoogleTokenStoreError(ValueError):
@@ -35,6 +36,13 @@ def parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def seconds_until(value: str | None) -> int | None:
+    parsed = parse_iso(value)
+    if not parsed:
+        return None
+    return int((parsed - datetime.now(timezone.utc)).total_seconds())
 
 
 def canonical_hash(payload: Any) -> str:
@@ -282,13 +290,14 @@ class GoogleTokenStore:
         public = dict(envelope.get("public", {}) if isinstance(envelope.get("public"), dict) else {})
         secret_meta = envelope.get("secret", {}) if isinstance(envelope.get("secret"), dict) else {}
         connected = bool(public.get("connected")) and bool(envelope)
-        expires = parse_iso(public.get("expires_at"))
-        expired = bool(expires and expires <= datetime.now(timezone.utc))
-        if expired:
-            connected = False
+        expires_in_seconds = seconds_until(public.get("expires_at"))
+        expired = bool(expires_in_seconds is not None and expires_in_seconds <= 0)
+        expiring = bool(expires_in_seconds is not None and 0 < expires_in_seconds <= TOKEN_REFRESH_SKEW_SECONDS)
         return {
             "connected": connected,
             "expired": expired,
+            "expiring": expiring,
+            "expires_in_seconds": expires_in_seconds,
             "granted_scopes": list(public.get("granted_scopes", []) or []),
             "expires_at": str(public.get("expires_at", "") or ""),
             "teacher_display_email": str(public.get("teacher_display_email", "") or ""),

@@ -76,19 +76,29 @@ def map_google_classroom_error(response: Any) -> str:
     reason, message = _google_error_detail(response)
     combined = f"{reason} {message}".lower()
     if status == 401:
+        if "expired" in combined or "invalid" in combined:
+            return "oauth_token_expired"
         return "missing_oauth_grant"
     if status == 403 and ("insufficient" in combined or "scope" in combined):
         return "insufficient_scope"
     if status == 403 and ("accessnotconfigured" in combined or "api has not been used" in combined or "disabled" in combined):
         return "classroom_api_disabled"
-    if status == 403 and ("admin" in combined or "app blocked" in combined or "access blocked" in combined):
+    if status == 403 and ("admin approval" in combined or "access blocked" in combined or "not verified" in combined):
         return "admin_approval_required"
-    if status == 403:
+    if status == 403 and ("app blocked" in combined or "blocked by admin" in combined):
         return "admin_blocked_app"
+    if status == 403 and ("teacher" in combined and ("removed" in combined or "not a teacher" in combined)):
+        return "teacher_removed_from_course"
+    if status == 403 and "archived" in combined:
+        return "course_archived"
+    if status == 403:
+        return "permission_denied"
     if status == 404:
         return "resource_not_found"
-    if status in {429, 500, 503} or "quota" in combined or "rate limit" in combined or "ratelimit" in combined:
+    if status == 429 or "quota" in combined or "rate limit" in combined or "ratelimit" in combined:
         return "quota_exhausted"
+    if status in {500, 502, 503, 504}:
+        return "google_api_unavailable"
     return "classroom_api_error"
 
 
@@ -177,12 +187,12 @@ class GoogleClassroomAdapter:
             )
         return result
 
-    def list_coursework(self, course_id: str) -> list[dict]:
+    def list_coursework(self, course_id: str, *, include_drafts: bool = False) -> list[dict]:
         rows = self._list_paginated(
             f"/courses/{quote(str(course_id), safe='')}/courseWork",
             "courseWork",
             params={
-                "courseWorkStates": ["PUBLISHED", "DRAFT"],
+                "courseWorkStates": ["PUBLISHED", "DRAFT"] if include_drafts else ["PUBLISHED"],
                 "pageSize": 100,
             },
         )

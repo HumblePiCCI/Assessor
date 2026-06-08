@@ -18,3 +18,14 @@ marking_framework/inputs/*.docx
 .coverage
 marking_framework/.env
 marking_framework/.env.local
+marking_framework/.env.*
+!marking_framework/.env.example
+marking_framework/.pytest_cache/
+marking_framework/projects/
+marking_framework/client_secret*.json
+marking_framework/google-oauth-client*.json
+marking_framework/*oauth*client*.json
+marking_framework/*client_secret*.json
+marking_framework/server/data/google_oauth/
+marking_framework/server/data/classroom/
+marking_framework/server/data/review_store/

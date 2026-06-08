@@ -35,25 +35,35 @@ UNSUPPORTED_GOOGLE_MIME_TYPES = {
 }
 CLASSROOM_REMEDIES = {
     "classroom_api_disabled": "Ask the Google Workspace admin to enable the Classroom API for this domain.",
-    "admin_approval_required": "Ask the Google Workspace admin to approve live Classroom writes before passback.",
+    "drive_api_disabled": "Ask the Google Workspace admin to enable the Google Drive API for this OAuth project.",
+    "admin_approval_required": "Ask the Google Workspace admin to approve this OAuth app and its read scopes for the pilot teacher.",
     "admin_blocked_app": "Ask the Google Workspace admin to approve the app for the teacher, course, or pilot cohort.",
     "classroom_write_adapter_not_configured": "Keep using CSV export until a verified Classroom write adapter is configured.",
     "full_validation_current_required": "Run background validation against the latest teacher revision before export or passback.",
     "missing_oauth_grant": "Reconnect Google so the app can refresh the teacher's Classroom grant.",
+    "oauth_token_expired": "Reconnect Google Classroom; the stored grant could not be used for a live read.",
+    "refresh_failed_reconnect_required": "Reconnect Google Classroom; the refresh token was rejected or revoked.",
     "insufficient_scope": "Reconnect with the Classroom and Drive scopes required by the selected workflow.",
     "requires_drive_scope": "Reconnect Google with Drive read access so the app can export or download the selected attachment.",
+    "permission_denied": "Confirm the teacher account still has access to this course, assignment, roster, submission, and attachment.",
     "teacher_removed_from_course": "Have a course teacher or admin restore access before retrying reconciliation.",
     "course_archived": "Restore or duplicate the course before linking it to a live assessment run.",
     "resource_not_found": "Refresh the course-work list and relink the assignment.",
     "quota_exhausted": "Retry after quota reset or move the job to the operator retry queue.",
+    "google_api_unavailable": "Retry after the Google API outage clears; no stale or partial read was imported.",
     "forms_unsupported": "Ask the student to submit the essay as a Google Doc, DOCX, PDF, text, Markdown, HTML, or RTF attachment.",
     "slides_unsupported": "Ask the student to submit the essay in a supported document format, not Slides.",
     "sheets_unsupported": "Ask the student to submit prose work in a supported document format, not Sheets.",
     "drawing_unsupported": "Ask the student to submit prose work in a supported document format, not Drawings.",
     "ocr_not_configured": "Image-only submissions need manual handling; OCR is not enabled in this slice.",
     "external_link_unsupported": "Ask the student to attach the work directly rather than linking an external site.",
+    "youtube_unsupported": "Ask the student to submit written work as an attached document; YouTube attachments are not graded.",
+    "partial_unsupported_attachments": "This slice blocks mixed supported/unsupported submissions; resolve or remove unsupported attachments before grading.",
+    "file_too_large": "Export or download a smaller text-bearing document, then resync.",
     "no_extractable_text": "Open the attachment and confirm it contains readable text, then resync.",
     "empty_attachment": "Ask the student to resubmit a non-empty document, then resync.",
+    "zero_imports_no_supported_submissions": "No supported written submissions were imported. Resolve blockers or choose another written assignment.",
+    "evidence_packet_required": "Generate the evidence packet before confirming CSV export.",
     "external_writes_disabled": "Use CSV export for this slice; live Classroom writes are deliberately disabled.",
 }
 
@@ -135,11 +145,17 @@ def default_state(scope_id: str, current_project: dict | None, identity: dict | 
         "submissions": {},
         "sync_history": [],
         "google_auth": {
+            "configured": False,
             "connected": False,
+            "expired": False,
+            "expiring": False,
+            "reconnect_required": False,
             "granted_scopes": [],
+            "missing_scopes": [],
             "expires_at": "",
             "teacher_display_email": "",
             "teacher_identity_hash": "",
+            "remediation": "",
         },
         "event_log": [],
         "event_ids": [],
@@ -182,6 +198,9 @@ def empty_summary() -> dict:
         "missing_count": 0,
         "reclaimed_count": 0,
         "returned_count": 0,
+        "imported_count": 0,
+        "blocked_count": 0,
+        "platform_error_count": 0,
         "updated_count": 0,
         "attachment_blocker_count": 0,
         "ready_for_analysis_count": 0,
@@ -231,10 +250,16 @@ def load_state(base_dir: Path, scope_id: str, current_project: dict | None = Non
     merged.setdefault("sync_history", [])
     merged.setdefault("google_auth", {})
     merged["google_auth"].setdefault("connected", False)
+    merged["google_auth"].setdefault("configured", False)
+    merged["google_auth"].setdefault("expired", False)
+    merged["google_auth"].setdefault("expiring", False)
+    merged["google_auth"].setdefault("reconnect_required", False)
     merged["google_auth"].setdefault("granted_scopes", [])
+    merged["google_auth"].setdefault("missing_scopes", [])
     merged["google_auth"].setdefault("expires_at", "")
     merged["google_auth"].setdefault("teacher_display_email", "")
     merged["google_auth"].setdefault("teacher_identity_hash", "")
+    merged["google_auth"].setdefault("remediation", "")
     merged.setdefault("platform_errors", [])
     merged.setdefault("passback", {"mode": "no_passback", "preflights": {}, "actions": []})
     merged.setdefault("audit", {})
@@ -278,11 +303,17 @@ def public_state(state: dict) -> dict:
                     attachment.pop("text", None)
     auth = payload.get("google_auth", {}) if isinstance(payload.get("google_auth"), dict) else {}
     payload["google_auth"] = {
+        "configured": bool(auth.get("configured", False)),
         "connected": bool(auth.get("connected", False)),
+        "expired": bool(auth.get("expired", False)),
+        "expiring": bool(auth.get("expiring", False)),
+        "reconnect_required": bool(auth.get("reconnect_required", False)),
         "granted_scopes": list(auth.get("granted_scopes", []) or []),
+        "missing_scopes": list(auth.get("missing_scopes", []) or []),
         "expires_at": str(auth.get("expires_at", "") or ""),
         "teacher_display_email": str(auth.get("teacher_display_email", "") or ""),
         "teacher_identity_hash": str(auth.get("teacher_identity_hash", "") or ""),
+        "remediation": str(auth.get("remediation", "") or ""),
     }
     passback = dict(payload.get("passback", {}))
     preflights = passback.get("preflights", {})
@@ -468,6 +499,8 @@ def normalize_submission(raw: dict, existing: dict | None = None) -> dict:
     blockers = []
     for attachment in attachments:
         blockers.extend(attachment.get("blockers", []) or [])
+    if blockers and extracted_text.strip():
+        blockers.append("partial_unsupported_attachments")
     if classroom_state in {"missing", "reclaimed", "returned"}:
         analysis_state = classroom_state
     elif blockers:
@@ -526,10 +559,17 @@ def summarize_state(state: dict) -> dict:
             summary["stale_analysis_count"] += 1
         elif analysis_state in {"current", "analyzed"}:
             summary["ready_for_analysis_count"] += 1
+        elif analysis_state == "blocked":
+            summary["blocked_count"] += 1
         summary["attachment_blocker_count"] += len(item.get("attachment_blockers", []) or [])
     submitted_ids = {str(item.get("student_id", "") or "") for item in submissions.values()}
     roster_ids = {str(item.get("student_id", "") or "") for item in roster}
     summary["missing_count"] += len([sid for sid in roster_ids if sid and sid not in submitted_ids])
+    latest_sync = (state.get("sync_history", []) or [])[-1] if state.get("sync_history") else {}
+    if isinstance(latest_sync, dict):
+        summary["imported_count"] = int(latest_sync.get("imported_count", 0) or 0)
+        summary["blocked_count"] = max(summary["blocked_count"], int(latest_sync.get("blocked_count", latest_sync.get("blocker_count", 0)) or 0))
+    summary["platform_error_count"] = len(state.get("platform_errors", []) or [])
     return summary
 
 
@@ -584,6 +624,7 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
     submissions_dir.mkdir(parents=True, exist_ok=True)
     imported = []
     blockers = []
+    summary = summarize_state(state)
     for submission in (state.get("submissions", {}) or {}).values():
         if not isinstance(submission, dict):
             continue
@@ -611,15 +652,33 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
             }
         )
         submission["analysis_state"] = "scheduled"
+    link = state.get("classroom_link", {}) if isinstance(state.get("classroom_link"), dict) else {}
     metadata = {
         "source": "google_classroom_read_only_sync",
         "generated_at": now_iso(),
-        "assignment": state.get("classroom_link", {}),
-        "roster": state.get("roster", []),
+        "assignment": {
+            "course_id_hash": short_hash({"course_id": link.get("course_id", "")}),
+            "coursework_id_hash": short_hash({"coursework_id": link.get("coursework_id", "")}),
+            "course_name": str(link.get("course_name", "") or ""),
+            "coursework_title": str(link.get("coursework_title", "") or ""),
+            "google_course_state": str(link.get("google_course_state", "") or ""),
+            "coursework_state": str(link.get("coursework_state", "") or ""),
+        },
+        "counts": {
+            "roster_count": int(summary.get("roster_count", 0) or 0),
+            "submitted_count": int(summary.get("submitted_count", 0) or 0),
+            "imported_count": len(imported),
+            "blocked_count": len(blockers),
+            "missing_count": int(summary.get("missing_count", 0) or 0),
+            "reclaimed_count": int(summary.get("reclaimed_count", 0) or 0),
+            "returned_count": int(summary.get("returned_count", 0) or 0),
+            "platform_error_count": len(state.get("platform_errors", []) or []),
+        },
         "imported_submission_count": len(imported),
         "attachment_blocker_count": len(blockers),
         "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
         "sync_history": list(state.get("sync_history", []) or [])[-5:],
+        "external_write_performed": False,
     }
     write_json(inputs / "class_metadata.json", metadata)
     return {
@@ -627,6 +686,14 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
         "external_write_performed": False,
         "imported_submission_count": len(imported),
         "blocked_submission_count": len(blockers),
+        "imported_count": len(imported),
+        "blocked_count": len(blockers),
+        "roster_count": int(summary.get("roster_count", 0) or 0),
+        "submitted_count": int(summary.get("submitted_count", 0) or 0),
+        "missing_count": int(summary.get("missing_count", 0) or 0),
+        "reclaimed_count": int(summary.get("reclaimed_count", 0) or 0),
+        "returned_count": int(summary.get("returned_count", 0) or 0),
+        "platform_error_count": len(state.get("platform_errors", []) or []),
         "imported_submissions": imported,
         "blockers": blockers,
     }
@@ -663,21 +730,46 @@ def read_only_sync(base_dir: Path, root: Path, current_project: dict | None, ide
     if isinstance(payload.get("google_auth"), dict):
         safe_auth = payload["google_auth"]
         state["google_auth"] = {
+            "configured": bool(safe_auth.get("configured", False)),
             "connected": bool(safe_auth.get("connected", False)),
+            "expired": bool(safe_auth.get("expired", False)),
+            "expiring": bool(safe_auth.get("expiring", False)),
+            "reconnect_required": bool(safe_auth.get("reconnect_required", False)),
             "granted_scopes": list(safe_auth.get("granted_scopes", []) or []),
+            "missing_scopes": list(safe_auth.get("missing_scopes", []) or []),
             "expires_at": str(safe_auth.get("expires_at", "") or ""),
             "teacher_display_email": str(safe_auth.get("teacher_display_email", "") or ""),
             "teacher_identity_hash": str(safe_auth.get("teacher_identity_hash", "") or ""),
+            "remediation": str(safe_auth.get("remediation", "") or ""),
         }
     sync = materialize_read_only_submissions(root, state)
+    if int(sync.get("imported_count", sync.get("imported_submission_count", 0)) or 0) == 0:
+        zero_import_error = {
+            "code": "zero_imports_no_supported_submissions",
+            "message": "No supported written submissions were imported from this Classroom assignment.",
+        }
+        existing_codes = {
+            str(item.get("code", "") or "")
+            for item in state.get("platform_errors", []) or []
+            if isinstance(item, dict)
+        }
+        if zero_import_error["code"] not in existing_codes:
+            state.setdefault("platform_errors", []).append(zero_import_error)
+        sync["platform_error_count"] = len(state.get("platform_errors", []) or [])
     history = {
         "timestamp": now_iso(),
         "adapter": sync.get("adapter", "fixture_local"),
         "snapshot_hash": canonical_hash(snapshot),
-        "roster_count": len(snapshot.get("roster", []) or []),
+        "roster_count": int(sync.get("roster_count", len(snapshot.get("roster", []) or [])) or 0),
+        "submitted_count": int(sync.get("submitted_count", 0) or 0),
         "submission_count": len(snapshot.get("submissions", []) or []),
-        "imported_count": int(sync.get("imported_submission_count", 0) or 0),
-        "blocker_count": int(sync.get("blocked_submission_count", 0) or 0),
+        "imported_count": int(sync.get("imported_count", sync.get("imported_submission_count", 0)) or 0),
+        "blocked_count": int(sync.get("blocked_count", sync.get("blocked_submission_count", 0)) or 0),
+        "blocker_count": int(sync.get("blocked_count", sync.get("blocked_submission_count", 0)) or 0),
+        "missing_count": int(sync.get("missing_count", 0) or 0),
+        "reclaimed_count": int(sync.get("reclaimed_count", 0) or 0),
+        "returned_count": int(sync.get("returned_count", 0) or 0),
+        "platform_error_count": int(sync.get("platform_error_count", len(state.get("platform_errors", []) or [])) or 0),
         "external_write_performed": False,
     }
     state.setdefault("sync_history", []).append(history)
@@ -687,6 +779,14 @@ def read_only_sync(base_dir: Path, root: Path, current_project: dict | None, ide
     if metadata:
         metadata["sync_history"] = list(state.get("sync_history", []) or [])[-5:]
         metadata["latest_sync"] = history
+        if isinstance(metadata.get("counts"), dict):
+            metadata["counts"].update(
+                {
+                    "imported_count": history["imported_count"],
+                    "blocked_count": history["blocked_count"],
+                    "platform_error_count": history["platform_error_count"],
+                }
+            )
         write_json(metadata_path, metadata)
     state["summary"] = summarize_state(state)
     state["product_state"] = derive_product_state(state, root, current_project, base_dir)
@@ -1129,6 +1229,12 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
             blockers.append("insufficient_scope")
         if policy.get("app_approval_status") != "approved":
             blockers.append("admin_approval_required")
+    evidence_packet_id = ""
+    if not blockers:
+        try:
+            evidence_packet_id = str(assessment_evidence_packet(base_dir, root, current_project, identity).get("packet_id", "") or "")
+        except Exception:
+            blockers.append("evidence_packet_required")
     submissions_by_student = {
         str(item.get("student_id", "") or ""): item
         for item in (state.get("submissions", {}) or {}).values()
@@ -1183,6 +1289,7 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
         "requires_teacher_confirmation": True,
         "external_write_would_occur": mode in LIVE_WRITE_MODES,
         "external_write_performed": False,
+        "evidence_packet_id": evidence_packet_id,
         "row_count": len(rows),
         "diff_rows": rows,
         "classroom_semantics": {
@@ -1209,6 +1316,8 @@ def confirm_passback(base_dir: Path, root: Path, current_project: dict | None, i
         raise ClassroomStateError("Blocked passback preflights cannot be confirmed.", code="preflight_blocked")
     if not bool(payload.get("confirmed", False)):
         raise ClassroomStateError("Teacher confirmation is required.", code="teacher_confirmation_required")
+    if preflight.get("mode") in LIVE_WRITE_MODES or preflight.get("external_write_would_occur"):
+        raise ClassroomStateError("Live Classroom writes are unavailable in this local pilot slice.", code="external_writes_disabled")
     action = {
         "action_id": short_hash({"preflight_id": preflight_id, "confirmed_at": now_iso()}),
         "preflight_id": preflight_id,

@@ -75,6 +75,19 @@ def test_drive_adapter_downloads_plain_text_and_docx():
     )
     assert "DOCX essay." in docx_adapter.resolve_drive_file("docx-id")["text"]
 
+    html_adapter = GoogleDriveAdapter(
+        "token",
+        transport=Transport(
+            [
+                Response(200, {"id": "html-id", "name": "Essay.html", "mimeType": "text/html"}),
+                Response(200, content=b"<html><head><style>.x{}</style></head><body><p>HTML essay.</p><script>nope()</script></body></html>"),
+            ]
+        ),
+    )
+    html_text = html_adapter.resolve_drive_file("html-id")["text"]
+    assert "HTML essay." in html_text
+    assert "nope" not in html_text
+
 
 def test_drive_adapter_blocks_unsupported_empty_image_external_and_missing_scope():
     for mime_type, blocker in [
@@ -111,3 +124,21 @@ def test_drive_adapter_blocks_unsupported_empty_image_external_and_missing_scope
     )
     assert missing_scope.resolve_classroom_attachment({"driveFile": {"driveFile": {"id": "secret", "title": "Secret"}}})["blockers"] == ["requires_drive_scope"]
     assert GoogleDriveAdapter("token").resolve_classroom_attachment({"link": {"url": "https://example.com"}})["blockers"] == ["external_link_unsupported"]
+    assert GoogleDriveAdapter("token").resolve_classroom_attachment({"youTubeVideo": {"title": "Video"}})["blockers"] == ["youtube_unsupported"]
+
+
+def test_drive_adapter_maps_google_api_failures_to_product_blockers():
+    cases = [
+        (403, {"error": {"message": "Google Drive API has not been used in project before or it is disabled."}}, "drive_api_disabled"),
+        (403, {"error": {"message": "The user does not have sufficient permissions for this file."}}, "permission_denied"),
+        (404, {"error": {"message": "File not found."}}, "resource_not_found"),
+        (429, {"error": {"message": "rateLimitExceeded"}}, "quota_exhausted"),
+        (503, {"error": {"message": "backend error"}}, "google_api_unavailable"),
+        (403, {"error": {"message": "This file is too large to be exported."}}, "file_too_large"),
+    ]
+    for status, payload, blocker in cases:
+        adapter = GoogleDriveAdapter("token", transport=Transport([Response(status, payload)]))
+        attachment = adapter.resolve_classroom_attachment({"driveFile": {"driveFile": {"id": "raw-file-id", "title": "Essay"}}})
+        assert attachment["blockers"] == [blocker]
+        assert attachment["source_file_id_hash"].startswith("drive:")
+        assert "raw-file-id" not in str(attachment)

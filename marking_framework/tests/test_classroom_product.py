@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import server.app as appmod
@@ -141,6 +142,7 @@ def test_classroom_state_tracks_reconciliation_revisions_evidence_and_passback(t
     preflight = classroom.passback_preflight(base_dir, root, project, {}, {"mode": "csv_export"})
     assert preflight["blocked"] is False
     assert preflight["row_count"] == 2
+    assert preflight["evidence_packet_id"]
     action = classroom.confirm_passback(base_dir, root, project, {}, {"preflight_id": preflight["preflight_id"], "confirmed": True})
     assert action["status"] == "prepared_for_export"
     assert action["external_write_performed"] is False
@@ -191,6 +193,46 @@ def test_classroom_read_only_sync_materializes_supported_text_and_blocks_unsuppo
     metadata = json.loads((root / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
     assert metadata["source"] == "google_classroom_read_only_sync"
     assert metadata["imported_submission_count"] == 1
+    assert metadata["assignment"]["course_id_hash"] != "course-1"
+    assert "course_id" not in metadata["assignment"]
+
+
+def test_read_sync_zero_imports_and_mixed_attachments_block_without_materializing(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    project = {"id": "project-a", "name": "Project A"}
+    payload = {
+        "course_id": "course-1",
+        "course_name": "Period 2",
+        "coursework_id": "cw-1",
+        "coursework_title": "Macbeth Essay",
+        "passback_mode": "csv_export",
+        "roster": [{"student_id": "s1", "display_name": "Student One"}],
+        "submissions": [
+            {
+                "submission_id": "sub-1",
+                "student_id": "s1",
+                "display_name": "Student One",
+                "attachments": [
+                    {"attachment_id": "a1", "mime_type": "text/plain", "text": "Supported essay text."},
+                    {"attachment_id": "a2", "type": "external_link", "title": "Portfolio"},
+                ],
+            }
+        ],
+    }
+
+    bundle = classroom.read_only_sync(base_dir, root, project, {}, payload)
+    assert bundle["read_sync"]["imported_submission_count"] == 0
+    assert bundle["read_sync"]["blocked_submission_count"] == 1
+    assert bundle["product_state"] == "blocked"
+    assert "partial_unsupported_attachments" in bundle["blockers"]
+    assert "external_link_unsupported" in bundle["blockers"]
+    assert "zero_imports_no_supported_submissions" in bundle["blockers"]
+    assert not any((root / "inputs" / "submissions").glob("*.txt"))
+    metadata = json.loads((root / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["counts"]["imported_count"] == 0
+    assert metadata["latest_sync"]["platform_error_count"] == 1
 
 
 def test_classroom_finalization_is_reopened_by_later_teacher_revision(tmp_path):
@@ -312,6 +354,28 @@ def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypa
     download = client.get(confirm.json()["download_url"])
     assert download.status_code == 200
     assert "student_display_name" in download.text
+
+
+def test_tampered_live_write_preflight_still_fails_closed_at_confirm(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    project = {"id": "project-a", "name": "Project A"}
+    classroom.link_assignment(base_dir, root, project, {}, classroom_link_payload(passback_mode="draft_grade"))
+    scope_id = review_store.review_scope_id(project)
+    state = classroom.load_state(base_dir, scope_id, project, {})
+    state.setdefault("passback", {}).setdefault("preflights", {})["tampered-live"] = {
+        "preflight_id": "tampered-live",
+        "mode": "draft_grade",
+        "blocked": False,
+        "external_write_would_occur": True,
+        "row_count": 1,
+        "diff_rows": [],
+    }
+    classroom.save_state(base_dir, scope_id, state, root)
+    with pytest.raises(classroom.ClassroomStateError) as exc:
+        classroom.confirm_passback(base_dir, root, project, {}, {"preflight_id": "tampered-live", "confirmed": True})
+    assert exc.value.code == "external_writes_disabled"
 
 
 def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(tmp_path, monkeypatch):

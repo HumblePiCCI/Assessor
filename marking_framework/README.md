@@ -67,6 +67,14 @@ Quick Start
    - For supervised classroom testing, use `docs/TEACHER_PILOT_RUNBOOK.md`; teacher pilot is not production launch and teachers retain final authority.
    - For the Classroom-facing product path, use `docs/GOOGLE_CLASSROOM_HERO_PATH.md`; Google OAuth + Classroom/Drive read sync can import supported submissions, CSV export is the shipped passback path, and live Classroom writes remain fail-closed.
 
+   Local Google Classroom pilot:
+   - follow `docs/GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md`
+   - copy placeholders from `.env.example` into an ignored `.env.local` or export env vars
+   - start the app with `python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000`
+   - click `Connect Google Classroom`, authenticate as the teacher, choose a real low-risk course and published assignment, then sync submissions
+   - add rubric and outline, run `POST /pipeline/v2/run-project-inputs` through the UI, review normal and flagged students, finalize review, then use CSV preflight/export
+   - confirm every Classroom sync/export action reports `external_write_performed: false`
+
 10) Pay-as-you-go job runner (optional)
    - `python3 scripts/payg_job.py --rubric inputs/rubric.md --outline inputs/assignment_outline.md --submissions inputs/submissions --llm --pricing`
    - Minimal API server: `python3 -m uvicorn server.app:app --reload`

@@ -38,6 +38,10 @@ export GOOGLE_OAUTH_CLIENT_SECRETS_FILE=/path/to/client_secret.json
 export GOOGLE_TOKEN_ENCRYPTION_KEY=<local-token-key>
 ```
 
+Use `.env.example` only as a placeholder template. Real `.env`, `.env.local`,
+client secret JSON, tokens, downloaded submissions, raw Google payloads, and
+real export CSVs are ignored local artifacts and must not be committed.
+
 Operational endpoints:
 
 - `GET /google/auth/status`
@@ -45,13 +49,22 @@ Operational endpoints:
 - `GET /google/auth/callback`
 - `POST /google/auth/disconnect`
 
-Status responses are intentionally redacted: connected state, granted scopes,
-expiry, and teacher display/hash only. Raw access tokens, refresh tokens, Google
-credential JSON, and student-private screenshots must not be committed.
+Status responses are intentionally redacted: configured, connected,
+expired/expiring, granted scopes, missing scopes, expiry, teacher display/hash,
+storage posture, and remediation only. Raw access tokens, refresh tokens, ID
+tokens, auth codes, client secrets, Google credential JSON, and student-private
+screenshots must not be committed or returned to the browser.
+
+Before each live Classroom/Drive read, the server refreshes expired or
+near-expiry access tokens. Refresh failure returns a reconnect-required blocker
+and prevents the stale token from being used against Google APIs.
 
 Strict staging/production launch remains blocked unless token storage is
 encrypted with an approved key path or delegated to an approved secret store.
-This slice does not enable live Classroom writes.
+This slice does not enable live Classroom writes. CSV export records
+`external_write_performed: false`; live grade, return, comment, rubric-score,
+attachment modification, create, update, and delete endpoints remain
+unavailable/fail-closed.
 
 ## Observability
 

@@ -3,3 +3,16 @@ bench/runs/
 bench/internet_real_student_samples_8pack/
 outputs/usage_log.jsonl
 logs/llm_failures.jsonl
+.env
+.env.local
+.env.*
+!.env.example
+.pytest_cache/
+projects/
+client_secret*.json
+google-oauth-client*.json
+*oauth*client*.json
+*client_secret*.json
+server/data/google_oauth/
+server/data/classroom/
+server/data/review_store/

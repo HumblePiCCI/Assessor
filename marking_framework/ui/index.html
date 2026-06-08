@@ -103,7 +103,7 @@
               <button id="syncGoogleSubmissions" class="primary">Sync submissions</button>
             </div>
             <details class="advanced-details">
-              <summary>Session/Admin details</summary>
+              <summary>Admin/dev details</summary>
               <div class="classroom-grid">
                 <input id="classroomCourseName" type="text" placeholder="Course name" />
                 <input id="classroomAssignmentTitle" type="text" placeholder="Assignment title" />
@@ -114,32 +114,24 @@
                 <select id="classroomPassbackMode">
                   <option value="no_passback">Dashboard only</option>
                   <option value="csv_export">CSV export</option>
-                  <option value="draft_grade">Classroom draft grades</option>
-                  <option value="assigned_grade">Classroom assigned grades</option>
-                  <option value="return_submission">Grades and return</option>
                 </select>
                 <button id="linkClassroom" class="ghost">Link fixture/local</button>
               </div>
               <div class="project-actions">
                 <button id="readSyncClassroom" class="ghost">Fixture read sync</button>
+                <button id="reconcileClassroom" class="ghost">Reconcile fixture</button>
+                <button id="completeClassroomAudit" class="ghost">Dev mark validation pass</button>
+                <button id="finalizeClassroom" class="ghost">Finalize evidence</button>
               </div>
+              <div class="auth-status">Live Classroom writes are disabled in this slice; CSV export is the only confirmable passback path.</div>
             </details>
+            <div class="auth-status classroom-linked-control is-hidden" id="classroomWriteStatus">No live Classroom write occurred.</div>
             <div class="project-actions classroom-linked-control is-hidden">
-              <button id="reconcileClassroom" class="ghost">Reconcile</button>
-              <button id="completeClassroomAudit" class="ghost">Refresh validation</button>
-              <button id="finalizeClassroom" class="primary">Finalize</button>
-            </div>
-            <div class="auth-row classroom-linked-control is-hidden">
-              <select id="passbackPreflightMode">
-                <option value="csv_export">CSV export</option>
-                <option value="draft_grade">Draft grades</option>
-                <option value="assigned_grade">Assigned grades</option>
-                <option value="return_submission">Return submissions</option>
-              </select>
-              <button id="passbackPreflight" class="ghost">Preflight</button>
-            </div>
-            <div class="project-actions classroom-linked-control is-hidden">
+              <input id="passbackPreflightMode" type="hidden" value="csv_export" />
+              <button id="passbackPreflight" class="ghost">CSV preflight</button>
               <button id="confirmPassback" class="ghost">Confirm CSV export</button>
+            </div>
+            <div class="project-actions classroom-linked-control is-hidden">
               <button id="showEvidencePacket" class="ghost">Evidence packet</button>
             </div>
             <div id="classroomCounts" class="classroom-counts classroom-linked-control is-hidden"></div>
@@ -270,7 +262,7 @@
   </div>
   <script src="grade_adjust.js?v=2"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

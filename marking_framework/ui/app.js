@@ -49,6 +49,17 @@ function setNodeState(node, text, state = 'idle') {
   node.textContent = text;
   node.dataset.state = state;
 }
+function apiErrorMessage(payload, fallback = 'Request failed') {
+  const detail = payload?.detail || payload || {};
+  if (typeof detail === 'string') return detail;
+  const code = detail.code || payload?.code || '';
+  const message = detail.message || payload?.message || fallback;
+  const remedy = detail.remediation || detail.remedy || payload?.remediation || '';
+  return [message, code ? `(${String(code).replaceAll('_', ' ')})` : '', remedy].filter(Boolean).join(' ');
+}
+function blockerLabel(code) {
+  return String(code || '').replaceAll('_', ' ');
+}
 function inferConnectionState(text) {
   const low = String(text || '').toLowerCase();
   if (low.includes('connected')) return 'ready';
@@ -308,6 +319,7 @@ function renderClassroomState(bundle) {
   const preflight = document.getElementById('classroomPreflight');
   const finalizeBtn = document.getElementById('finalizeClassroom');
   const confirmBtn = document.getElementById('confirmPassback');
+  const writeStatus = document.getElementById('classroomWriteStatus');
   if (!status || !counts) return;
   const link = bundle?.classroom_link || {};
   const linkedControls = document.querySelectorAll('.classroom-linked-control');
@@ -318,6 +330,7 @@ function renderClassroomState(bundle) {
     if (preflight) preflight.textContent = '';
     if (finalizeBtn) finalizeBtn.disabled = true;
     if (confirmBtn) confirmBtn.disabled = true;
+    if (writeStatus) writeStatus.textContent = 'No live Classroom write occurred.';
     linkedControls.forEach(node => node.classList.add('is-hidden'));
     return;
   }
@@ -328,18 +341,30 @@ function renderClassroomState(bundle) {
   status.dataset.state = classroomStateTone(bundle.product_state);
   const summary = bundle.summary || {};
   const latestSync = (bundle.sync_history || []).slice(-1)[0] || {};
+  const lastAction = (bundle.passback?.actions || []).slice(-1)[0] || {};
   const cells = [
     ['Roster', summary.roster_count || 0],
     ['Submitted', summary.submitted_count || 0],
     ['Imported', latestSync.imported_count ?? bundle.read_sync?.imported_submission_count ?? 0],
-    ['Scheduled', summary.scheduled_analysis_count || 0],
-    ['Blockers', latestSync.blocker_count ?? summary.attachment_blocker_count ?? 0],
+    ['Blocked', latestSync.blocked_count ?? latestSync.blocker_count ?? summary.blocked_count ?? 0],
+    ['Missing', latestSync.missing_count ?? summary.missing_count ?? 0],
+    ['Reclaimed', latestSync.reclaimed_count ?? summary.reclaimed_count ?? 0],
+    ['Returned', latestSync.returned_count ?? summary.returned_count ?? 0],
+    ['Platform', latestSync.platform_error_count ?? summary.platform_error_count ?? 0],
     ['Human rev', bundle.latest_human_revision_id || 0],
     ['Audit rev', bundle.audit?.audit_revision_id || 0],
   ];
   counts.innerHTML = cells.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
   if (finalizeBtn) finalizeBtn.disabled = bundle.product_state !== 'final_ready';
   if (confirmBtn) confirmBtn.disabled = !(classroomPreflight && !classroomPreflight.blocked);
+  if (writeStatus) {
+    const syncWrite = latestSync.external_write_performed === true;
+    const actionWrite = lastAction.external_write_performed === true;
+    writeStatus.textContent = syncWrite || actionWrite
+      ? 'Live Classroom write detected; stop and inspect audit records.'
+      : 'No live Classroom write occurred. Sync and CSV export record external_write_performed=false.';
+    writeStatus.dataset.state = syncWrite || actionWrite ? 'danger' : 'ready';
+  }
   if (preflight && !classroomPreflight && (!preflight.textContent || preflight.textContent.startsWith('Gates:'))) {
     const gates = bundle.launch_gates || {};
     preflight.textContent = `Gates: teacher review ${gates.teacher_review_finalized ? 'ready' : 'open'} · validation ${gates.full_validation_current ? 'current' : 'pending'} · attachments ${gates.attachment_blockers_clear ? 'clear' : 'blocked'}.`;
@@ -368,7 +393,8 @@ function populateSelect(select, rows, placeholder, valueKey, labelKey) {
   rows.forEach(row => {
     const opt = document.createElement('option');
     opt.value = row[valueKey] || '';
-    opt.textContent = row[labelKey] || row[valueKey] || '';
+    const state = row.coursework_state && String(row.coursework_state).toUpperCase() !== 'PUBLISHED' ? ` · ${row.coursework_state}` : '';
+    opt.textContent = `${row[labelKey] || row[valueKey] || ''}${state}`;
     opt.dataset.row = JSON.stringify(row);
     select.appendChild(opt);
   });
@@ -386,14 +412,24 @@ async function refreshGoogleAuth() {
     googleAuth = await res.json();
     const connectBtn = document.getElementById('googleConnect');
     const disconnectBtn = document.getElementById('googleDisconnect');
-    if (googleAuth.connected) {
-      const who = googleAuth.teacher_display_email || 'Google connected';
-      setGoogleStatus(`${who}. Choose a class.`, 'ready');
+    if (!googleAuth.configured) {
+      setGoogleStatus(`Google OAuth not configured. ${googleAuth.remediation || 'Set local OAuth env vars and restart.'}`, 'warn');
+      if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
+      if (disconnectBtn) disconnectBtn.disabled = true;
+    } else if (googleAuth.connected && (googleAuth.missing_scopes || []).length) {
+      setGoogleStatus(`Missing required scope: ${googleAuth.missing_scopes.map(scope => scope.split('/').pop()).join(', ')}. ${googleAuth.remediation || 'Reconnect Google.'}`, 'danger');
+      if (connectBtn) connectBtn.textContent = 'Reconnect Google';
+      if (disconnectBtn) disconnectBtn.disabled = false;
+    } else if (googleAuth.connected) {
+      const who = googleAuth.teacher_display_email || googleAuth.teacher_identity_hash || 'Google connected';
+      const suffix = googleAuth.expired || googleAuth.expiring ? ' Token refresh will run before the next live read.' : ' Choose a class.';
+      setGoogleStatus(`Connected as ${who}.${suffix}`, 'ready');
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
       await loadGoogleCourses();
     } else {
-      setGoogleStatus(googleAuth.configured ? 'Google not connected.' : 'Google OAuth is not configured on this server.', googleAuth.configured ? 'idle' : 'warn');
+      const reconnect = googleAuth.reconnect_required || googleAuth.expired;
+      setGoogleStatus(reconnect ? `Reconnect required. ${googleAuth.remediation || ''}` : `Google not connected. ${googleAuth.remediation || ''}`, reconnect ? 'danger' : 'idle');
       if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
       if (disconnectBtn) disconnectBtn.disabled = true;
     }
@@ -410,7 +446,7 @@ async function startGoogleConnect() {
       body: JSON.stringify({ redirect_after: location.pathname }),
     });
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok || !payload.authorization_url) throw new Error(payload.detail?.message || 'Google connection is not configured');
+    if (!res.ok || !payload.authorization_url) throw new Error(apiErrorMessage(payload, 'Google connection is not configured'));
     location.href = payload.authorization_url;
   } catch (err) {
     setGoogleStatus(err.message || 'Google connection failed.', 'danger');
@@ -435,7 +471,7 @@ async function loadGoogleCourses() {
   try {
     const res = await fetch(apiUrl('/projects/classroom/google/courses'));
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload.detail?.message || 'Could not load classes');
+    if (!res.ok) throw new Error(apiErrorMessage(payload, 'Could not load classes'));
     googleCourses = payload.courses || [];
     populateSelect(select, googleCourses, 'Choose class', 'course_id', 'course_name');
     if (!googleCourses.length) setGoogleStatus('Google connected, but no active teacher classes were returned.', 'warn');
@@ -453,7 +489,7 @@ async function loadGoogleCoursework() {
   try {
     const res = await fetch(apiUrl(`/projects/classroom/google/courses/${encodeURIComponent(course)}/coursework`));
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload.detail?.message || 'Could not load assignments');
+    if (!res.ok) throw new Error(apiErrorMessage(payload, 'Could not load assignments'));
     googleCoursework = payload.coursework || [];
     populateSelect(courseworkSelect, googleCoursework, 'Choose assignment', 'coursework_id', 'coursework_title');
     setGoogleStatus(googleCoursework.length ? 'Choose an assignment.' : 'No assignments returned for this class.', googleCoursework.length ? 'ready' : 'warn');
@@ -481,7 +517,7 @@ async function selectGoogleAssignment() {
       }),
     });
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload.detail?.message || 'Could not select assignment');
+    if (!res.ok) throw new Error(apiErrorMessage(payload, 'Could not select assignment'));
     classroomPreflight = null;
     renderClassroomState(payload);
     setGoogleStatus('Assignment selected. Sync submissions next.', 'ready');
@@ -507,11 +543,15 @@ async function syncGoogleSubmissions() {
       }),
     });
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload.detail?.message || 'Google sync failed');
+    if (!res.ok) throw new Error(apiErrorMessage(payload, 'Google sync failed'));
     classroomPreflight = null;
     renderClassroomState(payload);
     const latest = (payload.sync_history || []).slice(-1)[0] || {};
-    setGoogleStatus(`Synced ${latest.imported_count || 0} submissions; ${latest.blocker_count || 0} blocked.`, latest.blocker_count ? 'warn' : 'ready');
+    const imported = latest.imported_count || 0;
+    const blocked = latest.blocked_count ?? latest.blocker_count ?? 0;
+    const platformErrors = latest.platform_error_count || 0;
+    const tone = imported > 0 && !blocked && !platformErrors ? 'ready' : (imported > 0 ? 'warn' : 'danger');
+    setGoogleStatus(`Sync imported ${imported}; blocked ${blocked}; platform errors ${platformErrors}.`, tone);
     renderExceptions();
     updateWorkflowState();
   } catch (err) {
@@ -648,7 +688,8 @@ async function readSyncClassroom() {
     if (status) {
       const imported = bundle.read_sync?.imported_submission_count || 0;
       const blocked = bundle.read_sync?.blocked_submission_count || 0;
-      status.textContent = `Read sync imported ${imported}; blockers ${blocked}.`;
+      const platformErrors = bundle.read_sync?.platform_error_count || 0;
+      status.textContent = `Read sync imported ${imported}; blockers ${blocked}; platform errors ${platformErrors}.`;
     }
   } catch (err) {
     if (status) status.textContent = `Classroom read sync failed: ${err.message || 'unknown error'}`;
@@ -694,8 +735,8 @@ function renderPreflight(preflight) {
   }
   const blockers = preflight.blockers || [];
   node.textContent = preflight.blocked
-    ? `Preflight blocked: ${blockers.map(item => item.replaceAll('_', ' ')).join(' · ')}`
-    : `Preflight ready: ${preflight.mode.replaceAll('_', ' ')} · ${preflight.row_count} row${preflight.row_count === 1 ? '' : 's'} · confirmation required.`;
+    ? `Preflight blocked: ${blockers.map(blockerLabel).join(' · ')}`
+    : `CSV preflight ready: ${preflight.row_count} row${preflight.row_count === 1 ? '' : 's'} · evidence ${preflight.evidence_packet_id || 'ready'} · no live write.`;
   if (confirmBtn) confirmBtn.disabled = preflight.blocked;
 }
 async function preflightPassback() {
@@ -709,8 +750,7 @@ async function preflightPassback() {
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const detail = payload.detail?.message || payload.detail || 'preflight failed';
-      throw new Error(detail);
+      throw new Error(apiErrorMessage(payload, 'preflight failed'));
     }
     renderPreflight(payload);
   } catch (err) {
@@ -727,10 +767,11 @@ async function confirmPassback() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preflight_id: classroomPreflight.preflight_id, confirmed: true }),
     });
-    if (!res.ok) throw new Error('confirmation failed');
-    const action = await res.json();
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(apiErrorMessage(payload, 'confirmation failed'));
+    const action = payload;
     if (node) {
-      node.textContent = `CSV export ready: ${action.row_count} row${action.row_count === 1 ? '' : 's'}${action.export_artifact?.sha256 ? ` · ${action.export_artifact.sha256.slice(0, 12)}` : ''}.`;
+      node.textContent = `CSV export ready: ${action.row_count} row${action.row_count === 1 ? '' : 's'}${action.export_artifact?.sha256 ? ` · ${action.export_artifact.sha256.slice(0, 12)}` : ''} · external_write_performed=false.`;
       if (action.download_url) {
         const link = document.createElement('a');
         link.href = apiUrl(action.download_url);

@@ -78,3 +78,6 @@ permission-blocked, OCR-required, or external-link submissions are blockers and
 are not materialized as zero-text essays. CSV export is available only after the
 same review/current-validation/clear-blocker/evidence/confirmation sequence.
 Live Classroom write modes stay fail-closed in this slice.
+Mixed supported/unsupported attachment submissions are blocked in the local
+pilot rather than partially imported. A sync with zero imported submissions is a
+blocked product state, even if the Google read itself returned successfully.

@@ -1,9 +1,10 @@
 # Teacher Pilot Runbook
 
 Status
-- State: ready on merged `main`
+- State: local read-only Classroom pilot ready after OAuth setup; production
+  launch still blocked until the launch contract passes
 - Scope: controlled teacher pilot, not production launch
-- Last updated: 2026-04-27
+- Last updated: 2026-06-08
 
 ## Purpose
 
@@ -58,6 +59,10 @@ Before the first teacher cohort:
   from the pilot output.
 - Live Classroom writes are disabled. CSV export is the only shipped passback
   path for Classroom-linked work in this slice.
+- For a real teacher-owned Classroom pilot, complete
+  `GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md` first and keep OAuth client JSON,
+  tokens, downloaded submissions, screenshots, raw Google payloads, and real
+  generated CSVs out of git.
 - Any retained aggregate-learning record must pass the engagement and collection
   policy gates already implemented in `server/review_store.py`.
 
@@ -101,11 +106,15 @@ Recommended cohort shape:
 
    Or, for the Google Classroom read pilot:
 
+   - configure local Google OAuth
    - connect Google Classroom
-   - choose a class
-   - choose an assignment
+   - choose a live class
+   - choose a published assignment
    - sync submissions
-   - confirm imported/blocked counts
+   - confirm roster/submitted/imported/blocked/missing/reclaimed/returned and
+     platform-error counts
+   - resolve unsupported/empty/permission/no-OCR/external-link blockers instead
+     of treating them as zero-text essays
    - add rubric and assignment outline
 
 5. Run the queue-backed pipeline. The teacher-review dashboard should appear
@@ -156,6 +165,8 @@ Keep the project and job identifiers with these artifacts:
 - `inputs/class_metadata.json` when Classroom import is used
 - `outputs/classroom_state.json` when Classroom import is used
 - review export CSV artifact hash when CSV export is confirmed
+- explicit `external_write_performed: false` evidence when Classroom import or
+  CSV export is used
 
 When present, also capture:
 

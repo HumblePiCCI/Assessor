@@ -91,6 +91,10 @@ Classroom/Drive read sync materializes supported attachments into
 `inputs/submissions` and records source counts in `inputs/class_metadata.json`.
 `POST /pipeline/v2/run-project-inputs` then submits those server-side inputs to
 the same queue path as uploaded files; no separate Classroom grading lane exists.
+Local OAuth setup for an owner-run Classroom pilot is documented in
+`GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md`. That pilot remains read-only:
+unsupported or mixed attachments are blockers, zero imports are not success, and
+CSV export is the only confirmable passback path.
 
 Background validation then runs:
 

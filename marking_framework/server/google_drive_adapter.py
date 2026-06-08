@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -33,6 +34,34 @@ DOCUMENT_MIME_SUFFIXES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/msword": ".doc",
 }
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs):
+        if tag.lower() in {"script", "style", "noscript"}:
+            self._skip_depth += 1
+        if tag.lower() in {"p", "br", "div", "li", "tr", "h1", "h2", "h3", "h4"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str):
+        if tag.lower() in {"script", "style", "noscript"} and self._skip_depth:
+            self._skip_depth -= 1
+        if tag.lower() in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str):
+        if not self._skip_depth:
+            text = str(data or "").strip()
+            if text:
+                self.parts.append(text)
+
+    def text(self) -> str:
+        return "\n".join(part.strip() for part in self.parts if part.strip())
 
 
 class GoogleDriveError(ValueError):
@@ -94,15 +123,31 @@ def google_error_code(response: Any, *, default: str = "drive_api_error") -> str
         reason = str(errors[0].get("reason", "") or "")
     message = str(error.get("message", "") or payload.get("error_description", "") or "")
     combined = f"{reason} {message}".lower()
+    if status == 401:
+        if "expired" in combined or "invalid" in combined:
+            return "oauth_token_expired"
+        return "missing_oauth_grant"
+    if "accessnotconfigured" in combined or "api has not been used" in combined or "disabled" in combined:
+        return "drive_api_disabled"
     if status in {401, 403} and ("insufficient" in combined or "scope" in combined):
         return "requires_drive_scope"
-    if status in {401, 403}:
-        return "insufficient_scope"
+    if "file too large" in combined or "export size" in combined or "10 mb" in combined or "too large" in combined:
+        return "file_too_large"
+    if status == 403:
+        return "permission_denied"
     if status == 404:
         return "resource_not_found"
-    if status in {429, 500, 503} or "quota" in combined or "ratelimit" in combined or "rate limit" in combined:
+    if status == 429 or "quota" in combined or "ratelimit" in combined or "rate limit" in combined:
         return "quota_exhausted"
+    if status in {500, 502, 503, 504}:
+        return "google_api_unavailable"
     return default
+
+
+def html_to_text(raw: bytes) -> str:
+    parser = _HTMLTextExtractor()
+    parser.feed(raw.decode("utf-8", errors="ignore"))
+    return parser.text()
 
 
 class GoogleDriveAdapter:
@@ -228,6 +273,8 @@ class GoogleDriveAdapter:
                     path = Path(tmp) / f"attachment{suffix}"
                     path.write_bytes(raw)
                     text, _details = extract_document_text(path)
+            elif mime_type == "text/html":
+                text = html_to_text(raw)
             else:
                 text = raw.decode("utf-8", errors="ignore")
             return self._text_attachment(file_id=file_id, title=title, mime_type=mime_type, raw=raw, text=text, metadata=metadata)
@@ -275,5 +322,5 @@ class GoogleDriveAdapter:
             return self._blocked(title=str(form.get("title", "") or "Google Form"), mime_type="application/vnd.google-apps.form", blocker="forms_unsupported")
         if raw.get("youTubeVideo"):
             video = raw.get("youTubeVideo", {}) if isinstance(raw.get("youTubeVideo"), dict) else {}
-            return self._blocked(title=str(video.get("title", "") or "YouTube video"), blocker="unsupported_attachment_type")
+            return self._blocked(title=str(video.get("title", "") or "YouTube video"), blocker="youtube_unsupported")
         return self._blocked(title="Attachment", blocker="empty_attachment")

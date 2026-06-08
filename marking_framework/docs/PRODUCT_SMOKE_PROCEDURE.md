@@ -2,13 +2,14 @@
 
 Status: human product smoke for the teacher-facing assessment workspace.
 
-Last reviewed: 2026-05-29
+Last reviewed: 2026-06-08
 
 Related docs:
 
 - [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md)
 - [WORKFLOW.md](./WORKFLOW.md)
 - [LIVE_COHORT_RUNTIME.md](./LIVE_COHORT_RUNTIME.md)
+- [GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md](./GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md)
 
 ## Purpose
 
@@ -125,24 +126,47 @@ Product judgment:
 - A teacher should not need to navigate away from the first screen to prepare a
   run.
 
-### 3a. Optional Google Classroom Read Sync
+### 3a. Google Classroom Local Read Sync
 
-Use a low-risk test Classroom course only. Do not use real student-private data
-for committed screenshots or fixtures.
+Use a low-risk teacher-owned Classroom course only. Do not use real
+student-private data for committed screenshots, fixtures, raw payloads, or
+generated CSVs.
+
+Before the UI smoke, complete
+`docs/GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md`:
+
+- create or choose a Google Cloud project
+- enable Google Classroom API and Google Drive API
+- configure OAuth consent as Workspace Internal or External Testing with the
+  owner teacher as a test user
+- create a Web OAuth client
+- add `http://127.0.0.1:8000/google/auth/callback` as an authorized redirect
+  URI, and optionally `http://localhost:8000/google/auth/callback`
+- set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
+  `GOOGLE_OAUTH_REDIRECT_URI` in an ignored local env file or shell
+- keep client secret JSON outside git or in an ignored local path
 
 Expected:
 
 - `Connect Google Classroom` opens the Google OAuth flow when the server has
   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
   `GOOGLE_OAUTH_REDIRECT_URI`
-- after connection, the app shows connected/not connected in plain language
-- the teacher can choose a class and assignment from dropdowns
+- after connection, the app shows not configured, not connected, connected as
+  teacher identity, reconnect required, missing scope, admin approval required,
+  or API-disabled states in plain language
+- the teacher can choose a class and published assignment from dropdowns
 - `Sync submissions` imports supported attachments into server-side
   `inputs/submissions`
-- counts show roster, submitted, imported, and blocked submissions
+- counts show roster, submitted, imported, blocked, missing, reclaimed,
+  returned, and platform-error counts
 - blockers appear in Exceptions with remedies
+- zero imported submissions is a blocked/warn state, not green success
+- unsupported, empty, permission-denied, no-OCR, external-link, missing-scope,
+  quota, and API-disabled cases are blockers and are not graded as zero-text
+  essays
 - the run button becomes available when runtime, rubric, outline, and either
   local uploads or synced Classroom submissions are ready
+- the Classroom card states that no live Classroom write occurred
 
 Fail if raw OAuth tokens, raw Google file IDs, stack traces, or queue internals
 are exposed in the routine path.
@@ -376,26 +400,37 @@ Fail if the product feels powerful but cognitively expensive.
 ## Google Classroom Readiness Smoke
 
 This is not a live Classroom write/passback smoke. It verifies the read-only
-pilot path and the external Google setup posture for a future real adapter.
+pilot path and the external Google setup posture.
 
 Expected current setup:
 
 - Google Cloud project exists for the pilot
 - Google Classroom API is enabled
 - Google Drive API is enabled
-- OAuth consent is in Testing
-- the teacher account is listed as a test user
+- OAuth consent is Internal for a Workspace domain where possible, otherwise
+  External Testing
+- the teacher account is listed as a test user when External Testing is used
 - read-only Classroom and Drive scopes are configured
 - a Web OAuth client exists
-- localhost redirect URIs are configured for the local product ports
+- exact redirect URI is configured:
+  - `http://127.0.0.1:8000/google/auth/callback`
+  - optionally `http://localhost:8000/google/auth/callback`
 - credentials JSON is stored outside git
-- the in-app `Read sync` control can import fixture/local read-only submissions
-  into `inputs/submissions`
+- the in-app `Connect Google Classroom` flow succeeds for the owner teacher
+- live courses and published assignments are listed from the connected account
+- `Sync submissions` imports supported written submissions into
+  `inputs/submissions`
 - unsupported links, Forms/Slides/Sheets/drawings, image/OCR gaps, missing Drive
-  scope, and empty extraction become blockers
+  scope, permission denial, API-disabled, quota, file-too-large, and empty
+  extraction become blockers
+- `POST /pipeline/v2/run-project-inputs` can score Classroom-imported
+  submissions without local essay re-upload
+- CSV preflight/export is available only after finalized teacher review,
+  current validation, clear blockers, generated evidence, and explicit request
 
 Do not commit the credentials JSON or paste the client secret into docs, chat,
-or source files.
+source files. Do not commit downloaded submissions, private screenshots, raw
+Google payloads, real generated CSVs, or real student names in smoke reports.
 
 Pass criteria:
 
@@ -405,6 +440,7 @@ Pass criteria:
 - the pilot still uses read-only posture until passback is explicitly built and
   reviewed
 - no live Classroom write occurs
+- evidence/export actions record `external_write_performed: false`
 
 ## Operator Checks After The Product Smoke
 
