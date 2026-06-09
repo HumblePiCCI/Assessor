@@ -81,3 +81,9 @@ Live Classroom write modes stay fail-closed in this slice.
 Mixed supported/unsupported attachment submissions are blocked in the local
 pilot rather than partially imported. A sync with zero imported submissions is a
 blocked product state, even if the Google read itself returned successfully.
+Classroom imports are manifest-bound and authoritative for the latest selected
+assignment; stale files from older, failed, or zero-import syncs are not runnable
+through `run-project-inputs`. CSV preflight confirmation is also freshness-bound:
+any teacher review edit, validation refresh, Classroom resync, blocker change,
+evidence artifact change, export-mode change, or row-hash change requires a new
+CSV preflight before export can be confirmed.

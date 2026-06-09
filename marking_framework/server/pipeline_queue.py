@@ -178,7 +178,7 @@ def _collect_input_files(root: Path, rubric_path: Path, outline_path: Path, subm
         for item in sorted(submissions_dir.glob("*")):
             if not item.is_file():
                 continue
-            submissions.append({"path": f"inputs/submissions/{item.name}", "sha256": _file_sha256(item)})
+            submissions.append({"path": _root_relative(item, root), "sha256": _file_sha256(item)})
     class_metadata_path = root / CLASS_METADATA_ARTIFACT
     return {
         "rubric": _file_manifest(rubric_path, f"inputs/{rubric_path.name}"),

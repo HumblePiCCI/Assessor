@@ -60,13 +60,20 @@ write-looking controls are not part of the routine teacher path.
 
 `read-sync` is the ingestion seam. It accepts roster/submission snapshots from
 either the fixture/local adapter or the live Google adapter, materializes
-supported extracted text into `inputs/submissions`, writes Classroom import
-metadata to `inputs/class_metadata.json`, and records unsupported attachments
-as blockers. The latest sync records `roster_count`, `submitted_count`,
-`imported_count`, `blocked_count`, `missing_count`, `reclaimed_count`,
-`returned_count`, `platform_error_count`, and `external_write_performed: false`.
-Zero-import syncs are blocked with a remedy instead of being treated as success.
-CI uses mocked adapters only and does not call Google.
+supported extracted text into the Classroom-owned
+`inputs/submissions/classroom_import/` directory, writes
+`inputs/classroom_import_manifest.json`, writes Classroom import metadata to
+`inputs/class_metadata.json`, and records unsupported attachments as blockers.
+The latest sync records `roster_count`, `submitted_count`, `imported_count`,
+`blocked_count`, `missing_count`, `reclaimed_count`, `returned_count`,
+`platform_error_count`, the current import manifest hash, and
+`external_write_performed: false`. Sync is authoritative for the selected
+assignment: a different assignment, zero-import sync, OAuth/Google platform
+failure, or missing current manifest clears prior Classroom-owned imports so
+`POST /pipeline/v2/run-project-inputs` cannot assess stale work. Teacher
+uploads outside the Classroom import area are not deleted by Classroom sync.
+Zero-import syncs are blocked with a remedy instead of being treated as
+success. CI uses mocked adapters only and does not call Google.
 
 OAuth configuration is read only from environment/local config:
 
@@ -153,6 +160,15 @@ is absent. CSV export is the shipped passback path for this slice.
 Confirming CSV export records `external_write_performed: false`. The UI states
 that no live Classroom write occurred, and backend confirmation rejects
 tampered live-write preflights even if a caller bypasses the routine UI.
+
+CSV preflight confirmation is freshness-bound. A preflight stores a hash over
+the latest human revision, finalized review payload, audit gate, current
+Classroom sync manifest, attachment/platform blockers, evidence packet,
+export mode, row count, and row hash. Confirmation recomputes that state before
+writing a CSV and rejects stale preflights with
+`preflight_stale_rebuild_required`. Rebuild CSV preflight after any teacher
+edit, validation refresh, Classroom resync, blocker change, evidence artifact
+change, or export-row change.
 
 ## Evidence Packet
 

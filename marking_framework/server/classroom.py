@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import csv
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ SCHEMA_VERSION = 2
 PASSBACK_ORDER = ["no_passback", "csv_export", "draft_grade", "assigned_grade", "return_submission"]
 PASSBACK_MODES = set(PASSBACK_ORDER)
 LIVE_WRITE_MODES = {"draft_grade", "assigned_grade", "return_submission"}
+CLASSROOM_IMPORT_DIRNAME = "classroom_import"
+CLASSROOM_IMPORT_MANIFEST = "classroom_import_manifest.json"
+CLASSROOM_IMPORT_READY_ERROR = "No current Classroom imports are ready to assess. Resolve sync blockers and resync."
 TEXT_MIME_TYPES = {
     "text/plain",
     "text/markdown",
@@ -63,8 +67,10 @@ CLASSROOM_REMEDIES = {
     "no_extractable_text": "Open the attachment and confirm it contains readable text, then resync.",
     "empty_attachment": "Ask the student to resubmit a non-empty document, then resync.",
     "zero_imports_no_supported_submissions": "No supported written submissions were imported. Resolve blockers or choose another written assignment.",
+    "no_current_classroom_imports": "Resolve Classroom sync blockers and resync before running assessment.",
     "evidence_packet_required": "Generate the evidence packet before confirming CSV export.",
     "external_writes_disabled": "Use CSV export for this slice; live Classroom writes are deliberately disabled.",
+    "preflight_stale_rebuild_required": "Review or validation changed after this preflight. Rebuild CSV preflight before export.",
 }
 
 
@@ -618,9 +624,108 @@ def safe_submission_filename(submission: dict) -> str:
     return f"{cleaned or short_hash(submission)}.txt"
 
 
+def classroom_import_dir(root: Path) -> Path:
+    return Path(root) / "inputs" / "submissions" / CLASSROOM_IMPORT_DIRNAME
+
+
+def classroom_import_manifest_path(root: Path) -> Path:
+    return Path(root) / "inputs" / CLASSROOM_IMPORT_MANIFEST
+
+
+def root_relative(root: Path, path: Path) -> str:
+    try:
+        return str(Path(path).resolve().relative_to(Path(root).resolve()))
+    except Exception:
+        return str(path)
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_classroom_import_manifest(root: Path) -> dict:
+    manifest = load_json(classroom_import_manifest_path(root))
+    return manifest if manifest.get("source") == "google_classroom_read_only_sync" else {}
+
+
+def _previous_classroom_import_paths(root: Path) -> list[Path]:
+    inputs = Path(root) / "inputs"
+    submissions = inputs / "submissions"
+    paths: list[Path] = []
+    for source in (load_classroom_import_manifest(root), load_json(inputs / "class_metadata.json")):
+        for row in source.get("files", []) or source.get("imported_submissions", []) or []:
+            if not isinstance(row, dict):
+                continue
+            rel_path = str(row.get("path", "") or "").strip()
+            if not rel_path:
+                continue
+            candidate = (Path(root) / rel_path).resolve()
+            try:
+                candidate.relative_to(submissions.resolve())
+            except Exception:
+                continue
+            paths.append(candidate)
+    return sorted(set(paths))
+
+
+def _clear_previous_classroom_imports(root: Path) -> None:
+    manifest_path = classroom_import_manifest_path(root)
+    if manifest_path.exists():
+        manifest_path.unlink()
+    import_dir = classroom_import_dir(root)
+    if import_dir.exists():
+        shutil.rmtree(import_dir)
+    for path in _previous_classroom_import_paths(root):
+        if path.exists() and path.is_file():
+            path.unlink()
+
+
+def _current_import_files_ready(root: Path, manifest: dict) -> bool:
+    if not manifest or not bool(manifest.get("current_import_ready", False)):
+        return False
+    if int(manifest.get("imported_count", 0) or 0) <= 0:
+        return False
+    if int(manifest.get("platform_error_count", 0) or 0) > 0:
+        return False
+    import_root = classroom_import_dir(root).resolve()
+    files = manifest.get("files", []) or []
+    if len(files) != int(manifest.get("imported_count", 0) or 0):
+        return False
+    for row in files:
+        if not isinstance(row, dict):
+            return False
+        rel_path = str(row.get("path", "") or "").strip()
+        if not rel_path:
+            return False
+        path = (Path(root) / rel_path).resolve()
+        try:
+            path.relative_to(import_root)
+        except Exception:
+            return False
+        if not path.exists() or not path.is_file():
+            return False
+        expected = str(row.get("sha256", "") or "")
+        if expected and _file_hash(path) != expected:
+            return False
+    return True
+
+
+def classroom_imports_ready(root: Path) -> bool:
+    return _current_import_files_ready(root, load_classroom_import_manifest(root))
+
+
+def classroom_imports_run_directory(root: Path) -> Path:
+    return classroom_import_dir(root)
+
+
 def materialize_read_only_submissions(root: Path, state: dict) -> dict:
     inputs = root / "inputs"
     submissions_dir = inputs / "submissions"
+    final_import_dir = classroom_import_dir(root)
     submissions_dir.mkdir(parents=True, exist_ok=True)
     imported = []
     blockers = []
@@ -641,18 +746,53 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
             )
             continue
         filename = safe_submission_filename(submission)
-        path = submissions_dir / filename
-        path.write_text(text.strip() + "\n", encoding="utf-8")
+        path = final_import_dir / filename
         imported.append(
             {
                 "submission_id": submission.get("submission_id", ""),
                 "student_id": submission.get("student_id", ""),
-                "path": f"inputs/submissions/{filename}",
+                "path": f"inputs/submissions/{CLASSROOM_IMPORT_DIRNAME}/{filename}",
                 "text_hash": submission.get("text_hash", ""),
+                "text": text.strip(),
             }
         )
         submission["analysis_state"] = "scheduled"
+    if len(imported) == 0:
+        zero_import_error = {
+            "code": "zero_imports_no_supported_submissions",
+            "message": "No supported written submissions were imported from this Classroom assignment.",
+        }
+        existing_codes = {
+            str(item.get("code", "") or "")
+            for item in state.get("platform_errors", []) or []
+            if isinstance(item, dict)
+        }
+        if zero_import_error["code"] not in existing_codes:
+            state.setdefault("platform_errors", []).append(zero_import_error)
+    platform_error_count = len(state.get("platform_errors", []) or [])
     link = state.get("classroom_link", {}) if isinstance(state.get("classroom_link"), dict) else {}
+    snapshot_hash = str(state.get("reconciliation", {}).get("latest_snapshot_hash", "") or "")
+    sync_id = short_hash(
+        {
+            "snapshot_hash": snapshot_hash,
+            "course_id_hash": short_hash({"course_id": link.get("course_id", "")}),
+            "coursework_id_hash": short_hash({"coursework_id": link.get("coursework_id", "")}),
+            "files": [{key: row.get(key, "") for key in ("submission_id", "student_id", "path", "text_hash")} for row in imported],
+            "blockers": blockers,
+            "platform_errors": state.get("platform_errors", []) or [],
+        }
+    )
+    tmp_dir = submissions_dir / f".{CLASSROOM_IMPORT_DIRNAME}_tmp_{sync_id}"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    manifest_files = []
+    for row in imported:
+        filename = Path(str(row["path"])).name
+        tmp_path = tmp_dir / filename
+        tmp_path.write_text(str(row.pop("text", "")).strip() + "\n", encoding="utf-8")
+        sha256 = _file_hash(tmp_path)
+        manifest_files.append({**row, "sha256": sha256})
     metadata = {
         "source": "google_classroom_read_only_sync",
         "generated_at": now_iso(),
@@ -672,14 +812,46 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
             "missing_count": int(summary.get("missing_count", 0) or 0),
             "reclaimed_count": int(summary.get("reclaimed_count", 0) or 0),
             "returned_count": int(summary.get("returned_count", 0) or 0),
-            "platform_error_count": len(state.get("platform_errors", []) or []),
+            "platform_error_count": platform_error_count,
         },
         "imported_submission_count": len(imported),
         "attachment_blocker_count": len(blockers),
         "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
         "sync_history": list(state.get("sync_history", []) or [])[-5:],
+        "classroom_import_manifest": f"inputs/{CLASSROOM_IMPORT_MANIFEST}",
+        "current_import_ready": bool(len(imported) > 0 and platform_error_count == 0),
+        "sync_id": sync_id,
+        "snapshot_hash": snapshot_hash,
+        "imported_submissions": manifest_files,
         "external_write_performed": False,
     }
+    manifest = {
+        "schema_version": 1,
+        "source": "google_classroom_read_only_sync",
+        "generated_at": metadata["generated_at"],
+        "sync_id": sync_id,
+        "snapshot_hash": snapshot_hash,
+        "course_id_hash": metadata["assignment"]["course_id_hash"],
+        "coursework_id_hash": metadata["assignment"]["coursework_id_hash"],
+        "import_dir": f"inputs/submissions/{CLASSROOM_IMPORT_DIRNAME}",
+        "imported_count": len(imported),
+        "blocked_count": len(blockers),
+        "platform_error_count": platform_error_count,
+        "external_write_performed": False,
+        "current_import_ready": bool(len(imported) > 0 and platform_error_count == 0),
+        "files": manifest_files,
+        "text_hashes": {
+            str(row.get("submission_id", "") or row.get("student_id", "")): row.get("text_hash", "")
+            for row in manifest_files
+        },
+    }
+    manifest["manifest_hash"] = canonical_hash(manifest)
+    metadata["classroom_import_manifest_hash"] = manifest["manifest_hash"]
+    metadata["current_submission_paths"] = [row["path"] for row in manifest_files]
+    _clear_previous_classroom_imports(root)
+    final_import_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir.replace(final_import_dir)
+    write_json(classroom_import_manifest_path(root), manifest)
     write_json(inputs / "class_metadata.json", metadata)
     return {
         "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
@@ -693,8 +865,12 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
         "missing_count": int(summary.get("missing_count", 0) or 0),
         "reclaimed_count": int(summary.get("reclaimed_count", 0) or 0),
         "returned_count": int(summary.get("returned_count", 0) or 0),
-        "platform_error_count": len(state.get("platform_errors", []) or []),
-        "imported_submissions": imported,
+        "platform_error_count": platform_error_count,
+        "sync_id": sync_id,
+        "snapshot_hash": snapshot_hash,
+        "manifest_hash": manifest["manifest_hash"],
+        "current_import_ready": manifest["current_import_ready"],
+        "imported_submissions": manifest_files,
         "blockers": blockers,
     }
 
@@ -743,23 +919,13 @@ def read_only_sync(base_dir: Path, root: Path, current_project: dict | None, ide
             "remediation": str(safe_auth.get("remediation", "") or ""),
         }
     sync = materialize_read_only_submissions(root, state)
-    if int(sync.get("imported_count", sync.get("imported_submission_count", 0)) or 0) == 0:
-        zero_import_error = {
-            "code": "zero_imports_no_supported_submissions",
-            "message": "No supported written submissions were imported from this Classroom assignment.",
-        }
-        existing_codes = {
-            str(item.get("code", "") or "")
-            for item in state.get("platform_errors", []) or []
-            if isinstance(item, dict)
-        }
-        if zero_import_error["code"] not in existing_codes:
-            state.setdefault("platform_errors", []).append(zero_import_error)
-        sync["platform_error_count"] = len(state.get("platform_errors", []) or [])
     history = {
         "timestamp": now_iso(),
         "adapter": sync.get("adapter", "fixture_local"),
         "snapshot_hash": canonical_hash(snapshot),
+        "sync_id": sync.get("sync_id", ""),
+        "classroom_import_manifest_hash": sync.get("manifest_hash", ""),
+        "current_import_ready": bool(sync.get("current_import_ready", False)),
         "roster_count": int(sync.get("roster_count", len(snapshot.get("roster", []) or [])) or 0),
         "submitted_count": int(sync.get("submitted_count", 0) or 0),
         "submission_count": len(snapshot.get("submissions", []) or []),
@@ -1127,7 +1293,11 @@ def assessment_evidence_packet(base_dir: Path, root: Path, current_project: dict
         },
         "artifact_hashes": artifact_hashes(root),
     }
-    packet["packet_id"] = short_hash(packet)
+    stable_packet = json.loads(json.dumps(packet, ensure_ascii=True))
+    stable_packet.pop("generated_at", None)
+    if isinstance(stable_packet.get("artifact_hashes"), dict):
+        stable_packet["artifact_hashes"].pop("classroom_state", None)
+    packet["packet_id"] = short_hash(stable_packet)
     write_json(root / "outputs" / "assessment_evidence_packet.json", packet)
     return packet
 
@@ -1200,41 +1370,7 @@ def finalize_by_teacher(base_dir: Path, root: Path, current_project: dict | None
     return state_bundle(base_dir, root, current_project, identity)
 
 
-def passback_preflight(base_dir: Path, root: Path, current_project: dict | None, identity: dict | None, payload: dict) -> dict:
-    scope_id = review_store.review_scope_id(current_project)
-    state = load_state(base_dir, scope_id, current_project, identity)
-    require_link(state)
-    mode = normalize_passback_mode(payload.get("mode"))
-    if mode == "no_passback":
-        raise ClassroomStateError("no_passback has no export action.", code="invalid_passback_mode")
-    configured_mode = state.get("passback", {}).get("mode", "no_passback")
-    if mode not in allowed_passback_modes(configured_mode):
-        raise ClassroomStateError(f"{mode} is not allowed by the linked assignment policy.", code="passback_mode_not_allowed")
-    state["summary"] = summarize_state(state)
-    state["product_state"] = derive_product_state(state, root, current_project, base_dir)
-    review_bundle = review_store.load_review_bundle(base_dir, root, current_project)
-    latest_review = review_bundle.get("latest_review", {})
-    blockers = unresolved_blockers(state)
-    if latest_review.get("review_state") != "final" or not latest_review.get("review_id"):
-        blockers.append("finalized_teacher_review_required")
-    if not audit_is_current(state):
-        blockers.append("full_validation_current_required")
-    if state.get("product_state") not in {"final_ready", "finalized_by_teacher"}:
-        blockers.append("final_ready_required")
-    policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
-    if mode in LIVE_WRITE_MODES:
-        blockers.append("external_writes_disabled")
-        blockers.append("classroom_write_adapter_not_configured")
-        if policy.get("oauth_scope_posture") not in {"write_ready", "classroom_write_ready", "connected_with_write_scopes"}:
-            blockers.append("insufficient_scope")
-        if policy.get("app_approval_status") != "approved":
-            blockers.append("admin_approval_required")
-    evidence_packet_id = ""
-    if not blockers:
-        try:
-            evidence_packet_id = str(assessment_evidence_packet(base_dir, root, current_project, identity).get("packet_id", "") or "")
-        except Exception:
-            blockers.append("evidence_packet_required")
+def passback_rows(state: dict, latest_review: dict, mode: str) -> list[dict]:
     submissions_by_student = {
         str(item.get("student_id", "") or ""): item
         for item in (state.get("submissions", {}) or {}).values()
@@ -1280,6 +1416,130 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
                 "classroom_state": submission.get("classroom_state", ""),
             }
         )
+    return rows
+
+
+def passback_blockers(state: dict, latest_review: dict, mode: str) -> list[str]:
+    blockers = unresolved_blockers(state)
+    if latest_review.get("review_state") != "final" or not latest_review.get("review_id"):
+        blockers.append("finalized_teacher_review_required")
+    if not audit_is_current(state):
+        blockers.append("full_validation_current_required")
+    if state.get("product_state") not in {"final_ready", "finalized_by_teacher"}:
+        blockers.append("final_ready_required")
+    configured_mode = state.get("passback", {}).get("mode", "no_passback")
+    if mode not in allowed_passback_modes(configured_mode):
+        blockers.append("passback_mode_not_allowed")
+    policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
+    if mode in LIVE_WRITE_MODES:
+        blockers.append("external_writes_disabled")
+        blockers.append("classroom_write_adapter_not_configured")
+        if policy.get("oauth_scope_posture") not in {"write_ready", "classroom_write_ready", "connected_with_write_scopes"}:
+            blockers.append("insufficient_scope")
+        if policy.get("app_approval_status") != "approved":
+            blockers.append("admin_approval_required")
+    return sorted(set(blockers))
+
+
+def latest_final_review_fingerprint(latest_review: dict) -> dict:
+    return {
+        "review_id": str(latest_review.get("review_id", "") or ""),
+        "saved_at": str(latest_review.get("saved_at", "") or ""),
+        "review_state": str(latest_review.get("review_state", "") or ""),
+        "payload_hash": canonical_hash(latest_review) if latest_review else "",
+    }
+
+
+def latest_sync_fingerprint(root: Path, state: dict) -> dict:
+    latest_sync = (state.get("sync_history", []) or [])[-1] if state.get("sync_history") else {}
+    manifest = load_classroom_import_manifest(root)
+    return {
+        "sync_id": str(latest_sync.get("sync_id", "") or manifest.get("sync_id", "") or ""),
+        "timestamp": str(latest_sync.get("timestamp", "") or manifest.get("generated_at", "") or ""),
+        "snapshot_hash": str(latest_sync.get("snapshot_hash", "") or manifest.get("snapshot_hash", "") or ""),
+        "classroom_import_manifest_hash": str(latest_sync.get("classroom_import_manifest_hash", "") or manifest.get("manifest_hash", "") or ""),
+        "imported_count": int(latest_sync.get("imported_count", manifest.get("imported_count", 0)) or 0),
+        "blocked_count": int(latest_sync.get("blocked_count", manifest.get("blocked_count", 0)) or 0),
+        "platform_error_count": int(latest_sync.get("platform_error_count", manifest.get("platform_error_count", 0)) or 0),
+        "current_import_ready": bool(latest_sync.get("current_import_ready", manifest.get("current_import_ready", False))),
+    }
+
+
+def stable_artifact_hashes(root: Path) -> dict:
+    hashes = artifact_hashes(root)
+    hashes.pop("classroom_state", None)
+    return hashes
+
+
+def preflight_freshness_binding(root: Path, state: dict, latest_review: dict, mode: str, rows: list[dict], evidence_packet_id: str, blockers: list[str]) -> dict:
+    audit = state.get("audit", {}) if isinstance(state.get("audit"), dict) else {}
+    finalization = state.get("finalization", {}) if isinstance(state.get("finalization"), dict) else {}
+    return {
+        "latest_human_revision_id": latest_revision_id(state),
+        "latest_finalized_review": latest_final_review_fingerprint(latest_review),
+        "audit": {
+            "audit_revision_id": state_int(audit.get("audit_revision_id", 0)),
+            "gate_status": str(audit.get("gate_status", "") or ""),
+            "status": str(audit.get("status", "") or ""),
+            "audit_artifact_hash": str(audit.get("audit_artifact_hash", "") or ""),
+            "blocked_reasons": sorted(str(item) for item in audit.get("blocked_reasons", []) or []),
+        },
+        "finalization": {
+            "finalized_revision_id": state_int(finalization.get("finalized_revision_id", 0)),
+            "evidence_packet_id": str(finalization.get("evidence_packet_id", "") or ""),
+            "status": str(finalization.get("status", "") or ""),
+        },
+        "latest_classroom_sync": latest_sync_fingerprint(root, state),
+        "attachment_blockers": sorted(
+            {
+                str(blocker)
+                for submission in (state.get("submissions", {}) or {}).values()
+                for blocker in submission.get("attachment_blockers", []) or []
+            }
+        ),
+        "platform_errors": sorted(
+            str(item.get("code", "") or "") if isinstance(item, dict) else str(item)
+            for item in state.get("platform_errors", []) or []
+        ),
+        "blockers": sorted(set(blockers)),
+        "evidence_packet_id": str(evidence_packet_id or ""),
+        "artifact_hashes": stable_artifact_hashes(root),
+        "export_mode": mode,
+        "row_count": len(rows),
+        "row_hash": canonical_hash(rows),
+    }
+
+
+def preflight_stale_error() -> ClassroomStateError:
+    return ClassroomStateError(
+        "Review or sync changed after this preflight. Rebuild CSV preflight before export.",
+        code="preflight_stale_rebuild_required",
+    )
+
+
+def passback_preflight(base_dir: Path, root: Path, current_project: dict | None, identity: dict | None, payload: dict) -> dict:
+    scope_id = review_store.review_scope_id(current_project)
+    state = load_state(base_dir, scope_id, current_project, identity)
+    require_link(state)
+    mode = normalize_passback_mode(payload.get("mode"))
+    if mode == "no_passback":
+        raise ClassroomStateError("no_passback has no export action.", code="invalid_passback_mode")
+    configured_mode = state.get("passback", {}).get("mode", "no_passback")
+    if mode not in allowed_passback_modes(configured_mode):
+        raise ClassroomStateError(f"{mode} is not allowed by the linked assignment policy.", code="passback_mode_not_allowed")
+    state["summary"] = summarize_state(state)
+    state["product_state"] = derive_product_state(state, root, current_project, base_dir)
+    review_bundle = review_store.load_review_bundle(base_dir, root, current_project)
+    latest_review = review_bundle.get("latest_review", {})
+    blockers = passback_blockers(state, latest_review, mode)
+    evidence_packet_id = ""
+    if not blockers:
+        try:
+            evidence_packet_id = str(assessment_evidence_packet(base_dir, root, current_project, identity).get("packet_id", "") or "")
+        except Exception:
+            blockers.append("evidence_packet_required")
+    rows = passback_rows(state, latest_review, mode)
+    freshness = preflight_freshness_binding(root, state, latest_review, mode, rows, evidence_packet_id, blockers)
     preflight = {
         "preflight_id": "",
         "mode": mode,
@@ -1291,6 +1551,9 @@ def passback_preflight(base_dir: Path, root: Path, current_project: dict | None,
         "external_write_performed": False,
         "evidence_packet_id": evidence_packet_id,
         "row_count": len(rows),
+        "row_hash": freshness["row_hash"],
+        "freshness_hash": canonical_hash(freshness),
+        "freshness": freshness,
         "diff_rows": rows,
         "classroom_semantics": {
             "draft_grade_is_not_assigned_grade": True,
@@ -1318,10 +1581,26 @@ def confirm_passback(base_dir: Path, root: Path, current_project: dict | None, i
         raise ClassroomStateError("Teacher confirmation is required.", code="teacher_confirmation_required")
     if preflight.get("mode") in LIVE_WRITE_MODES or preflight.get("external_write_would_occur"):
         raise ClassroomStateError("Live Classroom writes are unavailable in this local pilot slice.", code="external_writes_disabled")
+    mode = normalize_passback_mode(preflight.get("mode"))
+    state["summary"] = summarize_state(state)
+    state["product_state"] = derive_product_state(state, root, current_project, base_dir)
+    review_bundle = review_store.load_review_bundle(base_dir, root, current_project)
+    latest_review = review_bundle.get("latest_review", {})
+    blockers = passback_blockers(state, latest_review, mode)
+    if blockers:
+        raise preflight_stale_error()
+    try:
+        evidence_packet_id = str(assessment_evidence_packet(base_dir, root, current_project, identity).get("packet_id", "") or "")
+    except Exception as exc:
+        raise preflight_stale_error() from exc
+    rows = passback_rows(state, latest_review, mode)
+    freshness = preflight_freshness_binding(root, state, latest_review, mode, rows, evidence_packet_id, blockers)
+    if preflight.get("freshness_hash") != canonical_hash(freshness) or preflight.get("freshness") != freshness:
+        raise preflight_stale_error()
     action = {
         "action_id": short_hash({"preflight_id": preflight_id, "confirmed_at": now_iso()}),
         "preflight_id": preflight_id,
-        "mode": preflight.get("mode", ""),
+        "mode": mode,
         "confirmed_at": now_iso(),
         "confirmed_by": str((identity or {}).get("teacher_id", "") or state.get("teacher_id", "")),
         "status": "prepared_for_adapter" if preflight.get("external_write_would_occur") else "prepared_for_export",

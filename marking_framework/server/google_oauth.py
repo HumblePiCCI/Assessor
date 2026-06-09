@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 import httpx
 
 from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError, TOKEN_REFRESH_SKEW_SECONDS, parse_iso
+from server.local_env import load_local_env
 
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -113,6 +114,8 @@ class GoogleOAuthService:
         config: dict | None = None,
     ):
         self.base_dir = Path(base_dir)
+        if config is None:
+            load_local_env(self.base_dir.parent)
         self.token_store = token_store or GoogleTokenStore(self.base_dir)
         self.transport = transport or OAuthTransport()
         self.config = dict(config or load_google_oauth_config())

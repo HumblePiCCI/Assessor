@@ -69,10 +69,12 @@ Quick Start
 
    Local Google Classroom pilot:
    - follow `docs/GOOGLE_CLASSROOM_LOCAL_OAUTH_SETUP.md`
-   - copy placeholders from `.env.example` into an ignored `.env.local` or export env vars
+   - copy placeholders from `.env.example` into an ignored `.env.local` or export env vars; the server auto-loads `.env.local` and `.env` without overriding exported env vars
    - start the app with `python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000`
    - click `Connect Google Classroom`, authenticate as the teacher, choose a real low-risk course and published assignment, then sync submissions
+   - synced Classroom submissions are authoritative under `inputs/submissions/classroom_import/`; zero-import, failed, or different-assignment syncs clear prior Classroom-owned imports so stale work cannot run
    - add rubric and outline, run `POST /pipeline/v2/run-project-inputs` through the UI, review normal and flagged students, finalize review, then use CSV preflight/export
+   - rebuild CSV preflight after any teacher edit, validation refresh, Classroom resync, blocker change, or evidence change
    - confirm every Classroom sync/export action reports `external_write_performed: false`
 
 10) Pay-as-you-go job runner (optional)

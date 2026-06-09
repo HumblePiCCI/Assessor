@@ -100,13 +100,15 @@ def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_b
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["blocked_submission_count"] == 1
     assert "external_link_unsupported" in payload["blockers"]
-    assert (tmp_path / "inputs" / "submissions" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
-    assert not (tmp_path / "inputs" / "submissions" / "s2.txt").exists()
+    assert (tmp_path / "inputs" / "submissions" / "classroom_import" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
+    assert not (tmp_path / "inputs" / "submissions" / "classroom_import" / "s2.txt").exists()
     metadata = json.loads((tmp_path / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    manifest = json.loads((tmp_path / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
     assert metadata["adapter"] == "live_google"
     assert metadata["latest_sync"]["imported_count"] == 1
     assert metadata["latest_sync"]["blocker_count"] == 1
     assert metadata["latest_sync"]["external_write_performed"] is False
+    assert manifest["current_import_ready"] is True
 
 
 class FailingRefreshTransport:
@@ -208,7 +210,22 @@ def test_classroom_project_inputs_reach_teacher_review_before_background_validat
     (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
     (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
     (inputs / "submissions").mkdir(parents=True, exist_ok=True)
-    (inputs / "submissions" / "s1.txt").write_text("First imported essay.", encoding="utf-8")
+    import_dir = inputs / "submissions" / "classroom_import"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    imported = import_dir / "s1.txt"
+    imported.write_text("First imported essay.", encoding="utf-8")
+    (inputs / "classroom_import_manifest.json").write_text(
+        json.dumps(
+            {
+                "source": "google_classroom_read_only_sync",
+                "current_import_ready": True,
+                "imported_count": 1,
+                "platform_error_count": 0,
+                "files": [{"path": "inputs/submissions/classroom_import/s1.txt"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     (inputs / "class_metadata.json").write_text(json.dumps({"source": "google_classroom_read_only_sync", "adapter": "live_google"}), encoding="utf-8")
     calls = []
     holder = {}
@@ -244,7 +261,7 @@ def test_classroom_project_inputs_reach_teacher_review_before_background_validat
         "openai",
         inputs / "rubric.md",
         inputs / "assignment_outline.md",
-        inputs / "submissions",
+        inputs / "submissions" / "classroom_import",
         [root / "config" / "llm_routing.json"],
         project_id="project-a",
     )

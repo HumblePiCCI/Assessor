@@ -53,6 +53,7 @@ function apiErrorMessage(payload, fallback = 'Request failed') {
   const detail = payload?.detail || payload || {};
   if (typeof detail === 'string') return detail;
   const code = detail.code || payload?.code || '';
+  if (code === 'preflight_stale_rebuild_required') return 'Review or sync changed after this preflight. Rebuild CSV preflight before export.';
   const message = detail.message || payload?.message || fallback;
   const remedy = detail.remediation || detail.remedy || payload?.remediation || '';
   return [message, code ? `(${String(code).replaceAll('_', ' ')})` : '', remedy].filter(Boolean).join(' ');
@@ -1831,7 +1832,7 @@ async function runPipeline() {
       let msg = 'Run failed';
       try {
         const err = await res.json();
-        if (err.detail) msg = runErrorForTeacher(err.detail);
+        if (err.detail) msg = runErrorForTeacher(apiErrorMessage(err, 'Run failed'));
       } catch (_) {}
       setPipelineStatus(msg, 'danger');
       stopShuffle();

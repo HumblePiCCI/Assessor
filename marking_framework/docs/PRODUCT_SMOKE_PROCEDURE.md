@@ -145,6 +145,8 @@ Before the UI smoke, complete
 - set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
   `GOOGLE_OAUTH_REDIRECT_URI` in an ignored local env file or shell
 - keep client secret JSON outside git or in an ignored local path
+- restart the server after editing `.env.local`; the app auto-loads
+  `.env.local` and `.env` without printing their values
 
 Expected:
 
@@ -156,11 +158,14 @@ Expected:
   or API-disabled states in plain language
 - the teacher can choose a class and published assignment from dropdowns
 - `Sync submissions` imports supported attachments into server-side
-  `inputs/submissions`
+  `inputs/submissions/classroom_import/` and records the current manifest in
+  `inputs/classroom_import_manifest.json`
 - counts show roster, submitted, imported, blocked, missing, reclaimed,
   returned, and platform-error counts
 - blockers appear in Exceptions with remedies
 - zero imported submissions is a blocked/warn state, not green success
+- a zero-import sync, failed Google/OAuth sync, or sync for a different
+  assignment clears prior Classroom-owned imports so stale work cannot run
 - unsupported, empty, permission-denied, no-OCR, external-link, missing-scope,
   quota, and API-disabled cases are blockers and are not graded as zero-text
   essays
@@ -427,6 +432,9 @@ Expected current setup:
   submissions without local essay re-upload
 - CSV preflight/export is available only after finalized teacher review,
   current validation, clear blockers, generated evidence, and explicit request
+- CSV export confirmation rejects a preflight generated before a later teacher
+  edit, validation change, Classroom resync, blocker change, or evidence change;
+  rebuild CSV preflight before confirming export
 
 Do not commit the credentials JSON or paste the client secret into docs, chat,
 source files. Do not commit downloaded submissions, private screenshots, raw
@@ -483,6 +491,8 @@ Record:
 - whether anchor calibration appeared
 - Classroom read/sync pilot result
 - export/passback preflight result
+- CSV preflight timestamp/hash and whether confirmation used that current
+  preflight
 - confirmation that no live Classroom write occurred
 - launch validator result and blockers
 - one normal student reviewed with no override

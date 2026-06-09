@@ -13,10 +13,16 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, RedirectResponse, HTMLResponse
 from pydantic import BaseModel
+from server.local_env import load_local_env
+
+BASE_DIR = Path(__file__).resolve().parent
+load_local_env(BASE_DIR.parent)
+
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
 from server.google_oauth import GoogleOAuthError, GoogleOAuthService, google_oauth_error_payload
 import server.projects as projectsmod
+from server import classroom as classroommod
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
 from scripts.assessor_utils import resolve_input_path
 from scripts.codex_runtime import codex_status_payload
@@ -29,7 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 API_KEY_OVERRIDE = {"value": None}
@@ -396,7 +401,18 @@ async def run_pipeline_project_inputs(
         raise HTTPException(status_code=400, detail="Rubric is required before running imported Classroom submissions")
     if not outline_path.exists() or not outline_path.is_file():
         raise HTTPException(status_code=400, detail="Assignment outline is required before running imported Classroom submissions")
-    if not submissions_dir.exists() or not any(item.is_file() for item in submissions_dir.iterdir()):
+    metadata = classroommod.load_json(inputs / "class_metadata.json")
+    if metadata.get("source") == "google_classroom_read_only_sync":
+        if not classroommod.classroom_imports_ready(root):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "no_current_classroom_imports",
+                    "message": classroommod.CLASSROOM_IMPORT_READY_ERROR,
+                },
+            )
+        submissions_dir = classroommod.classroom_imports_run_directory(root)
+    elif not submissions_dir.exists() or not any(item.is_file() for item in submissions_dir.iterdir()):
         raise HTTPException(status_code=400, detail="No imported Classroom submissions are ready to assess")
     selected_project = projectsmod.get_current_project(identity)
     effective_project_id = project_id or str((selected_project or {}).get("id", "") or "")

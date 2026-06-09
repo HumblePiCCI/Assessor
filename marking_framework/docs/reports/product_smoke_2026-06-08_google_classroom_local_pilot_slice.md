@@ -8,6 +8,8 @@ This report intentionally contains no real student names, document titles, raw G
 
 - Date: 2026-06-08
 - Branch: `codex/google-classroom-local-pilot-smoke`
+- Hardening branch: `codex/google-classroom-local-pilot-smoke-hardening`
+- Hardening starting commit verified: `94acf0efdd8fb2686034e583aeade67e758d0a32`
 - Starting PR #19 head verified before edits: `358480b533c5b79d40a0961c4bfedffbf03d2ebe`
 - Base reference verified before edits: `main@c30017dbb625710374827c7abefa67eed84e7af9`
 - Verification data: mocks/fixtures only
@@ -56,6 +58,21 @@ Current implementation result:
   - `publish_gate_missing`
   - `sota_gate_missing`
   - `calibration_manifest_missing`
+
+Hardening coverage added for the final local pilot smoke patch:
+
+- `.env.local` and `.env` are auto-loaded at server startup and by
+  `GoogleOAuthService` without overriding exported env vars or exposing values
+  in `/google/auth/status`.
+- Classroom-owned imports are written only under
+  `inputs/submissions/classroom_import/` and tracked by
+  `inputs/classroom_import_manifest.json`.
+- Different-assignment, zero-import, OAuth failure, and Google platform failure
+  syncs clear prior Classroom-owned imports and make
+  `/pipeline/v2/run-project-inputs` reject stale work.
+- CSV export confirmation recomputes the preflight freshness hash before
+  writing a CSV and rejects stale preflights with
+  `preflight_stale_rebuild_required`.
 
 ## Manual Live Owner Smoke
 
@@ -111,6 +128,8 @@ Do not record course names, assignment names, student names, document titles, ra
 - `reclaimed_count`:
 - `returned_count`:
 - `platform_error_count`:
+- current Classroom import manifest hash:
+- stale prior Classroom imports absent after latest sync:
 - blocker types:
 - unsupported/empty/permission-denied files were not graded as zero-text:
 
@@ -134,7 +153,12 @@ Do not record course names, assignment names, student names, document titles, ra
 ### Export And Evidence
 
 - CSV preflight result:
+- CSV preflight timestamp:
+- CSV preflight freshness hash:
+- CSV preflight row hash:
+- CSV preflight was rebuilt after any teacher edit/validation change/sync/blocker/evidence change:
 - CSV export artifact hash:
+- final CSV confirmation action hash/id:
 - Evidence packet hash/id:
 - Explicit confirmation no live Classroom write occurred:
   - no `draftGrade` changed:
@@ -194,7 +218,9 @@ Do not record course names, assignment names, student names, document titles, ra
 28. Finalize review.
 29. Reload and verify finalized persistence.
 30. Run CSV export preflight.
-31. Confirm CSV export only after required gates.
+31. Confirm CSV export only after required gates. If any teacher edit,
+    validation refresh, Classroom resync, blocker change, or evidence change
+    happens after preflight, rebuild preflight before confirming export.
 32. Download CSV or record artifact hash without committing the CSV.
 33. Generate/inspect evidence packet.
 34. Confirm no live Google Classroom write occurred.

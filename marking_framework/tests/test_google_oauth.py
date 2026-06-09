@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -97,6 +98,64 @@ def test_oauth_config_missing_status_is_teacher_friendly_and_redacted(tmp_path):
     with pytest.raises(GoogleOAuthError) as exc:
         svc.start(identity(), project())
     assert exc.value.code == "google_oauth_not_configured"
+
+
+def test_google_oauth_service_loads_env_local_without_leaking_secrets(tmp_path, monkeypatch):
+    for key in (
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REDIRECT_URI",
+        "GOOGLE_OAUTH_CLIENT_SECRETS_FILE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    (tmp_path / ".env.local").write_text(
+        "\n".join(
+            [
+                "# local owner smoke config",
+                "GOOGLE_OAUTH_CLIENT_ID=local-client.apps.googleusercontent.com",
+                'GOOGLE_OAUTH_CLIENT_SECRET="local-redacted-sentinel"',
+                "GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/google/auth/callback",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    svc = GoogleOAuthService(tmp_path / "server", token_store=GoogleTokenStore(tmp_path / "server"), transport=OAuthTransport())
+    status = svc.status(identity(), project())
+    assert status["configured"] is True
+    status_blob = json.dumps(status)
+    assert "local-redacted-sentinel" not in status_blob
+    assert "local-client" not in status_blob
+
+
+def test_process_env_overrides_env_local(tmp_path, monkeypatch):
+    (tmp_path / ".env.local").write_text(
+        "\n".join(
+            [
+                "GOOGLE_OAUTH_CLIENT_ID=file-client.apps.googleusercontent.com",
+                "GOOGLE_OAUTH_CLIENT_SECRET=file-redacted-sentinel",
+                "GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/google/auth/callback",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "process-client.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "process-redacted-sentinel")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/google/auth/callback")
+    svc = GoogleOAuthService(tmp_path / "server", token_store=GoogleTokenStore(tmp_path / "server"), transport=OAuthTransport())
+    assert svc.config["client_id"] == "process-client.apps.googleusercontent.com"
+    assert svc.config["client_secret"] == "process-redacted-sentinel"
+    assert svc.config["redirect_uri"] == "http://localhost:8000/google/auth/callback"
+
+
+def test_env_example_is_placeholder_only_and_env_local_ignored():
+    framework_root = Path(__file__).resolve().parents[1]
+    example = (framework_root / ".env.example").read_text(encoding="utf-8")
+    assert "replace-with-web-client-id" in example
+    assert "replace-with-web-client-secret" in example
+    assert "access-secret" not in example
+    assert "refresh-secret" not in example
+    assert ".env.local" in (framework_root / ".gitignore").read_text(encoding="utf-8")
+    assert "marking_framework/.env.local" in (framework_root.parent / ".gitignore").read_text(encoding="utf-8")
 
 
 def test_oauth_start_uses_pkce_state_and_project_binding(tmp_path):

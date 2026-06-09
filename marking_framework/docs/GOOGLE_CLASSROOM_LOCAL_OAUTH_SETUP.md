@@ -80,6 +80,12 @@ export GOOGLE_OAUTH_CLIENT_SECRET=<web-client-secret>
 export GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/google/auth/callback
 ```
 
+The server auto-loads `marking_framework/.env.local` and then
+`marking_framework/.env` at startup. Already-exported shell environment
+variables win over file values. The loader supports simple `KEY=value`,
+quoted values, comments, and blank lines; it never logs values or returns them
+to the browser.
+
 Optional local client JSON outside the repo:
 
 ```bash
@@ -162,6 +168,15 @@ Blocked:
 
 Mixed supported and unsupported attachments are blocked as `partial_unsupported_attachments` in this slice. The app does not grade the supported portion until the unsupported attachments are resolved.
 
+Synced Classroom-owned submissions are materialized only under
+`inputs/submissions/classroom_import/` and tracked by
+`inputs/classroom_import_manifest.json`. Each live or fixture sync is
+authoritative for that selected assignment: a different-assignment sync,
+zero-import sync, OAuth failure, or Google platform failure clears prior
+Classroom-owned imports and writes a non-runnable manifest. Teacher-uploaded
+local essays outside that Classroom import area are not deleted by Classroom
+sync.
+
 ## Common Failure Remedies
 
 `redirect_uri_mismatch`
@@ -190,6 +205,14 @@ Mixed supported and unsupported attachments are blocked as `partial_unsupported_
 
 `no extractable text`
 : Open the attachment and verify it contains readable text. Images and scans are not OCRed in this slice.
+
+`No current Classroom imports are ready to assess`
+: Resolve sync blockers and resync. The app will not run stale files from an
+older assignment, zero-import sync, or failed Google read.
+
+`preflight_stale_rebuild_required`
+: Review, validation, sync, blockers, or evidence changed after the CSV
+preflight. Rebuild CSV preflight before confirming export.
 
 ## Production Boundary
 
