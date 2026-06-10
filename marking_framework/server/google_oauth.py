@@ -27,6 +27,11 @@ GOOGLE_DRIVE_READ_SCOPES = (
     "https://www.googleapis.com/auth/drive.readonly",
 )
 DEFAULT_GOOGLE_SCOPES = (*GOOGLE_CLASSROOM_READ_SCOPES, *GOOGLE_DRIVE_READ_SCOPES)
+GOOGLE_SCOPE_EQUIVALENTS = {
+    "https://www.googleapis.com/auth/classroom.coursework.students.readonly": {
+        "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
+    },
+}
 
 
 class GoogleOAuthError(ValueError):
@@ -97,6 +102,17 @@ def _config_missing(config: dict) -> list[str]:
     return missing
 
 
+def _required_scope_is_satisfied(required_scope: str, granted_scopes: set[str]) -> bool:
+    if required_scope in granted_scopes:
+        return True
+    return bool(GOOGLE_SCOPE_EQUIVALENTS.get(required_scope, set()) & granted_scopes)
+
+
+def missing_required_scopes(granted_scopes: list[str]) -> list[str]:
+    granted = {str(scope or "").strip() for scope in granted_scopes if str(scope or "").strip()}
+    return [scope for scope in DEFAULT_GOOGLE_SCOPES if not _required_scope_is_satisfied(scope, granted)]
+
+
 def _token_needs_refresh(token: dict) -> bool:
     expires = parse_iso(str(token.get("expires_at", "") or ""))
     if not expires:
@@ -138,7 +154,7 @@ class GoogleOAuthService:
         configured_missing = _config_missing(config)
         configured = not configured_missing
         granted = list(token_status.get("granted_scopes", []) or [])
-        missing_scopes = sorted(set(DEFAULT_GOOGLE_SCOPES) - set(granted))
+        missing_scopes = missing_required_scopes(granted)
         remediation = ""
         if not configured:
             remediation = "Set Google OAuth env vars from marking_framework/.env.example, then restart the local server."

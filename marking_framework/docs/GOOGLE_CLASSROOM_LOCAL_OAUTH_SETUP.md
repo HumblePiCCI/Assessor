@@ -41,6 +41,16 @@ Scopes requested by this app:
 - `https://www.googleapis.com/auth/drive.readonly`
   - exports Google Docs and downloads supported text/DOCX/PDF/DOC/RTF/HTML attachments
 
+Google's Classroom authorization guide also lists
+`https://www.googleapis.com/auth/classroom.student-submissions.students.readonly`
+with the same teacher/admin student-work read meaning. The app still requests
+`classroom.coursework.students.readonly`, matching the CourseWork and
+StudentSubmissions method references, but local status accepts Google's
+documented student-submissions grant as satisfying the same read-only pilot
+capability. If a later Classroom API call returns `insufficient_scope`, add the
+explicit `classroom.coursework.students.readonly` scope to the OAuth consent
+screen and reconnect.
+
 Distribution warning: Drive read-only scopes are sensitive/restricted for broader distribution. Public or third-party production use may require Google verification and, for restricted data access from or through a third-party server, a security assessment. This local pilot does not satisfy that production verification requirement.
 
 ## 3. Create A Web OAuth Client
@@ -186,7 +196,12 @@ sync.
 : Use Workspace `Internal` mode when possible. For External Testing, add the owner teacher account as a test user and keep the app in Testing until verification is complete.
 
 `missing scope` / `insufficient_scope`
-: Reconnect Google and approve all Classroom and Drive read scopes.
+: Reconnect Google and approve all Classroom and Drive read scopes. If the
+status page shows Google granted `classroom.student-submissions.students.readonly`
+instead of `classroom.coursework.students.readonly`, the local status gate treats
+that as satisfying the read-only pilot. A downstream Classroom API
+`insufficient_scope` still means the OAuth consent screen/client must include
+the explicit coursework read scope before reconnecting.
 
 `API disabled`
 : Enable Google Classroom API and Google Drive API in the Google Cloud project used by the OAuth client.

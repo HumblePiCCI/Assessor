@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthError, GoogleOAuthService
+from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthError, GoogleOAuthService, missing_required_scopes
 from server.google_token_store import GoogleTokenStore, GoogleTokenStoreError
 
 
@@ -198,6 +198,48 @@ def test_oauth_callback_status_and_disconnect_never_leak_tokens(tmp_path):
     assert disconnected["cleared"] is True
     assert transport.posts[-1]["params"]["token"] == "refresh-secret"
     assert svc.status(identity(), project())["connected"] is False
+
+
+def test_status_accepts_documented_student_submissions_scope_equivalent(tmp_path):
+    store = GoogleTokenStore(tmp_path / "server")
+    granted_scopes = [
+        "https://www.googleapis.com/auth/classroom.courses.readonly",
+        "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
+        "https://www.googleapis.com/auth/classroom.rosters.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    store.save_token(
+        identity(),
+        project(),
+        {
+            "access_token": "access-secret",
+            "refresh_token": "refresh-secret",
+            "expires_in": 3600,
+            "scope": " ".join(granted_scopes),
+            "token_type": "Bearer",
+        },
+        granted_scopes=granted_scopes,
+    )
+    svc = GoogleOAuthService(
+        tmp_path / "server",
+        token_store=store,
+        transport=OAuthTransport(),
+        config={
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "redirect_uri": "http://localhost/google/auth/callback",
+        },
+    )
+
+    status = svc.status(identity(), project())
+
+    assert status["connected"] is True
+    assert status["missing_scopes"] == []
+    assert missing_required_scopes(granted_scopes) == []
+    assert "https://www.googleapis.com/auth/classroom.coursework.students.readonly" in status["required_scopes"]
+    assert "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly" in status["granted_scopes"]
+    assert "access-secret" not in json.dumps(status)
+    assert "refresh-secret" not in json.dumps(status)
 
 
 def test_access_token_refreshes_expired_token_before_live_google_use(tmp_path):
