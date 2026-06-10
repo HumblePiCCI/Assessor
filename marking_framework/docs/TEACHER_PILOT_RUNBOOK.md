@@ -94,7 +94,7 @@ Recommended cohort shape:
 3. Start a fresh server process.
 
    ```bash
-   python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8002
+   python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8002 --no-access-log
    ```
 
 4. Create a new project in the UI and upload:

@@ -193,7 +193,7 @@ Do not record course names, assignment names, student names, document titles, ra
 
    ```bash
    cd marking_framework
-   python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000
+   python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000 --no-access-log
    ```
 
 9. Open `http://127.0.0.1:8000`.

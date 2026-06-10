@@ -114,7 +114,7 @@ Local token files live under ignored `server/data/google_oauth/`. Without `GOOGL
 
 ```bash
 cd /Users/bldt/Desktop/Essays/marking_framework
-python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000
+python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 Open:
@@ -122,6 +122,10 @@ Open:
 ```text
 http://127.0.0.1:8000
 ```
+
+Use `--no-access-log` for local Google OAuth smoke runs. Uvicorn's default
+access log includes the full request target, and OAuth callback request targets
+can include short-lived authorization codes.
 
 ## 6. Connect, Disconnect, Reconnect
 

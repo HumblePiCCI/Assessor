@@ -50,11 +50,13 @@ From a terminal:
 
 ```bash
 cd /Users/bldt/Desktop/Essays/marking_framework
-python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000
+python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 If port `8000` is already occupied, stop the stale process or use another port,
 then open the matching URL. A stale server can create false failures.
+For Google OAuth smoke runs, keep `--no-access-log` so callback authorization
+codes are not written into local server access logs.
 
 ## Pass/Fail Rule
 
