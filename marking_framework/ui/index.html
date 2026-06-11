@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Assessor</title>
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body data-theme="light" data-view="single">
   <header class="topbar">
@@ -21,7 +21,7 @@
     <div class="topbar-actions">
       <button id="themeToggle" class="ghost icon-only" aria-label="Toggle theme">☾</button>
       <button id="viewToggle" class="ghost" aria-label="Toggle split view">Compare</button>
-      <button id="runPipelinePrimary" class="primary">Run assessment</button>
+      <button id="runPipelinePrimary" class="primary" disabled>Run assessment</button>
     </div>
   </header>
 
@@ -90,6 +90,7 @@
               <button id="googleDisconnect" class="ghost">Disconnect</button>
             </div>
             <div id="googleAuthStatus" class="auth-status">Google not connected.</div>
+            <div id="classroomNextStep" class="classroom-next-step">Next: connect Google Classroom.</div>
             <div class="classroom-grid">
               <select id="googleCourseSelect">
                 <option value="">Choose class</option>
@@ -262,7 +263,7 @@
   </div>
   <script src="grade_adjust.js?v=2"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

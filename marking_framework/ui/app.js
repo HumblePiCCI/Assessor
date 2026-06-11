@@ -76,6 +76,58 @@ function inferPipelineState(text) {
   if (low.includes('need') || low.includes('add ') || low.includes('checking') || low.includes('idle')) return 'warn';
   return 'idle';
 }
+function latestClassroomSync(bundle = classroomState) {
+  return (bundle?.sync_history || []).slice(-1)[0] || {};
+}
+function classroomImportedCount(bundle = classroomState) {
+  const summary = bundle?.summary || {};
+  const latestSync = latestClassroomSync(bundle);
+  return Number(latestSync.imported_count ?? summary.ready_for_analysis_count ?? 0) || 0;
+}
+function classroomBlockedCount(bundle = classroomState) {
+  const summary = bundle?.summary || {};
+  const latestSync = latestClassroomSync(bundle);
+  return Number(latestSync.blocked_count ?? latestSync.blocker_count ?? summary.blocked_count ?? 0) || 0;
+}
+function classroomPlatformErrorCount(bundle = classroomState) {
+  const summary = bundle?.summary || {};
+  const latestSync = latestClassroomSync(bundle);
+  return Number(latestSync.platform_error_count ?? summary.platform_error_count ?? 0) || 0;
+}
+function classroomImportsReady(bundle = classroomState) {
+  return !!(bundle?.classroom_link?.course_id && classroomImportedCount(bundle) > 0);
+}
+function classroomNextStep(bundle = classroomState) {
+  const link = bundle?.classroom_link || {};
+  const imported = classroomImportedCount(bundle);
+  const blocked = classroomBlockedCount(bundle);
+  const platformErrors = classroomPlatformErrorCount(bundle);
+  const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
+  const outlineReady = !!document.getElementById('uploadOutline')?.files?.[0];
+  const authText = document.getElementById('authStatus')?.textContent || '';
+  const runtimeReady = inferConnectionState(authText) === 'ready';
+  if (googleAuth && !googleAuth.configured) return { text: 'Next: configure Google OAuth locally, then connect Classroom.', state: 'warn' };
+  if (googleAuth && !googleAuth.connected) return { text: 'Next: connect Google Classroom.', state: 'warn' };
+  if (!link.course_id) return { text: 'Next: choose a class and assignment, then use the assignment.', state: 'warn' };
+  if (!imported) {
+    if (platformErrors) return { text: 'Next: resolve the Google API blocker, then sync submissions again.', state: 'danger' };
+    if (blocked) return { text: 'No supported essays were imported. Open Exceptions, resolve blockers, then sync again.', state: 'danger' };
+    return { text: 'Next: sync submissions for the selected assignment.', state: 'warn' };
+  }
+  const prefix = `${imported} Classroom essay${imported === 1 ? '' : 's'} imported${blocked ? `; ${blocked} blocked need review` : ''}.`;
+  if (!rubricReady && !outlineReady) return { text: `${prefix} Next: add the rubric and assignment outline, then run assessment.`, state: 'warn' };
+  if (!rubricReady) return { text: `${prefix} Next: add the rubric, then run assessment.`, state: 'warn' };
+  if (!outlineReady) return { text: `${prefix} Next: add the assignment outline, then run assessment.`, state: 'warn' };
+  if (!runtimeReady) return { text: `${prefix} Next: connect Codex or an API key, then run assessment.`, state: 'warn' };
+  return { text: `${prefix} Next: click Run assessment.`, state: 'ready' };
+}
+function renderClassroomNextStep(bundle = classroomState) {
+  const node = document.getElementById('classroomNextStep');
+  if (!node) return;
+  const next = classroomNextStep(bundle);
+  node.textContent = next.text;
+  node.dataset.state = next.state;
+}
 function updateWorkflowState() {
   const authText = document.getElementById('authStatus')?.textContent || 'Offline';
   const projectText = currentProject ? currentProject.name : 'unsaved';
@@ -85,12 +137,8 @@ function updateWorkflowState() {
   const essayCount = document.getElementById('uploadEssays')?.files?.length || 0;
   const rubricReady = !!document.getElementById('uploadRubric')?.files?.[0];
   const outlineReady = !!document.getElementById('uploadOutline')?.files?.[0];
-  const classroomSummary = classroomState?.summary || {};
-  const latestSync = (classroomState?.sync_history || []).slice(-1)[0] || {};
-  const classroomImported = !!(
-    classroomState?.classroom_link?.course_id &&
-    ((classroomSummary.ready_for_analysis_count || 0) > 0 || (latestSync.imported_count || 0) > 0)
-  );
+  const classroomImported = classroomImportsReady();
+  const importedCount = classroomImportedCount();
   const students = getStudents();
   const hasReview = !!(data?.students?.length);
   const filesReady = essayCount > 0 && rubricReady && outlineReady;
@@ -127,12 +175,19 @@ function updateWorkflowState() {
     workflowSummary.dataset.state = hasReview || filesReady || projectInputsReady ? 'ready' : 'idle';
   }
   const railMeta = document.getElementById('railMeta');
-  if (railMeta) railMeta.textContent = students.length ? `${students.length} essays in order` : 'No essays loaded';
+  if (railMeta) {
+    railMeta.textContent = students.length
+      ? `${students.length} essays in order`
+      : classroomImported
+        ? `${importedCount} Classroom essay${importedCount === 1 ? '' : 's'} synced; run assessment next`
+        : 'No essays loaded';
+  }
   const runButton = document.getElementById('runPipelinePrimary');
   if (runButton) {
     runButton.disabled = running || !(filesReady || projectInputsReady) || authState !== 'ready';
     runButton.textContent = running ? 'Running…' : 'Run assessment';
   }
+  renderClassroomNextStep();
 }
 function setPipelineStatus(text, state = inferPipelineState(text)) {
   setNodeState(document.getElementById('pipelineStatus'), text, state);
@@ -333,6 +388,7 @@ function renderClassroomState(bundle) {
     if (confirmBtn) confirmBtn.disabled = true;
     if (writeStatus) writeStatus.textContent = 'No live Classroom write occurred.';
     linkedControls.forEach(node => node.classList.add('is-hidden'));
+    renderClassroomNextStep(bundle);
     return;
   }
   linkedControls.forEach(node => node.classList.remove('is-hidden'));
@@ -370,6 +426,9 @@ function renderClassroomState(bundle) {
     const gates = bundle.launch_gates || {};
     preflight.textContent = `Gates: teacher review ${gates.teacher_review_finalized ? 'ready' : 'open'} · validation ${gates.full_validation_current ? 'current' : 'pending'} · attachments ${gates.attachment_blockers_clear ? 'clear' : 'blocked'}.`;
   }
+  renderClassroomNextStep(bundle);
+  updateWorkflowState();
+  if (!previewStudents.length && !(data?.students || []).length) renderDetail();
 }
 async function refreshClassroomState() {
   try {
@@ -436,6 +495,8 @@ async function refreshGoogleAuth() {
     }
   } catch (_) {
     setGoogleStatus('Google status unavailable.', 'warn');
+  } finally {
+    renderClassroomNextStep();
   }
 }
 async function startGoogleConnect() {
@@ -1635,8 +1696,17 @@ function renderDetail() {
   const emptyState = document.getElementById('workspaceEmpty');
   const essayGrid = document.getElementById('essayGrid');
   if (previewStudents.length || !data || !data.students || !data.students.length) {
-    document.getElementById('detailTitle').textContent = previewStudents.length ? 'Files ready. Run the assessment to review the cohort.' : 'Upload essays to begin';
-    document.getElementById('essay').innerHTML = '<p>Once the assessment runs, the essay text and comparison view will appear here.</p>';
+    const imported = classroomImportedCount();
+    const classroomReady = classroomImportsReady();
+    const next = classroomNextStep();
+    document.getElementById('detailTitle').textContent = previewStudents.length
+      ? 'Files ready. Run the assessment to review the cohort.'
+      : classroomReady
+        ? `${imported} Classroom essay${imported === 1 ? '' : 's'} synced`
+        : 'Upload essays to begin';
+    document.getElementById('essay').innerHTML = classroomReady
+      ? `<p>${next.text}</p>`
+      : '<p>Once the assessment runs, the essay text and comparison view will appear here.</p>';
     document.getElementById('essayLabelPrimary').textContent = '';
     document.getElementById('essayLabelCompare').textContent = '';
     if (summaryPanel) summaryPanel.classList.add('is-hidden');

@@ -200,6 +200,13 @@ textarea {
   transform: none;
 }
 
+.primary:disabled {
+  border-color: var(--line);
+  background: var(--panel-strong);
+  color: var(--muted);
+  box-shadow: none;
+}
+
 .icon-only {
   width: 40px;
   padding: 0;
@@ -494,6 +501,36 @@ textarea {
 body[data-theme="dark"] .classroom-grid input,
 body[data-theme="dark"] .classroom-grid select {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.classroom-next-step {
+  margin-top: -2px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(142, 201, 190, 0.13);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+body[data-theme="dark"] .classroom-next-step {
+  background: rgba(142, 201, 190, 0.11);
+}
+
+.classroom-next-step[data-state="ready"] {
+  border-color: rgba(87, 139, 124, 0.42);
+  background: rgba(142, 201, 190, 0.2);
+}
+
+.classroom-next-step[data-state="warn"] {
+  border-color: rgba(218, 178, 83, 0.46);
+  background: rgba(218, 178, 83, 0.14);
+}
+
+.classroom-next-step[data-state="danger"] {
+  border-color: rgba(188, 92, 72, 0.48);
+  background: rgba(188, 92, 72, 0.12);
 }
 
 .classroom-counts {
