@@ -36,5 +36,12 @@ Operational Notes
   - `openai_responses`: OpenAI Responses-compatible providers.
   - `openai_chat`: OpenAI-compatible chat completions providers, including Kimi-style routes.
   - `anthropic_messages`: Anthropic Messages-compatible providers.
+- The `metered` provider is the prepaid LiteLLM pilot route. It uses
+  `LITELLM_VIRTUAL_KEY`, routes Responses calls through the hosted LiteLLM
+  proxy, and enables a pre-run credit check against the configured
+  `balance_check.self_service_endpoint`.
+- Tester-local installs should not use `balance_check.master_key_env`; that
+  admin-only path is for centrally hosted trusted servers. Local tester installs
+  should query the hosted `/credits/me` self-service endpoint instead.
 - Update `config/llm_routing.json`, not individual scripts, to change models or reasoning levels.
 - Keep task additions explicit in this doc whenever a new route is introduced; otherwise queue, hero-path, and local runs become hard to compare.

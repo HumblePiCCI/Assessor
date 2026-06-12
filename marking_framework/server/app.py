@@ -22,6 +22,7 @@ from server.runtime_context import launch_contract, require_admin, resolve_reque
 from scripts.assessor_utils import resolve_input_path
 from scripts.codex_runtime import codex_status_payload
 from scripts.google_classroom_setup_check import build_setup_report
+from scripts.litellm_balance_gate import BalanceGateError, validate_credit_balance_for_run
 from scripts.openai_client import api_provider_status
 app = FastAPI()
 app.include_router(projects_router)
@@ -329,6 +330,21 @@ def validate_pipeline_mode(mode: str) -> str:
     return normalized
 
 
+def enforce_prepaid_balance_gate(mode: str, rubric_path: Path, outline_path: Path, submissions_dir: Path):
+    if mode != "openai":
+        return
+    try:
+        validate_credit_balance_for_run(
+            root=BASE_DIR.parent,
+            rubric_path=rubric_path,
+            outline_path=outline_path,
+            submissions_dir=submissions_dir,
+            api_key=current_api_key(),
+        )
+    except BalanceGateError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+
+
 def submit_pipeline_job(
     request: Request,
     rubric: UploadFile,
@@ -351,6 +367,7 @@ def submit_pipeline_job(
         save_upload(outline, outline_path)
         for upload in submissions:
             save_upload(upload, submissions_dir / upload.filename)
+        enforce_prepaid_balance_gate(mode, rubric_path, outline_path, submissions_dir)
         root = workspace_root()
         return PIPELINE_QUEUE.submit(
             mode=mode,
@@ -460,6 +477,7 @@ async def run_pipeline_project_inputs(
         raise HTTPException(status_code=400, detail="Classroom import metadata is required before running imported submissions")
     selected_project = projectsmod.get_current_project(identity)
     effective_project_id = project_id or str((selected_project or {}).get("id", "") or "")
+    enforce_prepaid_balance_gate(mode, rubric_path, outline_path, submissions_dir)
     return PIPELINE_QUEUE.submit(
         mode=mode,
         rubric_path=rubric_path,

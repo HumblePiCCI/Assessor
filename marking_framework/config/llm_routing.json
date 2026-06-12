@@ -69,6 +69,20 @@
       "responses_endpoint": "/responses",
       "api_key_env": "OPENAI_API_KEY"
     },
+    "metered": {
+      "kind": "openai_responses",
+      "base_url": "https://litellm-proxy.example.com/v1",
+      "responses_endpoint": "/responses",
+      "api_key_env": "LITELLM_VIRTUAL_KEY",
+      "balance_check": {
+        "enabled": true,
+        "self_service_endpoint": "https://litellm-proxy.example.com/credits/me",
+        "cost_markup_multiplier": 1.15,
+        "safety_multiplier": 1.2,
+        "minimum_remaining_usd": 1.0,
+        "timeout_seconds": 5
+      }
+    },
     "anthropic": {
       "kind": "anthropic_messages",
       "base_url": "https://api.anthropic.com/v1",
