@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -260,6 +261,20 @@ def _can_stream_subprocess(run_fn) -> bool:
     return getattr(run_fn, "__module__", "") == "subprocess" and getattr(run_fn, "__name__", "") == "run"
 
 
+def _pipeline_python(env: dict | None = None) -> str:
+    configured = str((env or {}).get("ASSESSOR_PIPELINE_PYTHON", "") or "").strip()
+    return configured or sys.executable
+
+
+def _resolve_python_command(cmd: list[str], env: dict | None = None) -> list[str]:
+    if not cmd:
+        return []
+    executable = str(cmd[0] or "")
+    if executable in {"python", "python3"}:
+        return [_pipeline_python(env), *cmd[1:]]
+    return list(cmd)
+
+
 def _run_capture(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
     result = run_fn(cmd, env=env, cwd=str(cwd), capture_output=True, text=True)
     stdout = str(getattr(result, "stdout", "") or "")
@@ -308,6 +323,7 @@ def _run_stream(cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, s
 
 
 def run_step(run_fn, cmd: list[str], env: dict, cwd: Path, on_output) -> tuple[int, str, str]:
+    cmd = _resolve_python_command(cmd, env)
     if _can_stream_subprocess(run_fn):
         return _run_stream(cmd, env, cwd, on_output)
     return _run_capture(run_fn, cmd, env, cwd, on_output)

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import types
 
 from server import step_runner
@@ -68,6 +69,47 @@ def test_committee_edge_resolver_live_env_appends_flag(monkeypatch):
 def test_can_stream_subprocess_detection():
     assert step_runner._can_stream_subprocess(subprocess.run) is True
     assert step_runner._can_stream_subprocess(lambda *_a, **_k: None) is False
+
+
+def test_resolve_python_command_uses_server_interpreter_by_default(monkeypatch):
+    monkeypatch.delenv("ASSESSOR_PIPELINE_PYTHON", raising=False)
+    assert step_runner._resolve_python_command(["python3", "scripts/normalize_rubric.py"], {}) == [
+        sys.executable,
+        "scripts/normalize_rubric.py",
+    ]
+    assert step_runner._resolve_python_command(["python", "-m", "pytest"], {}) == [
+        sys.executable,
+        "-m",
+        "pytest",
+    ]
+    assert step_runner._resolve_python_command(["node", "--check", "ui/app.js"], {}) == ["node", "--check", "ui/app.js"]
+
+
+def test_resolve_python_command_honors_explicit_pipeline_python():
+    env = {"ASSESSOR_PIPELINE_PYTHON": "/opt/assessor/python"}
+    assert step_runner._resolve_python_command(["python3", "scripts/normalize_rubric.py"], env) == [
+        "/opt/assessor/python",
+        "scripts/normalize_rubric.py",
+    ]
+
+
+def test_run_step_resolves_python_before_capture_runner(tmp_path, monkeypatch):
+    monkeypatch.delenv("ASSESSOR_PIPELINE_PYTHON", raising=False)
+    seen = []
+
+    def fake_run(cmd, env=None, cwd=None, capture_output=None, text=None):
+        seen.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    code, _stdout, _stderr = step_runner.run_step(
+        fake_run,
+        ["python3", "-c", "print('ok')"],
+        {},
+        tmp_path,
+        lambda _source, _text: None,
+    )
+    assert code == 0
+    assert seen == [[sys.executable, "-c", "print('ok')"]]
 
 
 def test_run_capture_collects_nonempty_lines(tmp_path):
