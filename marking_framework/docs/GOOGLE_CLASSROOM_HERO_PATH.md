@@ -11,6 +11,12 @@ write is performed by this repository without a future adapter that proves
 OAuth, scopes, tenancy, admin approval, preflight diff, audit records, tests,
 docs, and explicit teacher confirmation end to end.
 
+Classroom-owned imports are local pilot records, not long-term roster records.
+Supported submissions are materialized as local system IDs such as `s001.txt`.
+The routine teacher UI uses first-name-plus-local-ID labels such as
+`First - s001`; it should not show raw Google numeric user IDs or persist
+student last names in smoke evidence.
+
 ## Product Invariant
 
 The teacher gets a fast `teacher_review` dashboard while `full_validation` can

@@ -14,7 +14,89 @@ function num(value, fallback = 0) { const n = parseFloat(value); return Number.i
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function computeGrades(top, bottom, count) { if (count <= 0) return []; if (count === 1) return [Math.round(top)]; const result = []; for (let i = 0; i < count; i += 1) { const grade = top - (top - bottom) * (i / (count - 1)); result.push(Math.round(grade)); } return result; }
 function baseName(name) { return name.replace(/\.[^.]+$/, ''); }
-function labelFor(s) { return (s && (s.display_name || s.student_id)) ? (s.display_name || s.student_id) : ''; }
+function compactText(value) { return String(value || '').trim().replace(/\s+/g, ' '); }
+function isOpaqueStudentId(value) { const clean = compactText(value); return !!(clean && /^\d{8,}$/.test(clean)); }
+function firstNameOnly(value, fallback = '') {
+  let raw = compactText(value);
+  if (!raw || isOpaqueStudentId(raw)) raw = '';
+  if (raw.includes('@') && !raw.includes(' ')) raw = raw.split('@')[0];
+  const first = raw ? raw.split(' ')[0].replace(/^[.,;:()[\]{}<>"'`]+|[.,;:()[\]{}<>"'`]+$/g, '') : '';
+  if (first && !isOpaqueStudentId(first)) return first.slice(0, 40);
+  return compactText(fallback) || 'Student';
+}
+function appendSystemId(label, systemId) {
+  const clean = compactText(label);
+  const sid = compactText(systemId);
+  if (!clean) return sid;
+  if (sid && /^s\d+/i.test(sid) && !clean.includes(sid)) return `${clean} - ${sid}`;
+  return clean;
+}
+function classroomLabelSources() {
+  const maps = { byStudent: new Map(), bySource: new Map() };
+  const add = (key, label, map = maps.byStudent) => {
+    const cleanKey = compactText(key);
+    const cleanLabel = compactText(label);
+    if (cleanKey && cleanLabel && !isOpaqueStudentId(cleanLabel)) map.set(cleanKey, cleanLabel);
+  };
+  const addSourcePath = (path, label) => {
+    const clean = compactText(path);
+    if (!clean) return;
+    const name = clean.split('/').pop();
+    add(name, label, maps.bySource);
+    add(baseName(name), label, maps.bySource);
+  };
+  const metadata = data?.class_metadata || {};
+  [...(metadata.imported_submissions || []), ...(metadata.files || [])].forEach(row => {
+    const sid = row.student_id || row.safe_student_id || '';
+    const label = row.student_label || row.display_name || appendSystemId(row.student_first_name || '', sid);
+    add(sid, label);
+    addSourcePath(row.path || row.source_file || '', label);
+  });
+  const states = [classroomState, data?.classroom_state].filter(Boolean);
+  states.forEach(state => {
+    const submissions = state?.submissions || {};
+    Object.values(submissions).forEach(row => {
+      if (!row || typeof row !== 'object') return;
+      const first = firstNameOnly(row.display_name || row.student_first_name || '', row.student_id || '');
+      add(row.student_id, first);
+      add(row.submission_id, first);
+      addSourcePath(`${row.student_id || ''}.txt`, first);
+    });
+  });
+  return maps;
+}
+function classroomMappedLabel(student) {
+  if (!student) return '';
+  const maps = classroomLabelSources();
+  const source = compactText(student.source_file || '');
+  let label = '';
+  if (source) {
+    const name = source.split('/').pop();
+    label = maps.bySource.get(name) || maps.bySource.get(baseName(name)) || '';
+  }
+  const raw = compactText(student.display_name || '');
+  if (!label) label = maps.byStudent.get(raw) || maps.byStudent.get(student.student_id || '') || '';
+  return label ? appendSystemId(label, student.safe_student_id || student.student_id || '') : '';
+}
+function labelFor(s) {
+  if (!s) return '';
+  const systemId = s.safe_student_id || s.student_id || '';
+  const classroomBacked = !!(data?.class_metadata?.source === 'google_classroom_read_only_sync' || data?.classroom_state?.classroom_link || classroomState?.classroom_link);
+  const mapped = classroomBacked ? classroomMappedLabel(s) : '';
+  if (mapped) return mapped;
+  const explicit = compactText(s.student_label || s.student_display_name || s.display_name || '');
+  if (!classroomBacked) return explicit || compactText(systemId);
+  if (!explicit || isOpaqueStudentId(explicit)) return appendSystemId(firstNameOnly('', systemId), systemId);
+  return appendSystemId(firstNameOnly(explicit, systemId), systemId);
+}
+function labelForId(studentId, fallback = '') {
+  const sid = compactText(studentId);
+  const student = (data?.students || []).find(item => item.student_id === sid || item.safe_student_id === sid);
+  if (student) return labelFor(student);
+  const mapped = classroomMappedLabel({ student_id: sid, display_name: fallback, source_file: `${fallback || sid}.txt` });
+  if (mapped) return mapped;
+  return appendSystemId(firstNameOnly(fallback, sid), sid);
+}
 function getStudents() { return previewStudents.length ? previewStudents : ((data && data.students && data.students.length) ? data.students : []); }
 function pairKey(studentId, otherStudentId) { return [studentId, otherStudentId].sort().join('::'); }
 function studentReview(studentId) {
@@ -1120,7 +1202,7 @@ function renderAnchorReview(bundle) {
     const row = document.createElement('div');
     row.className = 'control';
     row.innerHTML = `
-      <label>${anchor.display_name || anchor.student_id} · machine ${anchor.machine_level || '—'} · ${anchor.machine_percent || '—'}%</label>
+      <label>${labelForId(anchor.student_id, anchor.display_name || anchor.student_id)} · machine ${anchor.machine_level || '—'} · ${anchor.machine_percent || '—'}%</label>
       <div class="curve-range">
         <select data-anchor-level="${idx}">
           <option value="">Level</option>
@@ -1192,7 +1274,8 @@ function validateAnchorPayload(anchors) {
   const byId = new Map(((anchorReview && anchorReview.anchor_packet && anchorReview.anchor_packet.anchors) || []).map(anchor => [anchor.student_id, anchor]));
   const allowedLevels = new Set(['1', '2', '3', '4', '4+']);
   for (const anchor of anchors) {
-    const label = byId.get(anchor.student_id)?.display_name || anchor.student_id;
+    const source = byId.get(anchor.student_id) || {};
+    const label = labelForId(anchor.student_id, source.display_name || anchor.student_id);
     if (anchor.teacher_level && !allowedLevels.has(anchor.teacher_level)) {
       return `${label} has an invalid level.`;
     }
@@ -1660,7 +1743,7 @@ function renderExceptions() {
   exceptions.slice(0, 12).forEach(item => {
     const row = document.createElement('div');
     row.className = 'exception-item';
-    const student = item.student_id ? `${item.student_id} · ` : '';
+    const student = item.student_id ? `${labelForId(item.student_id, item.student_id)} · ` : '';
     row.innerHTML = `
       <div class="exception-title">${student}${item.label || item.kind || 'Exception'}</div>
       <div class="exception-action">${item.action || 'Inspect this item before export.'}</div>
@@ -1998,7 +2081,7 @@ function setupControls() {
   document.getElementById('copyFeedback').addEventListener('click', () => {
     if (!data?.students?.length) return;
     const student = data.students[currentIndex]; const draft = feedbackForStudent(student.student_id, student.feedback_text || '');
-    const payload = [`Two Stars and a Wish — ${student.student_id}`, `Star 1: ${draft.star1 || '—'}`, `Star 2: ${draft.star2 || '—'}`, `Wish: ${draft.wish || '—'}`].join('\n'); navigator.clipboard.writeText(payload);
+    const payload = [`Two Stars and a Wish - ${labelFor(student)}`, `Star 1: ${draft.star1 || '—'}`, `Star 2: ${draft.star2 || '—'}`, `Wish: ${draft.wish || '—'}`].join('\n'); navigator.clipboard.writeText(payload);
   });
   const genBtn = document.getElementById('generateFeedback'); if (genBtn) genBtn.addEventListener('click', generateFeedbackDrafts);
   document.getElementById('themeToggle').addEventListener('click', () => { const body = document.body; body.dataset.theme = body.dataset.theme === 'dark' ? 'light' : 'dark'; });

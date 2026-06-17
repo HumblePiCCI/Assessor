@@ -147,6 +147,9 @@ In the UI:
 6. Choose a real low-risk class.
 7. Choose a real low-risk published written assignment.
 8. Sync submissions.
+9. Confirm the review UI uses first-name-plus-local-ID labels such as
+   `First - s001`; raw Google numeric user IDs and student last names should
+   not appear in the routine teacher path.
 
 Disconnect:
 
@@ -236,6 +239,12 @@ the explicit coursework read scope before reconnecting.
 `No current Classroom imports are ready to assess`
 : Resolve sync blockers and resync. The app will not run stale files from an
 older assignment, zero-import sync, or failed Google read.
+
+`Raw numeric student IDs in review`
+: Resync and rerun the assessment on the hardened branch. Classroom-owned
+imports are written as local `s001.txt` style files, and the dashboard maps
+them to first-name-plus-local-ID labels. Do not record student last names in
+smoke notes or committed artifacts.
 
 `preflight_stale_rebuild_required`
 : Review, validation, sync, blockers, or evidence changed after the CSV

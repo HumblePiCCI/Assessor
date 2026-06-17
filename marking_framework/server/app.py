@@ -96,6 +96,99 @@ def dashboard_data_path_for_identity(identity: dict) -> Path:
     return DATA_JSON_PATH
 
 
+def _append_system_id(label: str, student_id: str) -> str:
+    clean = " ".join(str(label or "").strip().split())
+    sid = " ".join(str(student_id or "").strip().split())
+    if not clean:
+        return sid
+    if sid and sid.lower().startswith("s") and sid not in clean:
+        return f"{clean} - {sid}"
+    return clean
+
+
+def hydrate_dashboard_classroom_labels(payload: dict, identity: dict) -> dict:
+    students = payload.get("students", []) if isinstance(payload, dict) else []
+    if not isinstance(students, list) or not students:
+        return payload
+    project = projectsmod.get_current_project(identity) or projectsmod.workspace_project(identity)
+    scope_id = classroommod.review_store.review_scope_id(project)
+    state = classroommod.public_state(classroommod.load_state(BASE_DIR, scope_id, project, identity))
+    metadata = payload.get("class_metadata", {}) if isinstance(payload.get("class_metadata"), dict) else {}
+    classroom_state = payload.get("classroom_state", {}) if isinstance(payload.get("classroom_state"), dict) else {}
+    classroom_backed = bool(
+        metadata.get("source") == "google_classroom_read_only_sync"
+        or state.get("classroom_link")
+        or classroom_state.get("classroom_link")
+    )
+    if not classroom_backed:
+        return payload
+    by_student: dict[str, str] = {}
+    by_source: dict[str, str] = {}
+
+    def add_student(key: str, label: str) -> None:
+        clean_key = str(key or "").strip()
+        clean_label = " ".join(str(label or "").strip().split())
+        if clean_key and clean_label and not classroommod.opaque_student_label(clean_label):
+            by_student[clean_key] = clean_label
+
+    def add_source(path: str, label: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        name = Path(clean_path).name
+        clean_label = " ".join(str(label or "").strip().split())
+        if clean_label and not classroommod.opaque_student_label(clean_label):
+            by_source[name] = clean_label
+            by_source[Path(name).stem] = clean_label
+
+    for row in list(metadata.get("imported_submissions", []) or []) + list(metadata.get("files", []) or []):
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("student_id", "") or row.get("safe_student_id", "") or "")
+        label = str(row.get("student_label", "") or row.get("display_name", "") or "")
+        if not label:
+            label = _append_system_id(str(row.get("student_first_name", "") or ""), sid)
+        add_student(sid, label)
+        add_source(str(row.get("path", "") or row.get("source_file", "") or ""), label)
+
+    for source_state in (classroom_state, state):
+        submissions = source_state.get("submissions", {}) if isinstance(source_state, dict) else {}
+        for submission in submissions.values() if isinstance(submissions, dict) else []:
+            if not isinstance(submission, dict):
+                continue
+            source_id = str(submission.get("student_id", "") or "")
+            first = classroommod.student_first_name(
+                str(submission.get("display_name", "") or submission.get("student_first_name", "") or ""),
+                source_id,
+            )
+            add_student(source_id, first)
+            add_student(str(submission.get("submission_id", "") or ""), first)
+            add_source(f"{source_id}.txt", first)
+
+    for student in students:
+        if not isinstance(student, dict):
+            continue
+        sid = str(student.get("safe_student_id", "") or student.get("student_id", "") or "")
+        source_file = str(student.get("source_file", "") or "")
+        label = ""
+        if source_file:
+            name = Path(source_file).name
+            label = by_source.get(name, "") or by_source.get(Path(name).stem, "")
+        if not label:
+            raw_display = str(student.get("display_name", "") or "")
+            label = by_student.get(raw_display, "") or by_student.get(str(student.get("student_id", "") or ""), "")
+        if not label:
+            label = str(student.get("student_label", "") or student.get("display_name", "") or "")
+        if classroommod.opaque_student_label(label):
+            label = ""
+        if label:
+            display = _append_system_id(label, sid)
+            student["display_name"] = display
+            student["student_label"] = display
+            student["safe_student_id"] = sid or str(student.get("student_id", "") or "")
+    return payload
+
+
 def reset_workspace(root: Path):
     inputs_dir = root / "inputs"
     exemplars_dir = inputs_dir / "exemplars"
@@ -240,10 +333,11 @@ def ui_file_response(name: str, media_type: str | None = None):
     return FileResponse(path, media_type=media_type)
 @app.get("/data.json")
 async def ui_data_json(request: Request):
-    data_path = dashboard_data_path_for_identity(request_identity(request))
+    identity = request_identity(request)
+    data_path = dashboard_data_path_for_identity(identity)
     if not data_path.exists():
         return {"students": []}
-    return json.loads(data_path.read_text(encoding="utf-8"))
+    return hydrate_dashboard_classroom_labels(json.loads(data_path.read_text(encoding="utf-8")), identity)
 @app.get("/")
 async def ui_index():
     return ui_file_response("index.html")

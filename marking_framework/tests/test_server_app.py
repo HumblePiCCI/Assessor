@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from server.app import app
 import server.app as appmod
+import server.classroom as classroommod
 import server.projects as projmod
 
 
@@ -329,6 +330,62 @@ def test_ui_routes(tmp_path, monkeypatch):
     (ui_dir / "app.js").unlink()
     resp_missing = client.get("/app.js")
     assert resp_missing.status_code == 404
+
+
+def test_data_json_hydrates_numeric_classroom_labels(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    project = {"id": "project-a", "name": "Project A", "scope_key": "project-a"}
+    projmod.CURRENT_PROJECT_PATH.write_text(json.dumps(project), encoding="utf-8")
+    workspace = projmod.workspace_root(None)
+    outputs = workspace / "outputs"
+    outputs.mkdir(parents=True, exist_ok=True)
+    raw_google_user_id = "123456789012345678901"
+    (outputs / "dashboard_data.json").write_text(
+        json.dumps(
+            {
+                "students": [
+                    {
+                        "student_id": "s014",
+                        "display_name": raw_google_user_id,
+                        "source_file": f"{raw_google_user_id}.txt",
+                    }
+                ],
+                "class_metadata": {"source": "google_classroom_read_only_sync"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    state_dir = server_dir / "data" / "classroom" / "project-a"
+    state_dir.mkdir(parents=True)
+    classroommod.write_json(
+        state_dir / "classroom_state.json",
+        {
+            "classroom_link": {"course_id": "course-1", "coursework_id": "cw-1"},
+            "submissions": {
+                "sub-1": {
+                    "submission_id": "sub-1",
+                    "student_id": raw_google_user_id,
+                    "display_name": "Alice Example",
+                }
+            },
+        },
+    )
+
+    response = TestClient(app).get("/data.json")
+
+    assert response.status_code == 200
+    student = response.json()["students"][0]
+    assert student["display_name"] == "Alice - s014"
+    assert student["student_label"] == "Alice - s014"
+    assert "Example" not in json.dumps(response.json())
+    assert raw_google_user_id not in student["display_name"]
 
 
 def test_projects_endpoints(tmp_path, monkeypatch):

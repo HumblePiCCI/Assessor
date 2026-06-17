@@ -108,6 +108,38 @@ def short_hash(payload: Any, length: int = 24) -> str:
     return canonical_hash(payload)[:length]
 
 
+def _compact_spaces(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def opaque_student_label(value: str) -> bool:
+    token = _compact_spaces(value)
+    return bool(token and token.isdigit() and len(token) >= 8)
+
+
+def student_first_name(value: str, fallback_id: str = "") -> str:
+    raw = _compact_spaces(value)
+    if not raw or opaque_student_label(raw):
+        raw = ""
+    if "@" in raw and " " not in raw:
+        raw = raw.split("@", 1)[0]
+    first = raw.split()[0] if raw else ""
+    first = first.strip(".,;:()[]{}<>\"'`")
+    if first and not opaque_student_label(first):
+        return first[:40]
+    return f"Student {short_hash({'student_id': fallback_id or value}, 6)}"
+
+
+def student_source_hash(student_id: str) -> str:
+    return short_hash({"classroom_student_id": str(student_id or "")})
+
+
+def classroom_student_label(first_name: str, system_student_id: str) -> str:
+    first = student_first_name(first_name, system_student_id)
+    sid = str(system_student_id or "").strip()
+    return f"{first} - {sid}" if sid else first
+
+
 def classroom_root(base_dir: Path) -> Path:
     path = base_dir / "data" / "classroom"
     path.mkdir(parents=True, exist_ok=True)
@@ -242,6 +274,43 @@ def default_registration() -> dict:
     }
 
 
+def sanitize_student_identity_fields(state: dict) -> dict:
+    roster = state.get("roster", [])
+    if isinstance(roster, list):
+        for row in roster:
+            if not isinstance(row, dict):
+                continue
+            source_id = str(row.get("student_id", "") or row.get("classroom_user_id", "") or "")
+            first = student_first_name(str(row.get("display_name", "") or row.get("student_first_name", "") or ""), source_id)
+            row["display_name"] = first
+            row["student_first_name"] = first
+            row["source_student_id_hash"] = str(row.get("source_student_id_hash", "") or student_source_hash(source_id))
+    submissions = state.get("submissions", {})
+    if isinstance(submissions, dict):
+        for row in submissions.values():
+            if not isinstance(row, dict):
+                continue
+            source_id = str(row.get("student_id", "") or "")
+            first = student_first_name(str(row.get("display_name", "") or row.get("student_first_name", "") or ""), source_id)
+            row["display_name"] = first
+            row["student_first_name"] = first
+            row["source_student_id_hash"] = str(row.get("source_student_id_hash", "") or student_source_hash(source_id))
+    passback = state.get("passback", {}) if isinstance(state.get("passback"), dict) else {}
+    preflights = passback.get("preflights", {}) if isinstance(passback.get("preflights"), dict) else {}
+    for preflight in preflights.values():
+        if not isinstance(preflight, dict):
+            continue
+        for row in preflight.get("diff_rows", []) or []:
+            if not isinstance(row, dict):
+                continue
+            safe_id = str(row.get("safe_student_id", "") or row.get("student_id", "") or "")
+            first = student_first_name(str(row.get("student_display_name", "") or row.get("display_name", "") or ""), safe_id)
+            label = classroom_student_label(first, safe_id) if safe_id and not opaque_student_label(safe_id) else first
+            row["display_name"] = label
+            row["student_display_name"] = label
+    return state
+
+
 def load_state(base_dir: Path, scope_id: str, current_project: dict | None = None, identity: dict | None = None) -> dict:
     existing = load_json(state_path(base_dir, scope_id))
     if not existing:
@@ -278,7 +347,7 @@ def load_state(base_dir: Path, scope_id: str, current_project: dict | None = Non
         "status",
         "current" if merged["finalization"].get("finalized_by_teacher_at") else "not_finalized",
     )
-    return merged
+    return sanitize_student_identity_fields(merged)
 
 
 def save_state(base_dir: Path, scope_id: str, state: dict, root: Path | None = None) -> dict:
@@ -296,13 +365,31 @@ def materialize_workspace_state(root: Path, state: dict) -> None:
 
 
 def public_state(state: dict) -> dict:
-    payload = json.loads(json.dumps(state, ensure_ascii=True))
+    payload = sanitize_student_identity_fields(json.loads(json.dumps(state, ensure_ascii=True)))
     payload["event_ids"] = list(payload.get("event_ids", [])[-20:])
+    roster = payload.get("roster", [])
+    if isinstance(roster, list):
+        for row in roster:
+            if not isinstance(row, dict):
+                continue
+            source_id = str(row.get("student_id", "") or row.get("classroom_user_id", "") or "")
+            first = student_first_name(str(row.get("display_name", "") or row.get("student_first_name", "") or ""), source_id)
+            row["display_name"] = first
+            row["student_first_name"] = first
+            row["source_student_id_hash"] = str(row.get("source_student_id_hash", "") or student_source_hash(source_id))
+            row.pop("classroom_user_id", None)
     submissions = payload.get("submissions", {})
     if isinstance(submissions, dict):
         for submission in submissions.values():
             if not isinstance(submission, dict):
                 continue
+            source_id = str(submission.get("student_id", "") or "")
+            first = student_first_name(str(submission.get("display_name", "") or submission.get("student_first_name", "") or ""), source_id)
+            submission["display_name"] = first
+            submission["student_first_name"] = first
+            submission["source_student_id_hash"] = str(
+                submission.get("source_student_id_hash", "") or student_source_hash(source_id)
+            )
             submission.pop("extracted_text", None)
             for attachment in submission.get("attachments", []) or []:
                 if isinstance(attachment, dict):
@@ -408,10 +495,13 @@ def normalize_roster(raw_roster: list[dict]) -> list[dict]:
         if not student_id or student_id in seen:
             continue
         seen.add(student_id)
+        first_name = student_first_name(str(raw.get("display_name", "") or raw.get("name", "") or ""), student_id)
         roster.append(
             {
                 "student_id": student_id,
-                "display_name": str(raw.get("display_name", "") or raw.get("name", "") or student_id).strip(),
+                "display_name": first_name,
+                "student_first_name": first_name,
+                "source_student_id_hash": student_source_hash(student_id),
                 "course_role": str(raw.get("course_role", "") or "student"),
                 "classroom_user_id": str(raw.get("classroom_user_id", "") or raw.get("user_id", "") or ""),
             }
@@ -496,7 +586,10 @@ def normalize_submission(raw: dict, existing: dict | None = None) -> dict:
     submission_id = str(raw.get("submission_id", "") or raw.get("id", "") or raw.get("student_id", "") or "").strip()
     student_id = str(raw.get("student_id", "") or raw.get("user_id", "") or submission_id).strip()
     classroom_state = str(raw.get("classroom_state", "") or raw.get("state", "") or "submitted").strip().lower()
-    display_name = str(raw.get("display_name", "") or raw.get("student_name", "") or student_id).strip()
+    display_name = student_first_name(
+        str(raw.get("display_name", "") or raw.get("student_name", "") or existing.get("display_name", "") or ""),
+        student_id,
+    )
     attachments = [normalize_attachment(item) for item in raw.get("attachments", []) or [] if isinstance(item, dict)]
     direct_text = str(raw.get("text", "") or raw.get("extracted_text", "") or "")
     text_parts = [direct_text] if direct_text.strip() else []
@@ -525,6 +618,8 @@ def normalize_submission(raw: dict, existing: dict | None = None) -> dict:
         "submission_id": submission_id or short_hash({"student_id": student_id, "display_name": display_name}),
         "student_id": student_id,
         "display_name": display_name,
+        "student_first_name": display_name,
+        "source_student_id_hash": student_source_hash(student_id),
         "classroom_state": classroom_state,
         "google_submission_state": str(raw.get("google_submission_state", "") or raw.get("state", "") or ""),
         "submitted_at": str(raw.get("submitted_at", "") or ""),
@@ -622,6 +717,18 @@ def safe_submission_filename(submission: dict) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in token)
     cleaned = "-".join(part for part in cleaned.split("-") if part)
     return f"{cleaned or short_hash(submission)}.txt"
+
+
+def _classroom_submission_sort_key(submission: dict) -> tuple[str, str, str]:
+    first_name = student_first_name(
+        str(submission.get("display_name", "") or submission.get("student_first_name", "") or ""),
+        str(submission.get("student_id", "") or ""),
+    )
+    return (
+        first_name.lower(),
+        str(submission.get("source_student_id_hash", "") or student_source_hash(str(submission.get("student_id", "") or ""))),
+        str(submission.get("submission_id", "") or ""),
+    )
 
 
 def classroom_import_dir(root: Path) -> Path:
@@ -730,32 +837,53 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
     imported = []
     blockers = []
     summary = summarize_state(state)
-    for submission in (state.get("submissions", {}) or {}).values():
+    sorted_submissions = sorted(
+        [item for item in (state.get("submissions", {}) or {}).values() if isinstance(item, dict)],
+        key=_classroom_submission_sort_key,
+    )
+    import_map = {}
+    for submission in sorted_submissions:
         if not isinstance(submission, dict):
             continue
         submission_blockers = list(submission.get("attachment_blockers", []) or [])
         classroom_state = str(submission.get("classroom_state", "") or "")
         text = str(submission.get("extracted_text", "") or "")
+        first_name = student_first_name(
+            str(submission.get("display_name", "") or submission.get("student_first_name", "") or ""),
+            str(submission.get("student_id", "") or ""),
+        )
+        source_student_hash = str(
+            submission.get("source_student_id_hash", "") or student_source_hash(str(submission.get("student_id", "") or ""))
+        )
         if classroom_state != "submitted" or submission_blockers or not text.strip():
             blockers.append(
                 {
                     "submission_id": submission.get("submission_id", ""),
                     "student_id": submission.get("student_id", ""),
+                    "student_first_name": first_name,
+                    "source_student_id_hash": source_student_hash,
                     "blockers": submission_blockers or ([classroom_state] if classroom_state != "submitted" else ["no_extractable_text"]),
                 }
             )
             continue
-        filename = safe_submission_filename(submission)
-        path = final_import_dir / filename
-        imported.append(
-            {
-                "submission_id": submission.get("submission_id", ""),
-                "student_id": submission.get("student_id", ""),
-                "path": f"inputs/submissions/{CLASSROOM_IMPORT_DIRNAME}/{filename}",
-                "text_hash": submission.get("text_hash", ""),
-                "text": text.strip(),
-            }
-        )
+        system_student_id = f"s{len(imported) + 1:03d}"
+        student_label = classroom_student_label(first_name, system_student_id)
+        filename = f"{system_student_id}.txt"
+        imported_row = {
+            "submission_id": system_student_id,
+            "student_id": system_student_id,
+            "safe_student_id": system_student_id,
+            "source_submission_id_hash": short_hash({"submission_id": str(submission.get("submission_id", "") or "")}),
+            "source_student_id_hash": source_student_hash,
+            "student_first_name": first_name,
+            "student_label": student_label,
+            "display_name": student_label,
+            "path": f"inputs/submissions/{CLASSROOM_IMPORT_DIRNAME}/{filename}",
+            "text_hash": submission.get("text_hash", ""),
+            "text": text.strip(),
+        }
+        imported.append(imported_row)
+        import_map[system_student_id] = {key: value for key, value in imported_row.items() if key != "text"}
         submission["analysis_state"] = "scheduled"
     if len(imported) == 0:
         zero_import_error = {
@@ -777,7 +905,7 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
             "snapshot_hash": snapshot_hash,
             "course_id_hash": short_hash({"course_id": link.get("course_id", "")}),
             "coursework_id_hash": short_hash({"coursework_id": link.get("coursework_id", "")}),
-            "files": [{key: row.get(key, "") for key in ("submission_id", "student_id", "path", "text_hash")} for row in imported],
+            "files": [{key: row.get(key, "") for key in ("submission_id", "student_id", "path", "text_hash", "student_label")} for row in imported],
             "blockers": blockers,
             "platform_errors": state.get("platform_errors", []) or [],
         }
@@ -823,6 +951,7 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
         "sync_id": sync_id,
         "snapshot_hash": snapshot_hash,
         "imported_submissions": manifest_files,
+        "student_display_policy": "first_name_plus_system_id",
         "external_write_performed": False,
     }
     manifest = {
@@ -853,6 +982,7 @@ def materialize_read_only_submissions(root: Path, state: dict) -> dict:
     tmp_dir.replace(final_import_dir)
     write_json(classroom_import_manifest_path(root), manifest)
     write_json(inputs / "class_metadata.json", metadata)
+    state["classroom_import_map"] = import_map
     return {
         "adapter": str(state.get("classroom_link", {}).get("google_integration_path", "") or "fixture_local"),
         "external_write_performed": False,
@@ -1376,6 +1506,10 @@ def passback_rows(state: dict, latest_review: dict, mode: str) -> list[dict]:
         for item in (state.get("submissions", {}) or {}).values()
         if item.get("student_id")
     }
+    import_map = state.get("classroom_import_map", {}) if isinstance(state.get("classroom_import_map"), dict) else {}
+    for system_id, imported in import_map.items():
+        if isinstance(imported, dict):
+            submissions_by_student[str(system_id)] = imported
     feedback_by_student = {
         str(item.get("student_id", "") or ""): item
         for item in latest_review.get("feedback_drafts", []) or []
@@ -1393,11 +1527,11 @@ def passback_rows(state: dict, latest_review: dict, mode: str) -> list[dict]:
         rows.append(
             {
                 "student_id": sid,
-                "safe_student_id": sid,
-                "classroom_student_id": submission.get("student_id", sid),
+                "safe_student_id": submission.get("safe_student_id", sid),
+                "classroom_student_id": submission.get("source_student_id_hash", ""),
                 "submission_id": submission.get("submission_id", ""),
-                "display_name": submission.get("display_name", sid),
-                "student_display_name": submission.get("display_name", sid),
+                "display_name": submission.get("student_label") or submission.get("display_name", sid),
+                "student_display_name": submission.get("student_label") or submission.get("display_name", sid),
                 "assigned_mark": mark.get("mark"),
                 "draft_grade": mark.get("mark") if mode in {"draft_grade", "assigned_grade", "return_submission"} else None,
                 "assigned_grade": mark.get("mark") if mode in {"assigned_grade", "return_submission"} else None,

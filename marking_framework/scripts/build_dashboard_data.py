@@ -69,6 +69,90 @@ def load_submission_metadata(path: Path) -> dict:
     return {}
 
 
+def compact_spaces(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def opaque_student_label(value: str) -> bool:
+    token = compact_spaces(value)
+    return bool(token and token.isdigit() and len(token) >= 8)
+
+
+def student_first_name(value: str, fallback: str = "") -> str:
+    raw = compact_spaces(value)
+    if not raw or opaque_student_label(raw):
+        raw = ""
+    if "@" in raw and " " not in raw:
+        raw = raw.split("@", 1)[0]
+    first = raw.split()[0] if raw else ""
+    first = first.strip(".,;:()[]{}<>\"'`")
+    if first and not opaque_student_label(first):
+        return first[:40]
+    return compact_spaces(fallback) or "Student"
+
+
+def append_system_id(label: str, student_id: str) -> str:
+    clean = compact_spaces(label)
+    sid = compact_spaces(student_id)
+    if not clean:
+        return sid
+    if sid and sid not in clean and sid.lower().startswith("s"):
+        return f"{clean} - {sid}"
+    return clean
+
+
+def classroom_label_maps(class_metadata: dict, classroom_state: dict) -> dict[str, dict[str, str]]:
+    by_source_file: dict[str, str] = {}
+    by_student_id: dict[str, str] = {}
+    rows = []
+    if isinstance(class_metadata, dict):
+        rows.extend(class_metadata.get("imported_submissions", []) or [])
+        rows.extend((class_metadata.get("files", []) or []))
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sid = compact_spaces(row.get("student_id", "") or row.get("safe_student_id", ""))
+        first = student_first_name(row.get("student_first_name", "") or row.get("display_name", ""), sid)
+        label = compact_spaces(row.get("student_label", "") or row.get("display_name", "")) or append_system_id(first, sid)
+        if sid:
+            by_student_id[sid] = label
+        path = compact_spaces(row.get("path", "") or row.get("source_file", ""))
+        if path:
+            by_source_file[Path(path).name] = label
+            by_source_file[Path(path).stem] = label
+    submissions = classroom_state.get("submissions", {}) if isinstance(classroom_state, dict) else {}
+    iterable = submissions.values() if isinstance(submissions, dict) else []
+    for submission in iterable:
+        if not isinstance(submission, dict):
+            continue
+        source_id = compact_spaces(submission.get("student_id", ""))
+        first = student_first_name(submission.get("display_name", "") or submission.get("student_first_name", ""), source_id)
+        for key in (source_id, compact_spaces(submission.get("submission_id", ""))):
+            if key:
+                by_student_id[key] = first
+                by_source_file[f"{key}.txt"] = first
+                by_source_file[key] = first
+    return {"by_source_file": by_source_file, "by_student_id": by_student_id}
+
+
+def dashboard_display_label(student_id: str, meta_row: dict, label_maps: dict[str, dict[str, str]]) -> str:
+    sid = compact_spaces(student_id)
+    source_file = compact_spaces(meta_row.get("source_file", ""))
+    by_source = label_maps.get("by_source_file", {})
+    by_student = label_maps.get("by_student_id", {})
+    label = ""
+    if source_file:
+        label = by_source.get(Path(source_file).name, "") or by_source.get(Path(source_file).stem, "")
+    if not label:
+        raw_display = compact_spaces(meta_row.get("display_name", ""))
+        label = by_student.get(raw_display, "") or by_student.get(sid, "")
+    if not label:
+        label = compact_spaces(meta_row.get("student_label", "") or meta_row.get("display_name", "") or sid)
+    if opaque_student_label(label):
+        label = sid
+    return append_system_id(label, sid)
+
+
 def num(value, default=0.0) -> float:
     try:
         return float(value)
@@ -433,6 +517,9 @@ def main() -> int:
     rubric_validation_report = load_json(Path("outputs/rubric_validation_report.json"))
     rubric_verification = load_json(Path("outputs/rubric_verification.json"))
     classroom_state = load_json(Path("outputs/classroom_state.json"))
+    metadata_path = Path("inputs/class_metadata.json")
+    class_metadata = load_json(metadata_path)
+    label_maps = classroom_label_maps(class_metadata, classroom_state)
     uncertainty_by_student = movement_map(consistency_report)
     boundaries = level_boundaries(Path("config/marking_config.json"))
 
@@ -449,10 +536,13 @@ def main() -> int:
         student_text = texts.get(sid, "")
         feedback_text = load_feedback_text(feedback_dir, sid)
         flags, reasons = student_uncertainty(row, uncertainty_by_student.get(sid, {}), boundaries)
+        display_label = dashboard_display_label(sid, meta_row, label_maps)
         data.append(
             {
                 "student_id": sid,
-                "display_name": meta_row.get("display_name") or sid,
+                "display_name": display_label,
+                "student_label": display_label,
+                "safe_student_id": sid,
                 "source_file": meta_row.get("source_file", ""),
                 "word_count": meta_row.get("word_count"),
                 "paragraph_count": meta_row.get("paragraph_count"),
@@ -493,11 +583,6 @@ def main() -> int:
 
     # Sort by rank for UI
     data.sort(key=lambda r: r["rank"])
-
-    metadata_path = Path("inputs/class_metadata.json")
-    class_metadata = {}
-    if metadata_path.exists():
-        class_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 
     curve_top = grades_rows[0].get("curve_top") if grades_rows else None
     curve_bottom = grades_rows[0].get("curve_bottom") if grades_rows else None

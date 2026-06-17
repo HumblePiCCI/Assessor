@@ -3,6 +3,9 @@
 Status: implementation verified with mocks/fixtures; manual live owner smoke pending.
 
 This report intentionally contains no real student names, document titles, raw Google IDs, screenshots, downloaded student work, OAuth tokens, client secrets, auth codes, raw Google payloads, or generated CSVs from real students.
+For Classroom review labels, record only the fact that first-name-plus-local-ID
+labels were visible, for example `First - s001`; do not record student last
+names.
 
 ## Implementation Verification
 
@@ -80,6 +83,34 @@ Timeout/source-isolation patch result:
   - `publish_gate_missing`
   - `sota_gate_missing`
   - `calibration_manifest_missing`
+
+First-name label/privacy patch verification on 2026-06-17:
+
+```bash
+cd marking_framework
+python3 -m pytest -q --no-cov tests/test_server_app.py tests/test_classroom_product.py tests/test_classroom_live_read_sync.py
+python3 -m pytest -q --no-cov tests/test_google_oauth.py tests/test_google_classroom_adapter.py tests/test_google_drive_adapter.py tests/test_classroom_live_read_sync.py tests/test_classroom_product.py tests/test_pipeline_queue.py tests/test_server_app.py
+python3 -m pytest -q --no-cov
+node --check ui/app.js
+python3 scripts/validate_production_launch.py
+```
+
+First-name label/privacy patch result:
+
+- Classroom/product focused pytest: passed
+- required focused pytest: passed
+- full pytest: passed
+- UI syntax: passed
+- production launch validator: blocked as expected by real launch gates
+  - `publish_gate_missing`
+  - `sota_gate_missing`
+  - `calibration_manifest_missing`
+- Classroom-owned imports now materialize as local `s001.txt` style files and
+  dashboards prefer first-name-plus-local-ID labels.
+- `/data.json` hydrates older numeric dashboard labels from sanitized
+  Classroom state so an already-run local review becomes readable after refresh.
+- Public Classroom state and metadata used by the routine UI avoid student last
+  names; raw Google numeric IDs are not used as teacher-facing labels.
 
 Hardening coverage added for the final local pilot smoke patch:
 
@@ -163,6 +194,10 @@ Do not record course names, assignment names, student names, document titles, ra
 - `platform_error_count`:
 - current Classroom import manifest hash:
 - stale prior Classroom imports absent after latest sync:
+- Classroom-owned source files used local IDs such as `s001.txt`:
+- routine review UI showed first-name-plus-local-ID labels, not raw Google
+  numeric IDs:
+- student last names absent from smoke notes/artifacts:
 - blocker types:
 - unsupported/empty/permission-denied files were not graded as zero-text:
 
@@ -239,22 +274,25 @@ Do not record course names, assignment names, student names, document titles, ra
 16. Choose a real low-risk published written assignment.
 17. Sync submissions.
 18. Confirm all sync counts.
-19. Confirm blockers have remedies and unsupported/empty/permission-denied files are not graded as zero-text.
-20. Add rubric and assignment outline.
-21. Connect runtime through Codex local OAuth or provider-generic API mode.
-22. Run assessment.
-23. Confirm `teacher_review_ready` appears before background validation completes when fast review succeeds.
-24. Review one normal student.
-25. Review one flagged/boundary student.
-26. Save draft.
-27. Reload and verify draft persistence.
-28. Finalize review.
-29. Reload and verify finalized persistence.
-30. Run CSV export preflight.
-31. Confirm CSV export only after required gates. If any teacher edit,
+19. Confirm Classroom-owned imports use local IDs such as `s001.txt`, and the
+    review rail/title/exceptions/anchor panel show first-name-plus-local-ID
+    labels rather than raw Google numeric IDs or student last names.
+20. Confirm blockers have remedies and unsupported/empty/permission-denied files are not graded as zero-text.
+21. Add rubric and assignment outline.
+22. Connect runtime through Codex local OAuth or provider-generic API mode.
+23. Run assessment.
+24. Confirm `teacher_review_ready` appears before background validation completes when fast review succeeds.
+25. Review one normal student.
+26. Review one flagged/boundary student.
+27. Save draft.
+28. Reload and verify draft persistence.
+29. Finalize review.
+30. Reload and verify finalized persistence.
+31. Run CSV export preflight.
+32. Confirm CSV export only after required gates. If any teacher edit,
     validation refresh, Classroom resync, blocker change, or evidence change
     happens after preflight, rebuild preflight before confirming export.
-32. Download CSV or record artifact hash without committing the CSV.
-33. Generate/inspect evidence packet.
-34. Confirm no live Google Classroom write occurred.
-35. Run launch validator and record that production launch remains blocked unless all launch gates are truly satisfied.
+33. Download CSV or record artifact hash without committing the CSV.
+34. Generate/inspect evidence packet.
+35. Confirm no live Google Classroom write occurred.
+36. Run launch validator and record that production launch remains blocked unless all launch gates are truly satisfied.

@@ -101,15 +101,17 @@ def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_b
     assert payload["read_sync"]["blocked_submission_count"] == 1
     assert "external_link_unsupported" in payload["blockers"]
     workspace = projmod.workspace_root(None)
-    assert (workspace / "inputs" / "submissions" / "classroom_import" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
-    assert not (workspace / "inputs" / "submissions" / "classroom_import" / "s2.txt").exists()
+    assert (workspace / "inputs" / "submissions" / "classroom_import" / "s001.txt").read_text(encoding="utf-8").strip() == "First imported essay."
+    assert not (workspace / "inputs" / "submissions" / "classroom_import" / "s002.txt").exists()
     metadata = json.loads((workspace / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
     manifest = json.loads((workspace / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
     assert metadata["adapter"] == "live_google"
     assert metadata["latest_sync"]["imported_count"] == 1
     assert metadata["latest_sync"]["blocker_count"] == 1
     assert metadata["latest_sync"]["external_write_performed"] is False
+    assert metadata["imported_submissions"][0]["student_label"] == "Student - s001"
     assert manifest["current_import_ready"] is True
+    assert manifest["files"][0]["student_id"] == "s001"
 
 
 class FailingRefreshTransport:
@@ -213,7 +215,7 @@ def test_classroom_project_inputs_reach_teacher_review_before_background_validat
     (inputs / "submissions").mkdir(parents=True, exist_ok=True)
     import_dir = inputs / "submissions" / "classroom_import"
     import_dir.mkdir(parents=True, exist_ok=True)
-    imported = import_dir / "s1.txt"
+    imported = import_dir / "s001.txt"
     imported.write_text("First imported essay.", encoding="utf-8")
     (inputs / "classroom_import_manifest.json").write_text(
         json.dumps(
@@ -222,7 +224,7 @@ def test_classroom_project_inputs_reach_teacher_review_before_background_validat
                 "current_import_ready": True,
                 "imported_count": 1,
                 "platform_error_count": 0,
-                "files": [{"path": "inputs/submissions/classroom_import/s1.txt"}],
+                "files": [{"path": "inputs/submissions/classroom_import/s001.txt"}],
             }
         ),
         encoding="utf-8",

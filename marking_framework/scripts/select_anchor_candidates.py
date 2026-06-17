@@ -71,12 +71,57 @@ def submission_meta(path: Path) -> dict[str, dict]:
     return {}
 
 
+def compact_spaces(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def anchor_label_maps(class_metadata: dict) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    rows = []
+    if isinstance(class_metadata, dict):
+        rows.extend(class_metadata.get("imported_submissions", []) or [])
+        rows.extend(class_metadata.get("files", []) or [])
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        label = compact_spaces(row.get("student_label", "") or row.get("display_name", ""))
+        if not label:
+            continue
+        sid = compact_spaces(row.get("student_id", "") or row.get("safe_student_id", ""))
+        if sid:
+            labels[sid] = label
+        path = compact_spaces(row.get("path", "") or row.get("source_file", ""))
+        if path:
+            labels[Path(path).name] = label
+            labels[Path(path).stem] = label
+    return labels
+
+
+def anchor_display_label(student_id: str, meta: dict, labels: dict[str, str]) -> str:
+    sid = compact_spaces(student_id)
+    source_file = compact_spaces(meta.get("source_file", ""))
+    if source_file:
+        label = labels.get(Path(source_file).name, "") or labels.get(Path(source_file).stem, "")
+        if label:
+            return label
+    raw = compact_spaces(meta.get("display_name", ""))
+    return labels.get(raw, "") or labels.get(sid, "") or raw or sid
+
+
 def movement_map(consistency_report: dict) -> dict[str, dict]:
     movements = consistency_report.get("movements", []) if isinstance(consistency_report, dict) else []
     return {str(item.get("student_id", "") or ""): item for item in movements if isinstance(item, dict) and item.get("student_id")}
 
 
-def select_anchor_candidates(rows: list[dict], *, config: dict, consistency_report: dict, metadata: dict[str, dict], candidate_count: int = 5) -> dict:
+def select_anchor_candidates(
+    rows: list[dict],
+    *,
+    config: dict,
+    consistency_report: dict,
+    metadata: dict[str, dict],
+    class_metadata: dict | None = None,
+    candidate_count: int = 5,
+) -> dict:
     if not rows:
         return {
             "generated_at": now_iso(),
@@ -137,13 +182,14 @@ def select_anchor_candidates(rows: list[dict], *, config: dict, consistency_repo
     selected = selected[: max(1, int(candidate_count))]
     candidates = []
     by_id = {str(row.get("student_id", "") or ""): row for row in ordered}
+    labels = anchor_label_maps(class_metadata or {})
     for student_id in selected:
         row = by_id.get(student_id, {})
         meta = metadata.get(student_id, {})
         candidates.append(
             {
                 "student_id": student_id,
-                "display_name": str(meta.get("display_name", "") or student_id),
+                "display_name": anchor_display_label(student_id, meta, labels),
                 "source_file": str(meta.get("source_file", "") or ""),
                 "machine_rank": int(num(row.get(order_key), 0.0) or 0.0),
                 "machine_level": str(row.get("adjusted_level", "") or row.get("base_level", "") or ""),
@@ -203,6 +249,7 @@ def main() -> int:
         config=load_json(Path(args.config)),
         consistency_report=load_json(Path(args.consistency_report)),
         metadata=submission_meta(Path(args.submission_metadata)),
+        class_metadata=load_json(Path("inputs/class_metadata.json")),
         candidate_count=max(1, int(args.candidate_count)),
     )
     output = Path(args.output)

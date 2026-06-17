@@ -162,6 +162,9 @@ Expected:
 - `Sync submissions` imports supported attachments into the ignored local
   workspace under `inputs/submissions/classroom_import/` and records the
   current manifest in `inputs/classroom_import_manifest.json`
+- Classroom-owned imports are materialized with local system IDs such as
+  `s001.txt`; the routine review UI should show first-name labels plus those
+  local IDs, not raw Google numeric user IDs or student last names
 - counts show roster, submitted, imported, blocked, missing, reclaimed,
   returned, and platform-error counts
 - blockers appear in Exceptions with remedies
@@ -429,6 +432,9 @@ Expected current setup:
 - live courses and published assignments are listed from the connected account
 - `Sync submissions` imports supported written submissions into
   `inputs/submissions`
+- the review rail, essay title, exceptions, anchor calibration, feedback copy,
+  and CSV/export preview identify Classroom work with first-name-plus-local-ID
+  labels such as `First - s001`, not raw Google numeric IDs
 - unsupported links, Forms/Slides/Sheets/drawings, image/OCR gaps, missing Drive
   scope, permission denial, API-disabled, quota, file-too-large, and empty
   extraction become blockers
@@ -443,6 +449,8 @@ Expected current setup:
 Do not commit the credentials JSON or paste the client secret into docs, chat,
 source files. Do not commit downloaded submissions, private screenshots, raw
 Google payloads, real generated CSVs, or real student names in smoke reports.
+Do not record student last names; local smoke notes should use only redacted
+labels or first-name-plus-local-ID labels.
 
 Pass criteria:
 
@@ -494,6 +502,8 @@ Record:
 - whether rubric review appeared
 - whether anchor calibration appeared
 - Classroom read/sync pilot result
+- first-name-plus-local-ID label check; no raw Google numeric IDs in the
+  routine review UI
 - export/passback preflight result
 - CSV preflight timestamp/hash and whether confirmation used that current
   preflight

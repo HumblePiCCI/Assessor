@@ -73,6 +73,7 @@ Quick Start
    - start the app with `python3 -m uvicorn server.app:app --host 127.0.0.1 --port 8000 --no-access-log` so OAuth callback codes are not written into local access logs
    - click `Connect Google Classroom`, authenticate as the teacher, choose a real low-risk course and published assignment, then sync submissions
    - synced Classroom submissions are authoritative under `inputs/submissions/classroom_import/`; zero-import, failed, or different-assignment syncs clear prior Classroom-owned imports so stale work cannot run
+   - Classroom-owned essays use local IDs such as `s001`; the routine review UI should show first-name-plus-local-ID labels, not raw Google numeric IDs or student last names
    - add rubric and outline, run `POST /pipeline/v2/run-project-inputs` through the UI, review normal and flagged students, finalize review, then use CSV preflight/export
    - rebuild CSV preflight after any teacher edit, validation refresh, Classroom resync, blocker change, or evidence change
    - confirm every Classroom sync/export action reports `external_write_performed: false`

@@ -9,6 +9,7 @@ import server.app as appmod
 import server.classroom as classroom
 import server.projects as projmod
 import server.review_store as review_store
+from scripts import build_dashboard_data
 from server.app import app
 
 
@@ -252,8 +253,8 @@ def test_classroom_read_only_sync_materializes_supported_text_and_blocks_unsuppo
     assert bundle["read_sync"]["external_write_performed"] is False
     assert bundle["read_sync"]["imported_submission_count"] == 1
     assert bundle["read_sync"]["blocked_submission_count"] == 1
-    assert classroom_import_file(root, "s1.txt").read_text(encoding="utf-8").strip() == "First essay text."
-    assert not classroom_import_file(root, "s2.txt").exists()
+    assert classroom_import_file(root, "s001.txt").read_text(encoding="utf-8").strip() == "First essay text."
+    assert not classroom_import_file(root, "s002.txt").exists()
     assert "external_link_unsupported" in bundle["blockers"]
     metadata = json.loads((root / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
     manifest = json.loads((root / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
@@ -261,9 +262,14 @@ def test_classroom_read_only_sync_materializes_supported_text_and_blocks_unsuppo
     assert metadata["imported_submission_count"] == 1
     assert metadata["current_import_ready"] is True
     assert manifest["current_import_ready"] is True
-    assert manifest["files"][0]["path"] == "inputs/submissions/classroom_import/s1.txt"
+    assert manifest["files"][0]["path"] == "inputs/submissions/classroom_import/s001.txt"
+    assert manifest["files"][0]["student_id"] == "s001"
+    assert manifest["files"][0]["student_label"] == "Student - s001"
     assert metadata["assignment"]["course_id_hash"] != "course-1"
     assert "course_id" not in metadata["assignment"]
+    serialized = json.dumps(metadata)
+    assert "Student One" not in serialized
+    assert "source_student_id_hash" in serialized
 
 
 def test_read_sync_zero_imports_and_mixed_attachments_block_without_materializing(tmp_path):
@@ -306,6 +312,68 @@ def test_read_sync_zero_imports_and_mixed_attachments_block_without_materializin
     assert manifest["current_import_ready"] is False
 
 
+def test_classroom_import_uses_first_name_labels_and_synthetic_system_ids(tmp_path):
+    root = tmp_path
+    base_dir = root / "server"
+    base_dir.mkdir()
+    project = {"id": "project-a", "name": "Project A"}
+    raw_google_user_id = "123456789012345678901"
+    payload = {
+        "course_id": "course-1",
+        "course_name": "Period 2",
+        "coursework_id": "cw-1",
+        "coursework_title": "Macbeth Essay",
+        "passback_mode": "csv_export",
+        "roster": [{"student_id": raw_google_user_id, "display_name": "Alice Example"}],
+        "submissions": [
+            {
+                "submission_id": "classroom-submission-1",
+                "student_id": raw_google_user_id,
+                "display_name": "Alice Example",
+                "attachments": [{"attachment_id": "a1", "mime_type": "text/plain", "text": "Alice essay text."}],
+            }
+        ],
+    }
+
+    bundle = classroom.read_only_sync(base_dir, root, project, {}, payload)
+
+    assert bundle["read_sync"]["imported_submission_count"] == 1
+    assert classroom_import_file(root, "s001.txt").read_text(encoding="utf-8").strip() == "Alice essay text."
+    assert not classroom_import_file(root, f"{raw_google_user_id}.txt").exists()
+    metadata = json.loads((root / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    manifest = json.loads((root / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
+    state = json.loads((base_dir / "data" / "classroom" / "project-a" / "classroom_state.json").read_text(encoding="utf-8"))
+    public = classroom.public_state(state)
+    assert manifest["files"][0]["student_id"] == "s001"
+    assert manifest["files"][0]["student_label"] == "Alice - s001"
+    assert public["roster"][0]["display_name"] == "Alice"
+    assert next(iter(public["submissions"].values()))["display_name"] == "Alice"
+    assert "Example" not in json.dumps(metadata)
+    assert "Example" not in json.dumps(public)
+    assert raw_google_user_id not in json.dumps(metadata)
+
+
+def test_dashboard_labels_numeric_classroom_sources_with_first_name_and_system_id():
+    label_maps = build_dashboard_data.classroom_label_maps(
+        {},
+        {
+            "submissions": {
+                "sub-1": {
+                    "submission_id": "sub-1",
+                    "student_id": "123456789012345678901",
+                    "display_name": "Alice Example",
+                }
+            }
+        },
+    )
+    label = build_dashboard_data.dashboard_display_label(
+        "s014",
+        {"display_name": "123456789012345678901", "source_file": "123456789012345678901.txt"},
+        label_maps,
+    )
+    assert label == "Alice - s014"
+
+
 def test_classroom_sync_replaces_prior_assignment_imports_without_deleting_manual_uploads(tmp_path):
     root = tmp_path
     base_dir = root / "server"
@@ -314,7 +382,7 @@ def test_classroom_sync_replaces_prior_assignment_imports_without_deleting_manua
 
     first = classroom.read_only_sync(base_dir, root, project, {}, classroom_sync_payload(coursework_id="cw-a", student_id="s1", text="Essay A."))
     assert first["read_sync"]["imported_submission_count"] == 1
-    assert classroom_import_file(root, "s1.txt").exists()
+    assert classroom_import_file(root, "s001.txt").read_text(encoding="utf-8").strip() == "Essay A."
     manual = root / "inputs" / "submissions" / "teacher-uploaded.txt"
     manual.write_text("Manual upload should not be deleted.", encoding="utf-8")
 
@@ -327,11 +395,11 @@ def test_classroom_sync_replaces_prior_assignment_imports_without_deleting_manua
     )
     second = classroom.read_only_sync(base_dir, root, project, {}, classroom_sync_payload(coursework_id="cw-b", student_id="s2", text="Essay B."))
     assert second["read_sync"]["imported_submission_count"] == 1
-    assert not classroom_import_file(root, "s1.txt").exists()
-    assert classroom_import_file(root, "s2.txt").read_text(encoding="utf-8").strip() == "Essay B."
+    assert classroom_import_file(root, "s001.txt").read_text(encoding="utf-8").strip() == "Essay B."
     assert manual.exists()
     manifest = json.loads((root / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
-    assert [row["path"] for row in manifest["files"]] == ["inputs/submissions/classroom_import/s2.txt"]
+    assert [row["path"] for row in manifest["files"]] == ["inputs/submissions/classroom_import/s001.txt"]
+    assert manifest["files"][0]["source_student_id_hash"] != "s2"
 
 
 def test_zero_import_sync_clears_prior_classroom_imports_and_run_project_inputs_rejects(tmp_path, monkeypatch):
@@ -340,7 +408,7 @@ def test_zero_import_sync_clears_prior_classroom_imports_and_run_project_inputs_
     base_dir.mkdir()
     project = {"id": "project-a", "name": "Project A"}
     classroom.read_only_sync(base_dir, root, project, {}, classroom_sync_payload(student_id="s1", text="Essay A."))
-    assert classroom_import_file(root, "s1.txt").exists()
+    assert classroom_import_file(root, "s001.txt").exists()
 
     zero = classroom.read_only_sync(
         base_dir,
@@ -350,7 +418,7 @@ def test_zero_import_sync_clears_prior_classroom_imports_and_run_project_inputs_
         classroom_sync_payload(student_id="s1", blocker={"attachment_id": "a2", "type": "external_link", "title": "Portfolio"}),
     )
     assert zero["read_sync"]["imported_submission_count"] == 0
-    assert not classroom_import_file(root, "s1.txt").exists()
+    assert not classroom_import_file(root, "s001.txt").exists()
     assert classroom.classroom_imports_ready(root) is False
     assert_project_inputs_reject_no_current_imports(tmp_path, monkeypatch)
 
@@ -361,7 +429,7 @@ def test_platform_error_sync_clears_prior_classroom_imports_and_run_project_inpu
     base_dir.mkdir()
     project = {"id": "project-a", "name": "Project A"}
     classroom.read_only_sync(base_dir, root, project, {}, classroom_sync_payload(student_id="s1", text="Essay A."))
-    assert classroom_import_file(root, "s1.txt").exists()
+    assert classroom_import_file(root, "s001.txt").exists()
 
     failed = classroom.read_only_sync(
         base_dir,
@@ -376,7 +444,7 @@ def test_platform_error_sync_clears_prior_classroom_imports_and_run_project_inpu
     )
     assert failed["read_sync"]["imported_submission_count"] == 0
     assert "refresh_failed_reconnect_required" in failed["blockers"]
-    assert not classroom_import_file(root, "s1.txt").exists()
+    assert not classroom_import_file(root, "s001.txt").exists()
     assert classroom.classroom_imports_ready(root) is False
     assert_project_inputs_reject_no_current_imports(tmp_path, monkeypatch)
 
@@ -648,4 +716,4 @@ def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(
     payload = resp.json()
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["external_write_performed"] is False
-    assert classroom_import_file(projmod.workspace_root(None), "s1.txt").exists()
+    assert classroom_import_file(projmod.workspace_root(None), "s001.txt").exists()

@@ -472,6 +472,7 @@ textarea {
 .exception-title {
   font-size: 13px;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .exception-action {
@@ -633,6 +634,10 @@ body[data-theme="dark"] .classroom-counts div {
   margin-top: 8px;
   font-size: 15px;
   font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rail-grade {
@@ -674,6 +679,7 @@ body[data-theme="dark"] .classroom-counts div {
   font-family: "Baskerville", "Iowan Old Style", "Georgia", serif;
   font-size: clamp(24px, 2.3vw, 32px);
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .snapshot-panel {
@@ -837,6 +843,7 @@ body[data-view="split"] #comparePanel {
 .control label {
   display: block;
   margin-bottom: 6px;
+  overflow-wrap: anywhere;
 }
 
 .control input,
