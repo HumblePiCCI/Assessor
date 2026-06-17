@@ -1524,36 +1524,70 @@ function currentCohortMarks() {
   if (!data?.students?.length) return [];
   return data.students.map((student, idx) => ({ student_id: student.student_id, mark: num(getGradeForIndex(idx), 0) }));
 }
-function scaledMarksForRange(existingMarks, top, bottom) {
-  const count = existingMarks.length;
-  if (!count) return [];
-  if (count === 1) return [Math.round(top)];
-  const oldTop = num(existingMarks[0]?.mark, top);
-  const oldBottom = num(existingMarks[count - 1]?.mark, bottom);
-  if (oldTop <= oldBottom) return computeGrades(top, bottom, count);
-  return existingMarks.map(({ mark }, idx) => {
-    if (idx === 0) return Math.round(top);
-    if (idx === count - 1) return Math.round(bottom);
-    const ratio = clamp((num(mark, oldBottom) - oldBottom) / (oldTop - oldBottom), 0, 1);
-    return Math.round(bottom + ((top - bottom) * ratio));
+function ensurePipelineRankOrder() {
+  if (!data?.students?.length) return;
+  data.students.forEach((student, idx) => {
+    if (student._pipeline_rank === undefined) {
+      student._pipeline_rank = num(student.pipeline_rank ?? student.rank, idx + 1);
+    }
   });
 }
-function applyCurveBounds(top, bottom, preserveShape = true) {
+function restorePipelineRankOrder(focusStudentId = '') {
   if (!data?.students?.length) return;
-  const currentMarks = preserveShape ? currentCohortMarks() : [];
+  ensurePipelineRankOrder();
+  data.students.sort((a, b) => {
+    const diff = num(a._pipeline_rank, 999999) - num(b._pipeline_rank, 999999);
+    if (diff) return diff;
+    return String(a.student_id || '').localeCompare(String(b.student_id || ''));
+  });
+  data.students.forEach((student, idx) => { student.rank = idx + 1; });
+  if (focusStudentId) {
+    const restored = data.students.findIndex(student => student.student_id === focusStudentId);
+    if (restored >= 0) currentIndex = restored;
+  }
+}
+function resetMarkAdjustments() {
+  overrides = {};
+  adjustments = {};
+  (data?.students || []).forEach(student => {
+    adjustments[student.student_id] = { overall: 0, rubric: 0, conventions: 0, comparative: 0 };
+  });
+}
+function setCurveStatus(text, state = 'ready') {
+  const status = document.getElementById('curveStatus');
+  if (!status) return;
+  status.textContent = text;
+  status.dataset.state = state;
+}
+function renderCurveStatus() {
+  if (!data?.students?.length) {
+    setCurveStatus('Curve is ready after assessment.', 'idle');
+    return;
+  }
+  const top = num(document.getElementById('topGrade')?.value, data.curve_top ?? 92);
+  const bottom = num(document.getElementById('bottomGrade')?.value, data.curve_bottom ?? 58);
+  if (top <= bottom) {
+    setCurveStatus('Curve needs a top mark higher than bottom mark.', 'warn');
+    return;
+  }
+  setCurveStatus(`${data.students.length} ranked essays span ${Math.round(top)} to ${Math.round(bottom)} by original assessment order.`, 'ready');
+}
+function applyCurveBounds(top, bottom, resetMarks = true) {
+  if (!data?.students?.length) {
+    renderCurveStatus();
+    return false;
+  }
+  if (top <= bottom) {
+    renderCurveStatus();
+    return false;
+  }
+  if (resetMarks) restorePipelineRankOrder(data.students[currentIndex]?.student_id || '');
   grades = computeGrades(top, bottom, data.students.length);
-  delete data.curve_top;
-  delete data.curve_bottom;
   data.curve_top = top;
   data.curve_bottom = bottom;
-  if (preserveShape) {
-    const scaledMarks = scaledMarksForRange(currentMarks, top, bottom);
-    overrides = {};
-    data.students.forEach((student, idx) => {
-      const adj = getAdjustment(student.student_id);
-      adj.overall = (scaledMarks[idx] ?? grades[idx] ?? 0) - (grades[idx] ?? 0);
-    });
-  }
+  if (resetMarks) resetMarkAdjustments();
+  renderCurveStatus();
+  return true;
 }
 function applyPersistedReviewState(record) {
   feedbackDrafts = {};
@@ -1574,7 +1608,7 @@ function applyPersistedReviewState(record) {
   const bottom = num(record?.curve_bottom, num(bottomInput?.value, 58));
   if (topInput) topInput.value = Math.round(top);
   if (bottomInput) bottomInput.value = Math.round(bottom);
-  applyCurveBounds(top, bottom, false);
+  applyCurveBounds(top, bottom, true);
   const markMap = new Map((record?.assigned_marks || []).map(item => [item.student_id, num(item.mark, null)]));
   data.students.forEach((student, idx) => {
     if (!markMap.has(student.student_id)) return;
@@ -1840,10 +1874,9 @@ function updateGradesFromCurve() {
   const bottomInput = document.getElementById('bottomGrade');
   const top = clamp(num(topInput?.value, 92), 0, 100);
   const bottom = clamp(num(bottomInput?.value, 58), 0, 100);
-  if (top <= bottom) return;
   if (topInput) topInput.value = Math.round(top);
   if (bottomInput) bottomInput.value = Math.round(bottom);
-  applyCurveBounds(top, bottom, true);
+  if (!applyCurveBounds(top, bottom, true)) return;
   updateRail();
   renderDetail();
 }
@@ -2181,7 +2214,8 @@ function setupControls() {
 async function boot(payload) {
   data = payload;
   if (!data.students) data.students = [];
-  data.students.sort((a, b) => a.rank - b.rank);
+  ensurePipelineRankOrder();
+  restorePipelineRankOrder();
   document.title = 'Assessor';
   if (data.class_metadata && data.class_metadata.grade_level) {
     const title = document.querySelector('.brand h1');

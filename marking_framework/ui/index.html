@@ -211,19 +211,20 @@
           <input id="gradeOverride" type="number" placeholder="Final mark" />
           <button id="copyFeedback" class="ghost">Copy feedback</button>
         </div>
-        <details class="secondary-details compact-details">
-          <summary>Curve</summary>
+        <div class="curve-panel">
+          <div class="stage-label">Cohort curve</div>
           <div class="curve-range">
             <div class="control curve-control">
               <label for="topGrade">Top mark</label>
-              <input id="topGrade" type="number" value="92" />
+              <input id="topGrade" type="number" min="0" max="100" value="92" />
             </div>
             <div class="control curve-control">
               <label for="bottomGrade">Bottom mark</label>
-              <input id="bottomGrade" type="number" value="58" />
+              <input id="bottomGrade" type="number" min="0" max="100" value="58" />
             </div>
           </div>
-        </details>
+          <div id="curveStatus" class="auth-status">Curve is ready after assessment.</div>
+        </div>
       </div>
 
       <details id="exceptionsSection" class="secondary-details" open>

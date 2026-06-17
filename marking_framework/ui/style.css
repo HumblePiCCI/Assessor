@@ -829,11 +829,21 @@ body[data-view="split"] #comparePanel {
   flex: 1;
 }
 
+.curve-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .curve-range {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+
+.curve-panel .auth-status {
+  margin-top: 8px;
 }
 
 .curve-control label {

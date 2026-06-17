@@ -217,6 +217,11 @@ Do not record course names, assignment names, student names, document titles, ra
   - action taken:
 - Draft save reload result:
 - Final review reload result:
+- Curve bounds tested:
+  - top mark:
+  - bottom mark:
+  - rank order preserved:
+  - invalid-bound warning checked:
 
 ### Export And Evidence
 

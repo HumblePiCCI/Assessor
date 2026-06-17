@@ -308,10 +308,15 @@ Change the class curve:
 
 Expected:
 
-- assigned marks update across the cohort
+- assigned marks update across the cohort from the original assessment order
+- the top-ranked essay receives the top mark, the bottom-ranked essay receives
+  the bottom mark, and essays between them are re-spaced by the original
+  assessment rank
 - the current student's displayed mark updates immediately
 - no student loses their relative order merely because the curve changed
 - the teacher can see that this is a class-level curve action
+- invalid bounds, such as a top mark below the bottom mark, show a teacher-facing
+  warning instead of silently changing marks
 
 Fail if the curve looks like a hidden global side effect.
 
