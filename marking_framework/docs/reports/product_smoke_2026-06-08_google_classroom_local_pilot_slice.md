@@ -59,6 +59,28 @@ Current implementation result:
   - `sota_gate_missing`
   - `calibration_manifest_missing`
 
+Timeout/source-isolation patch verification on 2026-06-17:
+
+```bash
+cd marking_framework
+python3 -m pytest -q --no-cov tests/test_server_app.py tests/test_server_pipeline.py tests/test_server_pipeline_v2.py tests/test_classroom_live_read_sync.py tests/test_classroom_product.py tests/test_pipeline_queue.py
+python3 -m pytest -q --no-cov
+python3 -m pytest -q --no-cov tests/test_google_oauth.py tests/test_google_classroom_adapter.py tests/test_google_drive_adapter.py tests/test_classroom_live_read_sync.py tests/test_classroom_product.py tests/test_pipeline_queue.py tests/test_server_app.py
+node --check ui/app.js
+python3 scripts/validate_production_launch.py
+```
+
+Timeout/source-isolation patch result:
+
+- server/Classroom/queue focused pytest: passed
+- full pytest: passed
+- required focused pytest: passed
+- UI syntax: passed
+- production launch validator: blocked as expected by real launch gates
+  - `publish_gate_missing`
+  - `sota_gate_missing`
+  - `calibration_manifest_missing`
+
 Hardening coverage added for the final local pilot smoke patch:
 
 - `.env.local` and `.env` are auto-loaded at server startup and by
@@ -73,6 +95,17 @@ Hardening coverage added for the final local pilot smoke patch:
 - CSV export confirmation recomputes the preflight freshness hash before
   writing a CSV and rejects stale preflights with
   `preflight_stale_rebuild_required`.
+- Local teacher-owned Classroom imports, generated dashboards, manifests, and
+  run outputs are published to ignored
+  `server/data/tenant_workspaces/<tenant>/<teacher>/workspace/`; the checked-out
+  source tree remains a read-only runtime dependency and is not used as the
+  live project workspace.
+- Saved local project snapshots default to ignored `server/data/projects/`;
+  legacy ignored `projects/` snapshots are migrated forward when the new store
+  is empty.
+- Large first-pass assessment runs keep polling the backend job after the old
+  client-side timeout threshold and show the current stage instead of falsely
+  marking a healthy running job as failed.
 
 ## Manual Live Owner Smoke
 

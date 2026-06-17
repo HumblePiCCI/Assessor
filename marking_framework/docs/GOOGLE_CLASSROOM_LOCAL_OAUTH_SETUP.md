@@ -108,7 +108,15 @@ Optional strict/staging local token encryption:
 export GOOGLE_TOKEN_ENCRYPTION_KEY=<local-token-storage-key>
 ```
 
-Local token files live under ignored `server/data/google_oauth/`. Without `GOOGLE_TOKEN_ENCRYPTION_KEY`, development mode stores local token data as plaintext under that ignored folder. Strict staging/production must use encrypted local token storage or an approved external secret store.
+Local token files live under ignored `server/data/google_oauth/`. Saved local
+project snapshots live under ignored `server/data/projects/`. Local
+teacher-owned project inputs, imported Classroom text, generated dashboards,
+pipeline manifests, and exports live under ignored
+`server/data/tenant_workspaces/<tenant>/<teacher>/workspace/`. They must not be
+copied back into the checked-out source tree or committed. Without
+`GOOGLE_TOKEN_ENCRYPTION_KEY`, development mode stores local token data as
+plaintext under that ignored folder. Strict staging/production must use
+encrypted local token storage or an approved external secret store.
 
 ## 5. Start The Server
 
@@ -182,9 +190,9 @@ Blocked:
 
 Mixed supported and unsupported attachments are blocked as `partial_unsupported_attachments` in this slice. The app does not grade the supported portion until the unsupported attachments are resolved.
 
-Synced Classroom-owned submissions are materialized only under
-`inputs/submissions/classroom_import/` and tracked by
-`inputs/classroom_import_manifest.json`. Each live or fixture sync is
+Synced Classroom-owned submissions are materialized only inside the active
+ignored local workspace under `inputs/submissions/classroom_import/` and tracked
+by `inputs/classroom_import_manifest.json`. Each live or fixture sync is
 authoritative for that selected assignment: a different-assignment sync,
 zero-import sync, OAuth failure, or Google platform failure clears prior
 Classroom-owned imports and writes a non-runnable manifest. Teacher-uploaded

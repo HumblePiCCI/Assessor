@@ -172,17 +172,32 @@ def _json_artifact_manifest(payload: dict | None, label: str) -> dict:
     }
 
 
-def _collect_input_files(root: Path, rubric_path: Path, outline_path: Path, submissions_dir: Path) -> dict:
+def _input_root_for_paths(rubric_path: Path, outline_path: Path, submissions_dir: Path) -> Path:
+    inputs_dir = rubric_path.parent
+    if inputs_dir.name == "inputs" and outline_path.parent == inputs_dir:
+        try:
+            submissions_dir.resolve().relative_to((inputs_dir / "submissions").resolve())
+            return inputs_dir.parent.resolve()
+        except Exception:
+            pass
+    candidates = [rubric_path.parent, outline_path.parent, submissions_dir]
+    try:
+        return Path(os.path.commonpath([str(path.resolve()) for path in candidates])).resolve()
+    except Exception:
+        return rubric_path.parent.resolve()
+
+
+def _collect_input_files(input_root: Path, rubric_path: Path, outline_path: Path, submissions_dir: Path) -> dict:
     submissions = []
     if submissions_dir.exists():
         for item in sorted(submissions_dir.glob("*")):
             if not item.is_file():
                 continue
-            submissions.append({"path": _root_relative(item, root), "sha256": _file_sha256(item)})
-    class_metadata_path = root / CLASS_METADATA_ARTIFACT
+            submissions.append({"path": _root_relative(item, input_root), "sha256": _file_sha256(item)})
+    class_metadata_path = input_root / CLASS_METADATA_ARTIFACT
     return {
-        "rubric": _file_manifest(rubric_path, f"inputs/{rubric_path.name}"),
-        "outline": _file_manifest(outline_path, f"inputs/{outline_path.name}"),
+        "rubric": _file_manifest(rubric_path, _root_relative(rubric_path, input_root)),
+        "outline": _file_manifest(outline_path, _root_relative(outline_path, input_root)),
         "class_metadata": _file_manifest(class_metadata_path, CLASS_METADATA_ARTIFACT),
         "submissions": submissions,
     }
@@ -297,8 +312,10 @@ def build_pipeline_manifest(
     submissions_dir: Path,
     extra_paths: list[Path] | None = None,
     rubric_artifacts: dict | None = None,
+    input_root: Path | None = None,
 ) -> dict:
     root = root.resolve()
+    input_root = (input_root or _input_root_for_paths(rubric_path, outline_path, submissions_dir)).resolve()
     extra_paths = extra_paths or []
     config_hashes, extra_hashes = _config_hashes(root, extra_paths)
     gate_hashes = {
@@ -324,7 +341,7 @@ def build_pipeline_manifest(
             }
         )
     routing_payload = load_contract_json(root / "config" / "llm_routing.json")
-    class_metadata_payload = load_contract_json(root / CLASS_METADATA_ARTIFACT)
+    class_metadata_payload = load_contract_json(input_root / CLASS_METADATA_ARTIFACT)
     rubric_artifacts = rubric_artifacts or {}
     rubric_manifest_payload = rubric_artifacts.get("rubric_manifest", {}) if isinstance(rubric_artifacts.get("rubric_manifest", {}), dict) else {}
     run_scope = build_run_scope(
@@ -345,7 +362,7 @@ def build_pipeline_manifest(
             "hash": pipeline_step_graph_hash(),
             "steps": step_graph_steps,
         },
-        "uploaded_inputs": _collect_input_files(root, rubric_path, outline_path, submissions_dir),
+        "uploaded_inputs": _collect_input_files(input_root, rubric_path, outline_path, submissions_dir),
         "run_scope": run_scope,
         "rubric_contract": {
             "summary": rubric_contract_summary(rubric_artifacts),
@@ -385,6 +402,7 @@ def snapshot_hash(
     extra_paths: list[Path],
     root: Path | None = None,
     rubric_artifacts: dict | None = None,
+    input_root: Path | None = None,
 ) -> str:
     manifest = build_pipeline_manifest(
         root=(root or _infer_root(rubric_path, outline_path, submissions_dir, extra_paths)),
@@ -394,12 +412,22 @@ def snapshot_hash(
         submissions_dir=submissions_dir,
         extra_paths=extra_paths,
         rubric_artifacts=rubric_artifacts,
+        input_root=input_root,
     )
     return manifest["manifest_hash"]
 
 
 class PipelineQueue:
-    def __init__(self, root: Path, data_dir: Path, reset_workspace_fn, run_fn, log_fn, api_key_fn):
+    def __init__(
+        self,
+        root: Path,
+        data_dir: Path,
+        reset_workspace_fn,
+        run_fn,
+        log_fn,
+        api_key_fn,
+        active_workspace_root_fn=None,
+    ):
         self.root = root
         self.data_dir = data_dir
         self.jobs_dir = data_dir / "pipeline_jobs"
@@ -411,6 +439,7 @@ class PipelineQueue:
         self.run = run_fn
         self.log = log_fn
         self.get_api_key = api_key_fn
+        self.active_workspace_root_fn = active_workspace_root_fn
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.workspaces_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -877,7 +906,7 @@ class PipelineQueue:
                 str(job_payload.get("tenant_id", "") or "local-dev-tenant"),
                 str(job_payload.get("teacher_id", "") or "local-dev-teacher"),
             )
-            root = self.root if not identity.get("strict_auth", False) else projectsmod.workspace_root(identity)
+            root = self._active_workspace_root(identity)
             meta_path = projectsmod.project_dir(project_id, identity) / "project.json"
             current = projectsmod.get_current_project(identity)
             if current and str(current.get("id", "") or "") != project_id:
@@ -1018,8 +1047,8 @@ class PipelineQueue:
             if item.is_file():
                 shutil.copy2(item, subs_dir / item.name)
 
-    def _copy_context_input(self, rel_path: str, dst_root: Path):
-        src = self.root / rel_path
+    def _copy_context_input(self, rel_path: str, dst_root: Path, *, source_root: Path | None = None):
+        src = (source_root or self.root) / rel_path
         if not src.exists() or not src.is_file():
             return
         dst = dst_root / rel_path
@@ -1037,6 +1066,7 @@ class PipelineQueue:
         submissions_dir: Path,
         rubric_artifacts: dict,
     ):
+        input_root = _input_root_for_paths(rubric_path, outline_path, submissions_dir)
         workspace_dir = self._workspace_dir(job_id, tenant_id)
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
@@ -1047,8 +1077,8 @@ class PipelineQueue:
         self.reset_workspace(workspace_dir)
         self._copy_upload_inputs(rubric_path, outline_path, submissions_dir, workspace_dir / "inputs")
         self._copy_upload_inputs(rubric_path, outline_path, submissions_dir, job_dir / "inputs")
-        self._copy_context_input(CLASS_METADATA_ARTIFACT, workspace_dir)
-        self._copy_context_input(CLASS_METADATA_ARTIFACT, job_dir)
+        self._copy_context_input(CLASS_METADATA_ARTIFACT, workspace_dir, source_root=input_root)
+        self._copy_context_input(CLASS_METADATA_ARTIFACT, job_dir, source_root=input_root)
         calibration_src = self.root / CALIBRATION_ARTIFACT
         if calibration_src.exists():
             calibration_dst = workspace_dir / CALIBRATION_ARTIFACT
@@ -1402,6 +1432,15 @@ class PipelineQueue:
             "teacher_token": identity_token(teacher),
         }
 
+    def _active_workspace_root(self, identity: dict) -> Path:
+        if self.active_workspace_root_fn is not None:
+            return Path(self.active_workspace_root_fn(identity))
+        tenant_token = str(identity.get("tenant_token", "") or self._tenant_token(str(identity.get("tenant_id", "") or "local-dev-tenant")))
+        teacher_token = str(identity.get("teacher_token", "") or identity_token(str(identity.get("teacher_id", "") or "local-dev-teacher")))
+        path = self.data_dir / "tenant_workspaces" / tenant_token / teacher_token / "workspace"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
     def _copy_runtime_state(self, source_root: Path, target_root: Path):
         self.reset_workspace(target_root)
         for folder in ["inputs", "processing", "assessments", "outputs"]:
@@ -1417,17 +1456,13 @@ class PipelineQueue:
         tenant_id = str(job.get("tenant_id", "") or "local-dev-tenant")
         teacher_id = str(job.get("teacher_id", "") or "local-dev-teacher")
         identity = self._job_identity(tenant_id, teacher_id)
-        active_root = self.root if not identity.get("strict_auth", False) else None
-        if active_root is None:
-            from server import projects as projectsmod
+        from server import projects as projectsmod
 
-            active_root = projectsmod.workspace_root(identity)
+        active_root = self._active_workspace_root(identity)
         self._copy_runtime_state(workspace_dir, active_root)
         project_id = str(job.get("project_id", "") or "").strip()
         if not project_id:
             return
-        from server import projects as projectsmod
-
         current = projectsmod.get_current_project(identity)
         if current and str(current.get("id", "") or "") != project_id:
             current = None
@@ -1530,7 +1565,7 @@ class PipelineQueue:
                 str(job.get("tenant_id", "") or "local-dev-tenant"),
                 str(job.get("teacher_id", "") or "local-dev-teacher"),
             )
-            root = self.root if not identity.get("strict_auth", False) else projectsmod.workspace_root(identity)
+            root = self._active_workspace_root(identity)
             current = projectsmod.get_current_project(identity)
             if current and str(current.get("id", "") or "") != project_id:
                 current = None

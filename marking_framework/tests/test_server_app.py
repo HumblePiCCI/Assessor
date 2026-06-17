@@ -345,10 +345,11 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     (projects_dir / "empty").mkdir()
     resp = client.get("/projects")
     assert resp.json() == {"current": None, "projects": []}
-    (tmp_path / "inputs").mkdir()
-    (tmp_path / "inputs" / "exemplars").mkdir()
-    (tmp_path / "inputs" / "exemplars" / "level_3.md").write_text("X", encoding="utf-8")
-    (tmp_path / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
+    workspace = projmod.workspace_root(None)
+    (workspace / "inputs").mkdir(parents=True)
+    (workspace / "inputs" / "exemplars").mkdir()
+    (workspace / "inputs" / "exemplars" / "level_3.md").write_text("X", encoding="utf-8")
+    (workspace / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
     save_resp = client.post("/projects/save", json={"name": "Class A", "aggregate_learning_mode": "opt_in", "aggregate_retention_days": 90})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
@@ -360,24 +361,24 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     assert list_resp.json()["current"]["id"] == project_id
     new_resp = client.post("/projects/new", json={"name": "New Project"})
     assert new_resp.status_code == 200
-    assert not (tmp_path / "inputs" / "rubric.md").exists()
-    assert (tmp_path / "inputs" / "exemplars" / "level_3.md").exists()
-    clear_file = tmp_path / "outputs"
+    assert not (workspace / "inputs" / "rubric.md").exists()
+    assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
+    clear_file = workspace / "outputs"
     clear_file.mkdir()
     (clear_file / "x.txt").write_text("x", encoding="utf-8")
     current_path.write_text(json.dumps({"id": project_id, "name": "Class A"}), encoding="utf-8")
     clear_resp = client.post("/projects/clear")
     assert clear_resp.json()["status"] == "cleared"
     assert clear_resp.json()["current"] is None
-    assert not (tmp_path / "outputs").exists()
+    assert not (workspace / "outputs").exists()
     assert not current_path.exists()
-    assert (tmp_path / "inputs" / "exemplars" / "level_3.md").exists()
+    assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
     proj_dir = projects_dir / project_id
     (proj_dir / "outputs").mkdir(parents=True)
     (proj_dir / "outputs" / "y.txt").write_text("y", encoding="utf-8")
     load_resp = client.post("/projects/load", json={"project_id": project_id})
     assert load_resp.status_code == 200
-    assert (tmp_path / "outputs" / "y.txt").exists()
+    assert (workspace / "outputs" / "y.txt").exists()
     current_path.write_text(json.dumps({"id": project_id}), encoding="utf-8")
     del_resp = client.delete(f"/projects/{project_id}")
     assert del_resp.status_code == 200
@@ -394,9 +395,10 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
-    outputs = tmp_path / "outputs"
+    workspace = projmod.workspace_root(None)
+    outputs = workspace / "outputs"
     outputs.mkdir()
-    (tmp_path / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-1"}), encoding="utf-8")
+    (workspace / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-1"}), encoding="utf-8")
     (outputs / "calibration_manifest.json").write_text(json.dumps({"model_version": "gpt-5.4"}), encoding="utf-8")
     (outputs / "dashboard_data.json").write_text(
         json.dumps(

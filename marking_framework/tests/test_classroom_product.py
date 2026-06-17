@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -115,7 +116,10 @@ def configure_app_workspace(tmp_path: Path, monkeypatch):
 
 def assert_project_inputs_reject_no_current_imports(tmp_path: Path, monkeypatch):
     client = configure_app_workspace(tmp_path, monkeypatch)
-    inputs = tmp_path / "inputs"
+    workspace = projmod.workspace_root(None)
+    if (tmp_path / "inputs").exists():
+        shutil.copytree(tmp_path / "inputs", workspace / "inputs", dirs_exist_ok=True)
+    inputs = workspace / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
     (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
@@ -469,7 +473,8 @@ def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypa
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
-    write_workspace(tmp_path)
+    workspace = projmod.workspace_root(None)
+    write_workspace(workspace)
 
     client = TestClient(app)
     save = client.post("/projects/save", json={"name": "Classroom Pilot"})
@@ -643,4 +648,4 @@ def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(
     payload = resp.json()
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["external_write_performed"] is False
-    assert classroom_import_file(tmp_path, "s1.txt").exists()
+    assert classroom_import_file(projmod.workspace_root(None), "s1.txt").exists()

@@ -1818,16 +1818,25 @@ function watchBackgroundValidation(jobId) {
 }
 async function waitForJob(jobId) {
   const start = Date.now();
-  while (Date.now() - start < 45 * 60 * 1000) {
+  let longRunNoticeShown = false;
+  while (true) {
     const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`));
     if (!res.ok) throw new Error('Run status unavailable');
     const job = await res.json();
     if (job.teacher_can_review || job.product_phase === 'teacher_review_ready' || job.product_phase === 'background_validating') return job;
     if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job;
     if (job.status === 'failed') throw new Error(job.error || 'Run failed');
-    await sleep(2000);
+    const elapsed = Date.now() - start;
+    if (elapsed >= 45 * 60 * 1000 && !longRunNoticeShown) {
+      longRunNoticeShown = true;
+      pipelineLog('Still running. Large Classroom sets can take longer on the first pass; this tab will keep watching the job.');
+    }
+    if (elapsed >= 45 * 60 * 1000) {
+      const stage = (job.progress_message || job.progress_stage || 'working').toString();
+      setPipelineStatus(`Still running: ${stage}`, 'warn');
+    }
+    await sleep(elapsed >= 45 * 60 * 1000 ? 5000 : 2000);
   }
-  throw new Error('Run timed out');
 }
 async function loadReviewReadyJob(job, fallbackJobId) {
   const jobId = job.id || fallbackJobId;

@@ -89,9 +89,11 @@ def request_identity(request: Request | None) -> dict:
 
 
 def dashboard_data_path_for_identity(identity: dict) -> Path:
-    if not identity.get("strict_auth", False):
-        return DATA_JSON_PATH
-    return projectsmod.workspace_root(identity) / "outputs" / "dashboard_data.json"
+    if projectsmod.BASE_DIR == BASE_DIR:
+        workspace_path = projectsmod.workspace_root(identity) / "outputs" / "dashboard_data.json"
+        if workspace_path.exists() or identity.get("strict_auth", False):
+            return workspace_path
+    return DATA_JSON_PATH
 
 
 def reset_workspace(root: Path):
@@ -142,6 +144,7 @@ PIPELINE_QUEUE = PipelineQueue(
     run_fn=run,
     log_fn=log_pipeline,
     api_key_fn=current_api_key,
+    active_workspace_root_fn=projectsmod.workspace_root,
 )
 @app.get("/auth/status")
 async def auth_status(request: Request):
@@ -421,7 +424,7 @@ async def run_pipeline_project_inputs(
         rubric_path=rubric_path,
         outline_path=outline_path,
         submissions_dir=submissions_dir,
-        extra_paths=[root / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
+        extra_paths=[workspace_root() / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
         identity=identity,
         project_id=effective_project_id,
     )

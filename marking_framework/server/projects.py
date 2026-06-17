@@ -14,14 +14,38 @@ from server import classroom
 from server.google_classroom_adapter import GoogleClassroomAdapter, GoogleClassroomError
 from server.google_oauth import GoogleOAuthError, GoogleOAuthService
 from server import review_store
-from server.runtime_context import identity_can_access, project_owner, resolve_request_identity
+from server.runtime_context import (
+    DEFAULT_LOCAL_TEACHER,
+    DEFAULT_LOCAL_TENANT,
+    identity_can_access,
+    identity_token,
+    project_owner,
+    resolve_request_identity,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
-PROJECTS_DIR = BASE_DIR.parent / "projects"
+LEGACY_PROJECTS_DIR = BASE_DIR.parent / "projects"
+PROJECTS_DIR = BASE_DIR / "data" / "projects"
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 CURRENT_PROJECT_PATH = PROJECTS_DIR / "current.json"
 
 router = APIRouter()
+
+
+def migrate_legacy_projects_dir() -> None:
+    if PROJECTS_DIR != BASE_DIR / "data" / "projects":
+        return
+    if not LEGACY_PROJECTS_DIR.exists():
+        return
+    try:
+        if any(PROJECTS_DIR.iterdir()):
+            return
+    except OSError:
+        return
+    shutil.copytree(LEGACY_PROJECTS_DIR, PROJECTS_DIR, dirs_exist_ok=True)
+
+
+migrate_legacy_projects_dir()
 
 
 class ProjectPayload(BaseModel):
@@ -196,10 +220,11 @@ def workspace_project(identity: dict | None) -> dict:
 
 
 def workspace_root(identity: dict | None = None) -> Path:
-    if not _strict_identity(identity):
-        return BASE_DIR.parent
-    tenant_token = str((identity or {}).get("tenant_token", "") or "tenant")
-    teacher_token = str((identity or {}).get("teacher_token", "") or "teacher")
+    identity = identity or {}
+    tenant_id = str(identity.get("tenant_id", "") or DEFAULT_LOCAL_TENANT)
+    teacher_id = str(identity.get("teacher_id", "") or DEFAULT_LOCAL_TEACHER)
+    tenant_token = str(identity.get("tenant_token", "") or identity_token(tenant_id))
+    teacher_token = str(identity.get("teacher_token", "") or identity_token(teacher_id))
     path = tenant_workspaces_dir() / tenant_token / teacher_token / "workspace"
     path.mkdir(parents=True, exist_ok=True)
     return path

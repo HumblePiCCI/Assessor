@@ -100,10 +100,11 @@ def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_b
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["blocked_submission_count"] == 1
     assert "external_link_unsupported" in payload["blockers"]
-    assert (tmp_path / "inputs" / "submissions" / "classroom_import" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
-    assert not (tmp_path / "inputs" / "submissions" / "classroom_import" / "s2.txt").exists()
-    metadata = json.loads((tmp_path / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
-    manifest = json.loads((tmp_path / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
+    workspace = projmod.workspace_root(None)
+    assert (workspace / "inputs" / "submissions" / "classroom_import" / "s1.txt").read_text(encoding="utf-8").strip() == "First imported essay."
+    assert not (workspace / "inputs" / "submissions" / "classroom_import" / "s2.txt").exists()
+    metadata = json.loads((workspace / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
+    manifest = json.loads((workspace / "inputs" / "classroom_import_manifest.json").read_text(encoding="utf-8"))
     assert metadata["adapter"] == "live_google"
     assert metadata["latest_sync"]["imported_count"] == 1
     assert metadata["latest_sync"]["blocker_count"] == 1

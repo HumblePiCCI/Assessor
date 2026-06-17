@@ -159,9 +159,9 @@ Expected:
   teacher identity, reconnect required, missing scope, admin approval required,
   or API-disabled states in plain language
 - the teacher can choose a class and published assignment from dropdowns
-- `Sync submissions` imports supported attachments into server-side
-  `inputs/submissions/classroom_import/` and records the current manifest in
-  `inputs/classroom_import_manifest.json`
+- `Sync submissions` imports supported attachments into the ignored local
+  workspace under `inputs/submissions/classroom_import/` and records the
+  current manifest in `inputs/classroom_import_manifest.json`
 - counts show roster, submitted, imported, blocked, missing, reclaimed,
   returned, and platform-error counts
 - blockers appear in Exceptions with remedies
@@ -187,6 +187,8 @@ Expected:
 - the pipeline state changes from idle to running
 - progress is visible in teacher-readable language
 - the review-ready dashboard loads as soon as the fast review phase succeeds
+- for a large first pass, the UI keeps polling the live job and shows the
+  current backend stage instead of declaring a client-side timeout
 - the app does not require terminal/log inspection while the job runs
 - background validation continues after the review dashboard appears
 - Classroom-imported submissions can run without downloading and re-uploading

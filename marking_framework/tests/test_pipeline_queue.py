@@ -197,6 +197,37 @@ def test_manifest_hash_busts_when_rubric_confirmation_changes(tmp_path):
     assert changed != baseline
 
 
+def test_project_input_manifest_uses_workspace_class_metadata_and_nested_import_paths(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _seed_runtime(root)
+    workspace = tmp_path / "workspace"
+    inputs = workspace / "inputs"
+    import_dir = inputs / "submissions" / "classroom_import"
+    import_dir.mkdir(parents=True)
+    rubric = inputs / "rubric.md"
+    outline = inputs / "assignment_outline.md"
+    rubric.write_text("rubric", encoding="utf-8")
+    outline.write_text("outline", encoding="utf-8")
+    (import_dir / "s1.txt").write_text("essay", encoding="utf-8")
+    _write_json(
+        inputs / "class_metadata.json",
+        {
+            "source": "google_classroom_read_only_sync",
+            "adapter": "live_google",
+            "latest_sync": {"imported_count": 1, "external_write_performed": False},
+        },
+    )
+
+    manifest = build_pipeline_manifest(root, "openai", rubric, outline, import_dir, _extra_paths(root))
+
+    assert manifest["uploaded_inputs"]["class_metadata"]["exists"] is True
+    assert manifest["uploaded_inputs"]["class_metadata"]["path"] == "inputs/class_metadata.json"
+    assert len(manifest["uploaded_inputs"]["submissions"]) == 1
+    assert manifest["uploaded_inputs"]["submissions"][0]["path"] == "inputs/submissions/classroom_import/s1.txt"
+    assert len(manifest["uploaded_inputs"]["submissions"][0]["sha256"]) == 64
+
+
 def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifacts(tmp_path):
     calls = {}
 
@@ -227,8 +258,10 @@ def test_submit_and_worker_success_uses_isolated_workspace_and_manifest_artifact
     assert calls["env"]["OPENAI_API_KEY"] == "k"
     assert calls["env"]["PIPELINE_MANIFEST_HASH"] == result["manifest_hash"]
     assert "PYTHONPATH" in calls["env"]
-    assert (root / "outputs" / "dashboard_data.json").exists()
-    assert json.loads((root / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))["students"][0]["student_id"] == "s1"
+    active_root = queue._active_workspace_root(queue._job_identity("local-dev-tenant", "local-dev-teacher"))
+    assert not (root / "outputs" / "dashboard_data.json").exists()
+    assert (active_root / "outputs" / "dashboard_data.json").exists()
+    assert json.loads((active_root / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))["students"][0]["student_id"] == "s1"
     assert (workspace_dir / "pipeline_manifest.json").exists()
     assert (workspace_dir / "outputs" / "normalized_rubric.json").exists()
     assert (workspace_dir / "outputs" / "rubric_manifest.json").exists()
@@ -286,7 +319,9 @@ def test_fast_review_dashboard_publishes_before_background_validation_finishes(t
     assert job["validation_status"] == "failed_nonblocking"
     assert job["product_phase"] == "validation_failed_nonblocking"
     assert job["validation_exception_count"] >= 1
-    assert (root / "outputs" / "dashboard_data.json").exists()
+    active_root = queue._active_workspace_root(queue._job_identity("local-dev-tenant", "local-dev-teacher"))
+    assert not (root / "outputs" / "dashboard_data.json").exists()
+    assert (active_root / "outputs" / "dashboard_data.json").exists()
     summary = json.loads((Path(job["workspace_dir"]) / "outputs" / "background_validation_summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "failed_nonblocking"
     assert any(item["step"] == "band_seam" for item in summary["exceptions"])

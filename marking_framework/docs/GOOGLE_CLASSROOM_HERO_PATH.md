@@ -25,8 +25,14 @@ input. Final export or passback is blocked until:
 
 ## Implemented Surface
 
-The backend stores Classroom state under `server/data/classroom/<scope_id>/` and
-materializes the current state into `outputs/classroom_state.json`.
+The backend stores Classroom state under `server/data/classroom/<scope_id>/`.
+Saved local project snapshots live under ignored `server/data/projects/`.
+Teacher-owned local project inputs, imported Classroom text, generated
+dashboards, manifests, and exports live under ignored
+`server/data/tenant_workspaces/<tenant>/<teacher>/workspace/`; the checked-out
+source tree stays a read-only runtime dependency during local smoke runs. The
+current Classroom state is materialized into that workspace's
+`outputs/classroom_state.json`.
 
 API endpoints:
 
@@ -60,7 +66,7 @@ write-looking controls are not part of the routine teacher path.
 
 `read-sync` is the ingestion seam. It accepts roster/submission snapshots from
 either the fixture/local adapter or the live Google adapter, materializes
-supported extracted text into the Classroom-owned
+supported extracted text into the active workspace's Classroom-owned
 `inputs/submissions/classroom_import/` directory, writes
 `inputs/classroom_import_manifest.json`, writes Classroom import metadata to
 `inputs/class_metadata.json`, and records unsupported attachments as blockers.
