@@ -75,6 +75,7 @@ def probe_codex_runtime(path: str) -> dict:
         "path": path,
         "kind": "",
         "supports_oauth": False,
+        "supports_ignore_user_config": False,
         "version": "",
         "error": "",
     }
@@ -103,6 +104,7 @@ def probe_codex_runtime(path: str) -> dict:
     if help_result is not None and help_result.returncode == 0 and "run codex non-interactively" in help_text:
         runtime["kind"] = "exec"
         runtime["supports_oauth"] = True
+        runtime["supports_ignore_user_config"] = "--ignore-user-config" in help_text
         return runtime
     runtime["kind"] = "legacy_q"
     runtime["supports_oauth"] = False

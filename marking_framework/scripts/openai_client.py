@@ -312,7 +312,10 @@ def _run_codex_exec(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
     cmd = [
         runtime["path"],
         "exec",
-        "--ignore-user-config",
+    ]
+    if runtime.get("supports_ignore_user_config"):
+        cmd.append("--ignore-user-config")
+    cmd.extend([
         "--model",
         model,
         "--sandbox",
@@ -323,7 +326,7 @@ def _run_codex_exec(runtime: dict, model: str, prompt: str) -> tuple[str, str]:
         "--output-last-message",
         str(output_path),
         prompt,
-    ]
+    ])
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=_codex_timeout_seconds())
         last_message = ""

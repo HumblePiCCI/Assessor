@@ -14,6 +14,7 @@ def fake_codex_runtime(kind="legacy_q"):
         "path": "/usr/bin/codex",
         "kind": kind,
         "supports_oauth": kind == "exec",
+        "supports_ignore_user_config": kind == "exec",
         "version": "codex-test",
     }
 
@@ -495,6 +496,28 @@ def test_responses_create_codex_exec_uses_output_last_message(tmp_path, monkeypa
     resp = oc.responses_create("gpt-5.4-mini", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
     assert captured["cmd"][:2] == ["/usr/bin/codex", "exec"]
     assert "--ignore-user-config" in captured["cmd"]
+    assert "--output-last-message" in captured["cmd"]
+    assert oc.extract_text(resp) == "exec-ok"
+
+
+def test_responses_create_codex_exec_omits_unsupported_ignore_user_config(tmp_path, monkeypatch):
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps({"mode": "codex_local"}), encoding="utf-8")
+    monkeypatch.setenv("LLM_MODE", "codex_local")
+    runtime = fake_codex_runtime("exec")
+    runtime["supports_ignore_user_config"] = False
+    monkeypatch.setattr(oc, "resolve_codex_runtime", lambda: runtime)
+    captured = {}
+
+    def fake_run(cmd, cwd=None, capture_output=None, text=None, timeout=None):
+        captured["cmd"] = cmd
+        output_path = Path(cmd[cmd.index("--output-last-message") + 1])
+        output_path.write_text("exec-ok", encoding="utf-8")
+        return type("Result", (), {"returncode": 0, "stdout": "noisy logs", "stderr": ""})()
+
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+    resp = oc.responses_create("gpt-5.4-mini", [{"role": "user", "content": "hi"}], routing_path=str(route_path))
+    assert "--ignore-user-config" not in captured["cmd"]
     assert "--output-last-message" in captured["cmd"]
     assert oc.extract_text(resp) == "exec-ok"
 
