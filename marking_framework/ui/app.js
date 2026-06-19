@@ -312,13 +312,13 @@ async function refreshAuthStatus() {
     const [codexRes, apiRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]);
     const codex = codexRes.ok ? await codexRes.json() : null;
     const api = apiRes.ok ? await apiRes.json() : null;
-    if (codex && codex.available && codex.connected) {
-      status.textContent = codex.auth_source === 'codex_oauth' ? 'Codex OAuth connected' : 'Codex connected';
-      if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; }
-    } else if (api && api.connected) {
+    if (api && api.connected) {
       const provider = api.api_provider && api.api_provider.provider ? api.api_provider.provider : 'API';
       status.textContent = `${provider} key connected`;
       if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
+    } else if (codex && codex.available && codex.connected) {
+      status.textContent = codex.auth_source === 'codex_oauth' ? 'Codex OAuth connected' : 'Codex connected';
+      if (codexBtn) { codexBtn.disabled = true; codexBtn.textContent = 'Codex connected'; }
     } else if (codex && codex.available) {
       status.textContent = codex.reason || 'Codex not connected';
       if (codexBtn) { codexBtn.disabled = false; codexBtn.textContent = 'Sign in with Codex'; }
@@ -2269,7 +2269,7 @@ async function runPipeline() {
     const [cRes, aRes] = await Promise.all([fetch(apiUrl('/codex/status')), fetch(apiUrl('/auth/status'))]);
     const c = cRes.ok ? await cRes.json() : null;
     const a = aRes.ok ? await aRes.json() : null;
-    mode = c && c.connected ? 'codex_local' : (a && a.connected ? 'api' : '');
+    mode = a && a.connected ? 'api' : (c && c.connected ? 'codex_local' : '');
   } catch (err) {
     setPipelineStatus('Offline', 'danger');
     return;
