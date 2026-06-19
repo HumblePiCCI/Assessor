@@ -375,7 +375,7 @@ def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="UI asset not found")
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
 @app.get("/data.json")
 async def ui_data_json(request: Request):
     identity = request_google_identity(request)
