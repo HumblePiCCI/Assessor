@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Assessor</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body data-theme="light" data-view="single">
   <header class="topbar">
@@ -55,29 +55,30 @@
       </div>
 
       <div class="workflow-strip">
-        <details class="quick-card project-card">
-          <summary>
-            <span>Project</span>
-            <span id="projectStatus" class="quick-card-status">No project loaded</span>
-          </summary>
+        <section class="quick-card project-card project-manager" aria-label="Projects">
+          <div class="project-manager-head">
+            <div>
+              <div class="project-manager-title">Projects</div>
+              <div id="projectStatus" class="quick-card-status">Sign in with Google</div>
+            </div>
+            <button id="newProject" class="primary">New</button>
+          </div>
           <div class="quick-card-body auth compact">
-            <div class="auth-row">
-              <select id="projectSelect"></select>
-              <button id="loadProject" class="ghost">Load</button>
-            </div>
-            <div class="project-actions">
+            <div class="project-switcher">
+              <select id="projectSelect" aria-label="Saved projects"></select>
+              <button id="loadProject" class="ghost">Open</button>
               <button id="saveProject" class="ghost">Save</button>
-              <button id="newProject" class="ghost">New</button>
             </div>
+            <div id="projectAuthHint" class="auth-status">Sign in with Google to open saved projects.</div>
             <details class="advanced-details">
               <summary>Manage</summary>
               <div class="project-actions">
-                <button id="clearProject" class="ghost">Clear</button>
-                <button id="deleteProject" class="ghost">Delete</button>
+                <button id="clearProject" class="ghost">Clear current</button>
+                <button id="deleteProject" class="ghost">Delete saved</button>
               </div>
             </details>
           </div>
-        </details>
+        </section>
 
         <details class="quick-card classroom-card">
           <summary>

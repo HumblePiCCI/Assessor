@@ -2,7 +2,7 @@
 
 Status: local owner-run Google Classroom pilot setup, not production launch.
 
-This repository supports a local, teacher-owned, read-only Google Classroom pilot. The app can connect through Google OAuth, list the teacher's active courses, list published coursework, read roster and submissions, export/download supported Drive attachments, materialize supported written work into local project inputs, run the existing assessment pipeline, and produce CSV export evidence. It does not write grades, return submissions, modify attachments, write comments, or write rubric scores to Google Classroom.
+This repository supports a local, teacher-owned, read-only Google Classroom pilot. The app can connect through Google OAuth, verify the teacher's Google email identity, list the teacher's active courses, list published coursework, read roster and submissions, export/download supported Drive attachments, materialize supported written work into local project inputs, run the existing assessment pipeline, and produce CSV export evidence. Saved project access requires this Google sign-in session: each teacher sees only projects, workspaces, runs, Classroom state, and exports scoped to that verified Google account. It does not write grades, return submissions, modify attachments, write comments, or write rubric scores to Google Classroom.
 
 Official references:
 
@@ -32,6 +32,10 @@ Use Google Auth Platform / OAuth consent:
 
 Scopes requested by this app:
 
+- `openid`
+  - asks Google for a signed identity token so the app can verify the account before serving saved projects
+- `email`
+  - reads only the verified Google email identity used to scope local project access
 - `https://www.googleapis.com/auth/classroom.courses.readonly`
   - lists the connected teacher's active courses
 - `https://www.googleapis.com/auth/classroom.coursework.students.readonly`
@@ -71,6 +75,12 @@ Optional alternate if you will start the server and open the UI on localhost:
 http://localhost:8000/google/auth/callback
 ```
 
+Hosted smoke redirect URI, when the app is served behind the Carbon Caste tunnel:
+
+```text
+https://assessor.carboncaste.io/google/auth/callback
+```
+
 Download the client secret JSON only to a local path outside the repository, or to an ignored path. Do not commit it.
 
 ## 4. Configure The Local App
@@ -88,6 +98,12 @@ Fill local values in `.env.local`, or export them in your shell:
 export GOOGLE_OAUTH_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
 export GOOGLE_OAUTH_CLIENT_SECRET=<web-client-secret>
 export GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/google/auth/callback
+```
+
+For the hosted smoke route, use the HTTPS redirect URI instead:
+
+```bash
+export GOOGLE_OAUTH_REDIRECT_URI=https://assessor.carboncaste.io/google/auth/callback
 ```
 
 The server auto-loads `marking_framework/.env.local` and then
@@ -118,6 +134,11 @@ copied back into the checked-out source tree or committed. Without
 plaintext under that ignored folder. Strict staging/production must use
 encrypted local token storage or an approved external secret store.
 
+Browser Google sign-in sessions are stored as HttpOnly cookies backed by ignored
+files under `server/data/google_sessions/`. Session files include the verified
+teacher email and a stable hash used for local project ownership. They are local
+runtime data, not source artifacts, and must not be committed.
+
 ## 5. Start The Server
 
 ```bash
@@ -139,15 +160,16 @@ can include short-lived authorization codes.
 
 In the UI:
 
-1. Create or save a project.
-2. Click `Connect Google Classroom`.
-3. Authenticate with the owner teacher Google account.
-4. Return to the app.
-5. Confirm the status shows `Connected as <teacher email>` or the redacted teacher identity.
-6. Choose a real low-risk class.
-7. Choose a real low-risk published written assignment.
-8. Sync submissions.
-9. Confirm the review UI uses first-name-plus-local-ID labels such as
+1. Click `Connect Google Classroom`.
+2. Authenticate with the owner teacher Google account.
+3. Return to the app.
+4. Confirm the status shows `Connected as <teacher email>` or the redacted teacher identity.
+5. Confirm the Projects control unlocks and shows only that account's saved projects.
+6. Create or save a project.
+7. Choose a real low-risk class.
+8. Choose a real low-risk published written assignment.
+9. Sync submissions.
+10. Confirm the review UI uses first-name-plus-local-ID labels such as
    `First - s001`; raw Google numeric user IDs and student last names should
    not appear in the routine teacher path.
 

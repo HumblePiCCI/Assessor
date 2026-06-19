@@ -1,7 +1,32 @@
+import hashlib
+
 from fastapi.testclient import TestClient
 
 from server.app import app
 import server.app as appmod
+import server.google_session as google_session
+
+
+def attach_google_session(client: TestClient, base_dir, email="teacher@example.com"):
+    clean = email.strip().lower()
+    session_id, identity = google_session.create_session(
+        base_dir,
+        {
+            "teacher_display_email": clean,
+            "teacher_identity_hash": hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24],
+        },
+    )
+    client.cookies.set(google_session.COOKIE_NAME, session_id)
+    return identity
+
+
+def signed_client(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    client = TestClient(app)
+    attach_google_session(client, server_dir)
+    return client
 
 
 class FakeQueue:
@@ -37,11 +62,11 @@ def _files():
     ]
 
 
-def test_pipeline_run_and_v2_delegate_to_same_queue(monkeypatch):
+def test_pipeline_run_and_v2_delegate_to_same_queue(tmp_path, monkeypatch):
     fake = FakeQueue()
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
     appmod.API_KEY_OVERRIDE["value"] = "test-key"
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     direct = client.post("/pipeline/run", data={"mode": "openai"}, files=_files())
     queued = client.post("/pipeline/v2/run", data={"mode": "openai"}, files=_files())
     assert direct.status_code == 200
@@ -73,10 +98,10 @@ def test_pipeline_run_openai_validation(monkeypatch):
     assert fake.calls == []
 
 
-def test_pipeline_run_codex_validation(monkeypatch):
+def test_pipeline_run_codex_validation(tmp_path, monkeypatch):
     fake = FakeQueue()
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": False, "connected": False})
     resp = client.post("/pipeline/run", data={"mode": "codex_local"}, files=_files())
     assert resp.status_code == 400

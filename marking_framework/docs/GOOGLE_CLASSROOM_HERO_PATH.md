@@ -2,12 +2,15 @@
 
 Status: local read-only Classroom pilot surface plus product contract. The
 live product surface is implemented as a project-scoped Classroom state model,
-Google OAuth connection, Classroom/Drive read adapters, API, and dashboard
-controls. A repository owner can configure local OAuth, authenticate as a
-teacher, choose a real course and published assignment, sync supported written
-submissions, run the existing assessment pipeline, review/finalize, and produce
-CSV export evidence. It is intentionally read-only-first: no Google Classroom
-write is performed by this repository without a future adapter that proves
+Google OAuth connection, verified Google-email project ownership,
+Classroom/Drive read adapters, API, and dashboard controls. A repository owner
+can configure local OAuth, authenticate as a teacher, choose a real course and
+published assignment, sync supported written submissions, run the existing
+assessment pipeline, review/finalize, and produce CSV export evidence. Saved
+projects, active workspaces, job state, Classroom state, and exports are served
+only to the signed-in Google identity that owns them. It is intentionally
+read-only-first: no Google Classroom write is performed by this repository
+without a future adapter that proves
 OAuth, scopes, tenancy, admin approval, preflight diff, audit records, tests,
 docs, and explicit teacher confirmation end to end.
 
@@ -39,6 +42,9 @@ dashboards, manifests, and exports live under ignored
 source tree stays a read-only runtime dependency during local smoke runs. The
 current Classroom state is materialized into that workspace's
 `outputs/classroom_state.json`.
+Anonymous browsers and header-only requests cannot list, load, save, or run
+saved projects; the browser must hold the HttpOnly Google session created by the
+OAuth callback.
 
 API endpoints:
 
@@ -108,6 +114,7 @@ local storage or an approved secret store before launch.
 
 Default Google scopes are read-only:
 
+- OpenID/email identity for verified Google sign-in and local project ownership
 - Classroom courses read-only
 - Classroom coursework/submissions read-only
 - Classroom rosters read-only

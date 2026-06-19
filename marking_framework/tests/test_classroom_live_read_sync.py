@@ -1,4 +1,5 @@
 import json
+import hashlib
 import shutil
 import types
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 import server.app as appmod
 from server.app import app
 import server.projects as projmod
+import server.google_session as google_session
 from server.google_oauth import DEFAULT_GOOGLE_SCOPES, GoogleOAuthService
 from server.google_token_store import GoogleTokenStore
 from server.pipeline_queue import PipelineQueue
@@ -53,6 +55,21 @@ class FakeGoogleAdapter:
         }
 
 
+def google_public(email="teacher@example.com"):
+    clean = email.strip().lower()
+    return {
+        "teacher_display_email": clean,
+        "teacher_identity_hash": hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24],
+    }
+
+
+def attach_google_session(client: TestClient, base_dir: Path, email="teacher@example.com") -> dict:
+    session_id, identity = google_session.create_session(base_dir, google_public(email))
+    client.cookies.set(google_session.COOKIE_NAME, session_id)
+    client.assessor_identity = identity
+    return identity
+
+
 def setup_server(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -76,7 +93,9 @@ def setup_server(tmp_path, monkeypatch):
             },
         ),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    attach_google_session(client, server_dir)
+    return client
 
 
 def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_blocks_unsupported(tmp_path, monkeypatch):
@@ -100,7 +119,7 @@ def test_live_google_read_sync_endpoint_materializes_supported_submissions_and_b
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["blocked_submission_count"] == 1
     assert "external_link_unsupported" in payload["blockers"]
-    workspace = projmod.workspace_root(None)
+    workspace = projmod.workspace_root(client.assessor_identity)
     assert (workspace / "inputs" / "submissions" / "classroom_import" / "s001.txt").read_text(encoding="utf-8").strip() == "First imported essay."
     assert not (workspace / "inputs" / "submissions" / "classroom_import" / "s002.txt").exists()
     metadata = json.loads((workspace / "inputs" / "class_metadata.json").read_text(encoding="utf-8"))
@@ -129,8 +148,9 @@ def test_live_google_courses_refresh_failure_requires_reconnect_before_adapter_u
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
     store = GoogleTokenStore(server_dir)
-    identity = {"tenant_id": "local-dev-tenant", "teacher_id": "local-dev-teacher", "strict_auth": False}
-    project = {"id": "workspace", "name": "Workspace", "scope_key": "workspace"}
+    client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
+    project = projmod.workspace_project(identity)
     store.save_token(
         identity,
         project,
@@ -160,7 +180,6 @@ def test_live_google_courses_refresh_failure_requires_reconnect_before_adapter_u
 
     monkeypatch.setattr(projmod, "google_oauth_service", lambda: service)
     monkeypatch.setattr(projmod, "GoogleClassroomAdapter", forbidden_adapter)
-    client = TestClient(app)
     response = client.get("/projects/classroom/google/courses")
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "refresh_failed_reconnect_required"

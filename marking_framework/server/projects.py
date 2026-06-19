@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from scripts.aggregate_review_learning import default_aggregate_learning_policy, normalize_aggregate_learning_policy
 from server import classroom
+from server import google_session
 from server.google_classroom_adapter import GoogleClassroomAdapter, GoogleClassroomError
 from server.google_oauth import GoogleOAuthError, GoogleOAuthService
 from server import review_store
@@ -20,7 +21,6 @@ from server.runtime_context import (
     identity_can_access,
     identity_token,
     project_owner,
-    resolve_request_identity,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -141,7 +141,16 @@ class GoogleClassroomReadSyncPayload(BaseModel):
 
 
 def identity_context(request: Request | None) -> dict:
-    return resolve_request_identity(request, BASE_DIR.parent)
+    identity = google_session.identity_from_request(BASE_DIR, request)
+    if identity:
+        return identity
+    raise HTTPException(
+        status_code=401,
+        detail={
+            "code": "google_sign_in_required",
+            "message": "Sign in with Google to open, create, or switch saved projects.",
+        },
+    )
 
 
 def _strict_identity(identity: dict | None) -> bool:

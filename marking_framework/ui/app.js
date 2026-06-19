@@ -369,12 +369,47 @@ async function startCodexLogin() {
     updateWorkflowState();
   }
 }
+function setProjectControls(enabled, message = '') {
+  const select = document.getElementById('projectSelect');
+  const loadBtn = document.getElementById('loadProject');
+  const saveBtn = document.getElementById('saveProject');
+  const newBtn = document.getElementById('newProject');
+  const clearBtn = document.getElementById('clearProject');
+  const deleteBtn = document.getElementById('deleteProject');
+  [select, loadBtn, saveBtn, newBtn, clearBtn, deleteBtn].forEach(node => {
+    if (node) node.disabled = !enabled;
+  });
+  const hint = document.getElementById('projectAuthHint');
+  if (hint) {
+    hint.textContent = message || (enabled ? 'Only projects for the signed-in Google account are shown.' : 'Sign in with Google to open saved projects.');
+    hint.dataset.state = enabled ? 'ready' : 'warn';
+  }
+}
 async function loadProjects() {
   const select = document.getElementById('projectSelect');
   if (!select) return;
   try {
     const res = await fetch(apiUrl('/projects'));
-    if (!res.ok) return;
+    if (res.status === 401) {
+      projects = [];
+      currentProject = null;
+      select.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.textContent = 'Sign in with Google';
+      opt.value = '';
+      opt.disabled = true;
+      opt.selected = true;
+      select.appendChild(opt);
+      const status = document.getElementById('projectStatus');
+      if (status) {
+        status.textContent = 'Sign in required';
+        status.dataset.state = 'warn';
+      }
+      setProjectControls(false, 'Sign in with Google to open, create, or switch projects.');
+      updateWorkflowState();
+      return;
+    }
+    if (!res.ok) throw new Error('projects unavailable');
     const payload = await res.json();
     projects = payload.projects || [];
     currentProject = payload.current || null;
@@ -400,7 +435,15 @@ async function loadProjects() {
       status.textContent = currentProject ? currentProject.name : 'No project loaded';
       status.dataset.state = currentProject ? 'ready' : 'idle';
     }
-  } catch (_) {}
+    setProjectControls(true);
+  } catch (_) {
+    const status = document.getElementById('projectStatus');
+    if (status) {
+      status.textContent = 'Projects unavailable';
+      status.dataset.state = 'danger';
+    }
+    setProjectControls(false, 'Project service is unavailable. Check the server and try again.');
+  }
   updateWorkflowState();
 }
 async function saveProject() {
@@ -414,11 +457,11 @@ async function saveProject() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(name ? { name } : {}),
     });
-    if (!res.ok) throw new Error('save failed');
+    if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Project save failed'));
     currentProject = await res.json();
     await loadProjects();
-  } catch (_) {
-    if (status) status.textContent = 'Project save failed';
+  } catch (err) {
+    if (status) status.textContent = err.message || 'Project save failed';
   }
 }
 async function newProject() {
@@ -432,11 +475,11 @@ async function newProject() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) throw new Error('new project failed');
+    if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'New project failed'));
     currentProject = await res.json();
     location.reload();
-  } catch (_) {
-    if (status) status.textContent = 'New project failed; current pass was not cleared.';
+  } catch (err) {
+    if (status) status.textContent = err.message || 'New project failed; current pass was not cleared.';
   }
 }
 function resetUploadLabels() {
@@ -471,9 +514,9 @@ function clearLocalState() {
   renderAnchorReview(null);
   renderRail(); renderDetail(); updateWorkflowState();
 }
-async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error('clear failed'); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (_) { if (status) status.textContent = 'Server unavailable: local view cleared only'; } }
-async function loadProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; try { const res = await fetch(apiUrl('/projects/load'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: select.value }) }); if (!res.ok) return; location.reload(); } catch (_) {} }
-async function deleteProject() { const select = document.getElementById('projectSelect'); if (!select || !select.value) return; if (!confirm('Delete this project?')) return; try { const res = await fetch(apiUrl(`/projects/${select.value}`), { method: 'DELETE' }); if (!res.ok) return; await loadProjects(); } catch (_) {} }
+async function clearProject() { if (!confirm('Clear the current session?')) return; clearLocalState(); const status = document.getElementById('projectStatus'); if (status) status.textContent = 'Clearing session...'; try { const res = await fetch(apiUrl('/projects/clear'), { method: 'POST' }); if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Clear failed')); await loadProjects(); location.href = `${location.pathname}?t=${Date.now()}`; } catch (err) { if (status) status.textContent = err.message || 'Server unavailable: local view cleared only'; } }
+async function loadProject() { const select = document.getElementById('projectSelect'); const status = document.getElementById('projectStatus'); if (!select || !select.value) return; try { if (status) status.textContent = 'Opening project...'; const res = await fetch(apiUrl('/projects/load'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: select.value }) }); if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Open failed')); location.reload(); } catch (err) { if (status) status.textContent = err.message || 'Open failed'; } }
+async function deleteProject() { const select = document.getElementById('projectSelect'); const status = document.getElementById('projectStatus'); if (!select || !select.value) return; if (!confirm('Delete this project?')) return; try { const res = await fetch(apiUrl(`/projects/${select.value}`), { method: 'DELETE' }); if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Delete failed')); await loadProjects(); } catch (err) { if (status) status.textContent = err.message || 'Delete failed'; } }
 function classroomStateLabel(value) {
   return String(value || 'blocked').replaceAll('_', ' ');
 }
@@ -592,25 +635,30 @@ async function refreshGoogleAuth() {
       setGoogleStatus(`Google OAuth not configured. ${googleAuth.remediation || 'Set local OAuth env vars and restart.'}`, 'warn');
       if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
       if (disconnectBtn) disconnectBtn.disabled = true;
+      setProjectControls(false, 'Configure Google OAuth, then sign in to open projects.');
     } else if (googleAuth.connected && (googleAuth.missing_scopes || []).length) {
       setGoogleStatus(`Missing required scope: ${googleAuth.missing_scopes.map(scope => scope.split('/').pop()).join(', ')}. ${googleAuth.remediation || 'Reconnect Google.'}`, 'danger');
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
+      await loadProjects();
     } else if (googleAuth.connected) {
       const who = googleAuth.teacher_display_email || googleAuth.teacher_identity_hash || 'Google connected';
       const suffix = googleAuth.expired || googleAuth.expiring ? ' Token refresh will run before the next live read.' : ' Choose a class.';
       setGoogleStatus(`Connected as ${who}.${suffix}`, 'ready');
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
+      await loadProjects();
       await loadGoogleCourses();
     } else {
       const reconnect = googleAuth.reconnect_required || googleAuth.expired;
       setGoogleStatus(reconnect ? `Reconnect required. ${googleAuth.remediation || ''}` : `Google not connected. ${googleAuth.remediation || ''}`, reconnect ? 'danger' : 'idle');
       if (connectBtn) connectBtn.textContent = 'Connect Google Classroom';
       if (disconnectBtn) disconnectBtn.disabled = true;
+      setProjectControls(false, 'Sign in with Google to open, create, or switch projects.');
     }
   } catch (_) {
     setGoogleStatus('Google status unavailable.', 'warn');
+    setProjectControls(false, 'Project sign-in status is unavailable. Check the server and try again.');
   } finally {
     renderClassroomNextStep();
   }

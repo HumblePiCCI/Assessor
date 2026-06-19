@@ -134,6 +134,10 @@ Hardening coverage added for the final local pilot smoke patch:
 - Saved local project snapshots default to ignored `server/data/projects/`;
   legacy ignored `projects/` snapshots are migrated forward when the new store
   is empty.
+- Saved projects, active workspaces, run state, Classroom state, and export
+  state require the HttpOnly Google session cookie and are scoped by the
+  verified Google identity hash; anonymous/header-only project access returns
+  `google_sign_in_required`.
 - Large first-pass assessment runs keep polling the backend job after the old
   client-side timeout threshold and show the current stage instead of falsely
   marking a healthy running job as failed.
@@ -159,8 +163,11 @@ Codex cannot authenticate with the repository owner's Google Classroom account. 
   - Google Drive API:
 - Redirect URI used:
   - `http://127.0.0.1:8000/google/auth/callback`
+  - `https://assessor.carboncaste.io/google/auth/callback`
   - other:
 - Scopes requested:
+  - `openid`
+  - `email`
   - `https://www.googleapis.com/auth/classroom.courses.readonly`
   - `https://www.googleapis.com/auth/classroom.coursework.students.readonly`
   - `https://www.googleapis.com/auth/classroom.rosters.readonly`
@@ -168,6 +175,10 @@ Codex cannot authenticate with the repository owner's Google Classroom account. 
 - Runtime mode:
   - Codex local OAuth:
   - provider-generic API key:
+- Project access evidence:
+  - anonymous `/projects` blocked:
+  - signed-in teacher can list own projects:
+  - different Google account cannot see this teacher's saved projects:
 
 ### Classroom Shape
 
@@ -256,6 +267,7 @@ Do not record course names, assignment names, student names, document titles, ra
 5. Add authorized redirect URI:
    - `http://127.0.0.1:8000/google/auth/callback`
    - optionally `http://localhost:8000/google/auth/callback`
+   - for hosted smoke, `https://assessor.carboncaste.io/google/auth/callback`
 6. Store client secret JSON outside the repo or in an ignored local path.
 7. Set env vars:
    - `GOOGLE_OAUTH_CLIENT_ID`
@@ -270,34 +282,35 @@ Do not record course names, assignment names, student names, document titles, ra
    ```
 
 9. Open `http://127.0.0.1:8000`.
-10. Create or save a project.
-11. Click `Connect Google Classroom`.
-12. Authenticate with the owner teacher Google account.
-13. Return to the app.
-14. Confirm connected status shows the teacher identity.
-15. Choose a real low-risk course.
-16. Choose a real low-risk published written assignment.
-17. Sync submissions.
-18. Confirm all sync counts.
-19. Confirm Classroom-owned imports use local IDs such as `s001.txt`, and the
+10. Click `Connect Google Classroom`.
+11. Authenticate with the owner teacher Google account.
+12. Return to the app.
+13. Confirm connected status shows the teacher identity.
+14. Confirm the Projects control unlocks and shows only this Google account's projects.
+15. Create or save a project.
+16. Choose a real low-risk course.
+17. Choose a real low-risk published written assignment.
+18. Sync submissions.
+19. Confirm all sync counts.
+20. Confirm Classroom-owned imports use local IDs such as `s001.txt`, and the
     review rail/title/exceptions/anchor panel show first-name-plus-local-ID
     labels rather than raw Google numeric IDs or student last names.
-20. Confirm blockers have remedies and unsupported/empty/permission-denied files are not graded as zero-text.
-21. Add rubric and assignment outline.
-22. Connect runtime through Codex local OAuth or provider-generic API mode.
-23. Run assessment.
-24. Confirm `teacher_review_ready` appears before background validation completes when fast review succeeds.
-25. Review one normal student.
-26. Review one flagged/boundary student.
-27. Save draft.
-28. Reload and verify draft persistence.
-29. Finalize review.
-30. Reload and verify finalized persistence.
-31. Run CSV export preflight.
-32. Confirm CSV export only after required gates. If any teacher edit,
+21. Confirm blockers have remedies and unsupported/empty/permission-denied files are not graded as zero-text.
+22. Add rubric and assignment outline.
+23. Connect runtime through Codex local OAuth or provider-generic API mode.
+24. Run assessment.
+25. Confirm `teacher_review_ready` appears before background validation completes when fast review succeeds.
+26. Review one normal student.
+27. Review one flagged/boundary student.
+28. Save draft.
+29. Reload and verify draft persistence.
+30. Finalize review.
+31. Reload and verify finalized persistence.
+32. Run CSV export preflight.
+33. Confirm CSV export only after required gates. If any teacher edit,
     validation refresh, Classroom resync, blocker change, or evidence change
     happens after preflight, rebuild preflight before confirming export.
-33. Download CSV or record artifact hash without committing the CSV.
-34. Generate/inspect evidence packet.
-35. Confirm no live Google Classroom write occurred.
+34. Download CSV or record artifact hash without committing the CSV.
+35. Generate/inspect evidence packet.
+36. Confirm no live Google Classroom write occurred.
 36. Run launch validator and record that production launch remains blocked unless all launch gates are truly satisfied.

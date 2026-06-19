@@ -318,3 +318,16 @@ class GoogleTokenStore:
         if existed:
             path.unlink()
         return existed
+
+    def clear_identity_tokens(self, identity: dict) -> bool:
+        path = self._identity_dir(identity, {"id": "workspace", "scope_key": "workspace"})
+        teacher_dir = path.parent
+        if not teacher_dir.exists():
+            return False
+        for item in sorted(teacher_dir.rglob("*"), reverse=True):
+            if item.is_file():
+                item.unlink()
+            elif item.is_dir():
+                item.rmdir()
+        teacher_dir.rmdir()
+        return True

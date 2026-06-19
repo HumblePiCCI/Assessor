@@ -345,6 +345,37 @@ textarea {
   background: var(--panel-strong);
 }
 
+.project-manager {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.project-manager-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 0 12px;
+}
+
+.project-manager-title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.project-manager .quick-card-status {
+  display: block;
+  margin-top: 3px;
+  text-align: left;
+}
+
+.project-switcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
 .quick-card summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

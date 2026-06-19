@@ -21,6 +21,7 @@ class Response:
 class OAuthTransport:
     def __init__(self):
         self.posts = []
+        self.gets = []
 
     def post(self, url, *, data=None, params=None, timeout=20.0):
         self.posts.append({"url": url, "data": data or {}, "params": params or {}})
@@ -34,6 +35,20 @@ class OAuthTransport:
                 "expires_in": 3600,
                 "scope": " ".join(DEFAULT_GOOGLE_SCOPES),
                 "token_type": "Bearer",
+                "id_token": "verified-id-token",
+            },
+        )
+
+    def get(self, url, *, params=None, timeout=20.0):
+        self.gets.append({"url": url, "params": params or {}})
+        return Response(
+            200,
+            {
+                "aud": "client-id",
+                "iss": "https://accounts.google.com",
+                "exp": str(int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp())),
+                "email": "teacher@example.com",
+                "email_verified": "true",
             },
         )
 
@@ -45,6 +60,9 @@ class FailingRefreshTransport:
     def post(self, url, *, data=None, params=None, timeout=20.0):
         self.posts.append({"url": url, "data": data or {}, "params": params or {}})
         return Response(400, {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+
+    def get(self, url, *, params=None, timeout=20.0):
+        return Response(200, {})
 
 
 def identity():
@@ -187,22 +205,28 @@ def test_oauth_callback_status_and_disconnect_never_leak_tokens(tmp_path):
 
     connected = svc.callback(state=state, code="auth-code")
     assert connected["status"] == "connected"
-    status = svc.status(identity(), project())
+    google_identity = connected["identity"]
+    assert google_identity["google_teacher_display_email"] == "teacher@example.com"
+    status = svc.status(google_identity, project())
     status_blob = json.dumps(status)
     assert status["connected"] is True
+    assert status["teacher_display_email"] == "teacher@example.com"
     assert "access-secret" not in status_blob
     assert "refresh-secret" not in status_blob
+    assert "verified-id-token" not in status_blob
 
-    disconnected = svc.disconnect(identity(), project())
+    disconnected = svc.disconnect(google_identity, project())
     assert disconnected["connected"] is False
     assert disconnected["cleared"] is True
     assert transport.posts[-1]["params"]["token"] == "refresh-secret"
-    assert svc.status(identity(), project())["connected"] is False
+    assert svc.status(google_identity, project())["connected"] is False
 
 
 def test_status_accepts_documented_student_submissions_scope_equivalent(tmp_path):
     store = GoogleTokenStore(tmp_path / "server")
     granted_scopes = [
+        "openid",
+        "email",
         "https://www.googleapis.com/auth/classroom.courses.readonly",
         "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
         "https://www.googleapis.com/auth/classroom.rosters.readonly",

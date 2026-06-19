@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -7,10 +8,26 @@ from fastapi.testclient import TestClient
 
 import server.app as appmod
 import server.classroom as classroom
+import server.google_session as google_session
 import server.projects as projmod
 import server.review_store as review_store
 from scripts import build_dashboard_data
 from server.app import app
+
+
+def google_public(email="teacher@example.com"):
+    clean = email.strip().lower()
+    return {
+        "teacher_display_email": clean,
+        "teacher_identity_hash": hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24],
+    }
+
+
+def attach_google_session(client: TestClient, base_dir: Path, email="teacher@example.com") -> dict:
+    session_id, identity = google_session.create_session(base_dir, google_public(email))
+    client.cookies.set(google_session.COOKIE_NAME, session_id)
+    client.assessor_identity = identity
+    return identity
 
 
 def write_workspace(root: Path):
@@ -112,12 +129,14 @@ def configure_app_workspace(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
     monkeypatch.setitem(appmod.API_KEY_OVERRIDE, "value", "test-key")
-    return TestClient(app)
+    client = TestClient(app)
+    attach_google_session(client, server_dir)
+    return client
 
 
 def assert_project_inputs_reject_no_current_imports(tmp_path: Path, monkeypatch):
     client = configure_app_workspace(tmp_path, monkeypatch)
-    workspace = projmod.workspace_root(None)
+    workspace = projmod.workspace_root(client.assessor_identity)
     if (tmp_path / "inputs").exists():
         shutil.copytree(tmp_path / "inputs", workspace / "inputs", dirs_exist_ok=True)
     inputs = workspace / "inputs"
@@ -450,7 +469,7 @@ def test_platform_error_sync_clears_prior_classroom_imports_and_run_project_inpu
 
 
 def test_local_upload_run_remains_unaffected_by_classroom_import_manifest(tmp_path, monkeypatch):
-    configure_app_workspace(tmp_path, monkeypatch)
+    client = configure_app_workspace(tmp_path, monkeypatch)
     calls = []
 
     def fake_submit(**kwargs):
@@ -460,7 +479,6 @@ def test_local_upload_run_remains_unaffected_by_classroom_import_manifest(tmp_pa
         return {"job_id": "job-local", "status": "queued"}
 
     monkeypatch.setattr(appmod.PIPELINE_QUEUE, "submit", fake_submit)
-    client = TestClient(app)
     response = client.post(
         "/pipeline/v2/run",
         data={"mode": "openai"},
@@ -541,10 +559,11 @@ def test_classroom_api_endpoints_preserve_teacher_review_gate(tmp_path, monkeypa
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
-    workspace = projmod.workspace_root(None)
+    client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
+    workspace = projmod.workspace_root(identity)
     write_workspace(workspace)
 
-    client = TestClient(app)
     save = client.post("/projects/save", json={"name": "Classroom Pilot"})
     assert save.status_code == 200
 
@@ -691,6 +710,7 @@ def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
 
     client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
     save = client.post("/projects/save", json={"name": "Read Sync Pilot"})
     assert save.status_code == 200
     resp = client.post(
@@ -716,4 +736,4 @@ def test_classroom_read_sync_endpoint_uses_fixture_snapshot_without_live_writes(
     payload = resp.json()
     assert payload["read_sync"]["imported_submission_count"] == 1
     assert payload["read_sync"]["external_write_performed"] is False
-    assert classroom_import_file(projmod.workspace_root(None), "s001.txt").exists()
+    assert classroom_import_file(projmod.workspace_root(identity), "s001.txt").exists()

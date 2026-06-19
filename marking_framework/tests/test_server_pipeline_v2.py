@@ -1,9 +1,33 @@
+import hashlib
 import json
 
 from fastapi.testclient import TestClient
 
 from server.app import app
 import server.app as appmod
+import server.google_session as google_session
+
+
+def attach_google_session(client: TestClient, base_dir, email="teacher@example.com"):
+    clean = email.strip().lower()
+    session_id, identity = google_session.create_session(
+        base_dir,
+        {
+            "teacher_display_email": clean,
+            "teacher_identity_hash": hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24],
+        },
+    )
+    client.cookies.set(google_session.COOKIE_NAME, session_id)
+    return identity
+
+
+def signed_client(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    client = TestClient(app)
+    attach_google_session(client, server_dir)
+    return client
 
 
 class FakeQueue:
@@ -76,11 +100,11 @@ def _files():
     ]
 
 
-def test_pipeline_v2_run_success_openai(monkeypatch):
+def test_pipeline_v2_run_success_openai(tmp_path, monkeypatch):
     fake = FakeQueue()
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
     appmod.API_KEY_OVERRIDE["value"] = "test-key"
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     resp = client.post("/pipeline/v2/run", data={"mode": "openai"}, files=_files())
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "j1"
@@ -102,10 +126,10 @@ def test_pipeline_v2_run_validation(monkeypatch):
     assert no_key.status_code == 400
 
 
-def test_pipeline_v2_codex_validation(monkeypatch):
+def test_pipeline_v2_codex_validation(tmp_path, monkeypatch):
     fake = FakeQueue()
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     monkeypatch.setattr(appmod, "codex_status_payload", lambda: {"available": False, "connected": False})
     resp = client.post("/pipeline/v2/run", data={"mode": "codex_local"}, files=_files())
     assert resp.status_code == 400
@@ -117,12 +141,12 @@ def test_pipeline_v2_codex_validation(monkeypatch):
     assert ok.status_code == 200
 
 
-def test_pipeline_v2_status_and_data(monkeypatch):
+def test_pipeline_v2_status_and_data(tmp_path, monkeypatch):
     fake = FakeQueue()
     fake.job = {"id": "j1", "status": "running"}
     fake.data = {"students": [{"student_id": "s1"}]}
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     status = client.get("/pipeline/v2/jobs/j1")
     assert status.status_code == 200
     assert status.json()["status"] == "running"
@@ -136,11 +160,11 @@ def test_pipeline_v2_status_and_data(monkeypatch):
     assert no_data.status_code == 404
 
 
-def test_pipeline_v2_events_and_progress_asset(monkeypatch):
+def test_pipeline_v2_events_and_progress_asset(tmp_path, monkeypatch):
     fake = FakeQueue()
     fake.events = {"events": [{"index": 0, "message": "ok"}], "next_after": 0, "done": True, "status": "completed"}
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     events = client.get("/pipeline/v2/jobs/j1/events?after=-1&limit=10")
     assert events.status_code == 200
     assert events.json()["events"][0]["message"] == "ok"
@@ -150,7 +174,7 @@ def test_pipeline_v2_events_and_progress_asset(monkeypatch):
     assert asset.status_code == 200
 
 
-def test_pipeline_v2_rubric_endpoints(monkeypatch):
+def test_pipeline_v2_rubric_endpoints(tmp_path, monkeypatch):
     fake = FakeQueue()
     fake.rubric = {
         "job_id": "j1",
@@ -159,7 +183,7 @@ def test_pipeline_v2_rubric_endpoints(monkeypatch):
         "rubric_verification": {"status": "needs_confirmation", "editable_projection": {"criteria": [], "levels": []}},
     }
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", fake)
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     status = client.get("/pipeline/v2/jobs/j1/rubric")
     assert status.status_code == 200
     assert status.json()["rubric_manifest"]["rubric_family"] == "rubric_a"
@@ -172,13 +196,13 @@ def test_pipeline_v2_rubric_endpoints(monkeypatch):
     assert fake.confirmed["teacher_edits"]["genre"] == "argumentative"
 
 
-def test_pipeline_v2_anchor_confirm_validation(monkeypatch):
+def test_pipeline_v2_anchor_confirm_validation(tmp_path, monkeypatch):
     class RaisingQueue(FakeQueue):
         def confirm_anchor_scores(self, job_id, teacher_scores=None, identity=None):
             raise ValueError("Anchor s1 mark must be between 0 and 100.")
 
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", RaisingQueue())
-    client = TestClient(app)
+    client = signed_client(tmp_path, monkeypatch)
     confirm = client.post(
         "/pipeline/v2/jobs/j1/anchors",
         json={"anchors": [{"student_id": "s1", "teacher_level": "4", "teacher_mark": 150}]},

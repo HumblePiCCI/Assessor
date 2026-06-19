@@ -15,5 +15,8 @@ google-oauth-client*.json
 *oauth*client*.json
 *client_secret*.json
 server/data/google_oauth/
+server/data/google_sessions/
 server/data/classroom/
+server/data/projects/
 server/data/review_store/
+server/data/tenant_workspaces/

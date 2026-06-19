@@ -20,9 +20,10 @@ load_local_env(BASE_DIR.parent)
 
 from server.projects import router as projects_router
 from server.pipeline_queue import PipelineQueue
-from server.google_oauth import GoogleOAuthError, GoogleOAuthService, google_oauth_error_payload
+from server.google_oauth import GOOGLE_ACCOUNT_PROJECT, GoogleOAuthError, GoogleOAuthService, google_oauth_error_payload
 import server.projects as projectsmod
 from server import classroom as classroommod
+from server import google_session
 from server.runtime_context import launch_contract, require_admin, resolve_request_identity
 from scripts.assessor_utils import resolve_input_path
 from scripts.codex_runtime import codex_status_payload
@@ -85,7 +86,27 @@ def current_api_key() -> str | None:
 
 
 def request_identity(request: Request | None) -> dict:
+    google_identity = google_session.identity_from_request(BASE_DIR, request)
+    if google_identity:
+        return google_identity
     return resolve_request_identity(request, BASE_DIR.parent)
+
+
+def request_google_identity(request: Request | None) -> dict | None:
+    return google_session.identity_from_request(BASE_DIR, request)
+
+
+def require_google_identity(request: Request | None) -> dict:
+    identity = request_google_identity(request)
+    if identity:
+        return identity
+    raise HTTPException(
+        status_code=401,
+        detail={
+            "code": "google_sign_in_required",
+            "message": "Sign in with Google to open this project workspace.",
+        },
+    )
 
 
 def dashboard_data_path_for_identity(identity: dict) -> Path:
@@ -271,19 +292,21 @@ def google_oauth_service() -> GoogleOAuthService:
 
 
 def google_project_for_identity(identity: dict) -> dict:
+    if not identity.get("google_authenticated", False):
+        return dict(GOOGLE_ACCOUNT_PROJECT)
     return projectsmod.get_current_project(identity) or projectsmod.workspace_project(identity)
 
 
 @app.get("/google/auth/status")
 async def google_auth_status(request: Request):
-    identity = request_identity(request)
+    identity = request_google_identity(request) or google_session.anonymous_identity()
     project = google_project_for_identity(identity)
     return google_oauth_service().status(identity, project)
 
 
 @app.post("/google/auth/start")
 async def google_auth_start(payload: GoogleAuthStartPayload, request: Request):
-    identity = request_identity(request)
+    identity = request_google_identity(request) or google_session.anonymous_identity()
     project = google_project_for_identity(identity)
     try:
         return google_oauth_service().start(identity, project, redirect_after=payload.redirect_after or "/")
@@ -293,7 +316,7 @@ async def google_auth_start(payload: GoogleAuthStartPayload, request: Request):
 
 @app.get("/google/auth/start")
 async def google_auth_start_get(request: Request, redirect_after: str = "/"):
-    identity = request_identity(request)
+    identity = request_google_identity(request) or google_session.anonymous_identity()
     project = google_project_for_identity(identity)
     try:
         payload = google_oauth_service().start(identity, project, redirect_after=redirect_after)
@@ -303,7 +326,7 @@ async def google_auth_start_get(request: Request, redirect_after: str = "/"):
 
 
 @app.get("/google/auth/callback")
-async def google_auth_callback(state: str = "", code: str = "", error: str = ""):
+async def google_auth_callback(request: Request, state: str = "", code: str = "", error: str = ""):
     try:
         payload = google_oauth_service().callback(state=state, code=code, error=error or None)
     except GoogleOAuthError as exc:
@@ -312,20 +335,42 @@ async def google_auth_callback(state: str = "", code: str = "", error: str = "")
             f"<!doctype html><title>Google Classroom connection failed</title><p>Google Classroom connection failed: {safe['code']}.</p>",
             status_code=400,
         )
+    session_id, _identity = google_session.create_session(BASE_DIR, payload.get("google_auth", {}))
     redirect_after = html.escape(str(payload.get("redirect_after") or "/"), quote=True)
-    return HTMLResponse(
+    response = HTMLResponse(
         "<!doctype html><title>Google Classroom connected</title>"
         "<p>Google Classroom connected. You can close this tab and return to Assessor.</p>"
         f"<p><a href=\"{redirect_after}\">Return to Assessor</a></p>",
         status_code=200,
     )
+    response.set_cookie(
+        google_session.COOKIE_NAME,
+        session_id,
+        max_age=google_session.SESSION_TTL_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=google_session.cookie_secure(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @app.post("/google/auth/disconnect")
 async def google_auth_disconnect(request: Request):
-    identity = request_identity(request)
+    identity = request_google_identity(request)
+    if not identity:
+        response = Response(
+            content=json.dumps({"status": "disconnected", "connected": False, "cleared": False}),
+            media_type="application/json",
+        )
+        response.delete_cookie(google_session.COOKIE_NAME, path="/")
+        return response
     project = google_project_for_identity(identity)
-    return google_oauth_service().disconnect(identity, project)
+    payload = google_oauth_service().disconnect(identity, project)
+    google_session.clear_session(BASE_DIR, request)
+    response = Response(content=json.dumps(payload), media_type="application/json")
+    response.delete_cookie(google_session.COOKIE_NAME, path="/")
+    return response
 def ui_file_response(name: str, media_type: str | None = None):
     path = UI_DIR / name
     if not path.exists():
@@ -333,7 +378,13 @@ def ui_file_response(name: str, media_type: str | None = None):
     return FileResponse(path, media_type=media_type)
 @app.get("/data.json")
 async def ui_data_json(request: Request):
-    identity = request_identity(request)
+    identity = request_google_identity(request)
+    if not identity:
+        return {
+            "students": [],
+            "auth_required": True,
+            "message": "Sign in with Google to load saved projects.",
+        }
     data_path = dashboard_data_path_for_identity(identity)
     if not data_path.exists():
         return {"students": []}
@@ -422,7 +473,7 @@ def submit_pipeline_job(
     if not submissions:
         raise HTTPException(status_code=400, detail="No submissions provided")
     mode = validate_pipeline_mode(mode)
-    identity = request_identity(request)
+    identity = require_google_identity(request)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         rubric_path = tmp_dir / f"rubric{Path(rubric.filename).suffix or '.md'}"
@@ -483,7 +534,7 @@ async def run_pipeline_project_inputs(
     project_id: str = Form(""),
 ):
     mode = validate_pipeline_mode(mode)
-    identity = request_identity(request)
+    identity = require_google_identity(request)
     root = projectsmod.workspace_root(identity)
     inputs = root / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
@@ -524,13 +575,13 @@ async def run_pipeline_project_inputs(
     )
 @app.get("/pipeline/v2/jobs/{job_id}")
 async def pipeline_v2_status(job_id: str, request: Request):
-    job = PIPELINE_QUEUE.get_job(job_id, identity=request_identity(request))
+    job = PIPELINE_QUEUE.get_job(job_id, identity=require_google_identity(request))
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 @app.get("/pipeline/v2/jobs/{job_id}/data")
 async def pipeline_v2_data(job_id: str, request: Request):
-    data = PIPELINE_QUEUE.load_dashboard_data(job_id, identity=request_identity(request))
+    data = PIPELINE_QUEUE.load_dashboard_data(job_id, identity=require_google_identity(request))
     if data is None:
         raise HTTPException(status_code=404, detail="Dashboard data not ready")
     return data
@@ -538,7 +589,7 @@ async def pipeline_v2_data(job_id: str, request: Request):
 
 @app.get("/pipeline/v2/jobs/{job_id}/rubric")
 async def pipeline_v2_rubric(job_id: str, request: Request):
-    payload = PIPELINE_QUEUE.rubric_status(job_id, identity=request_identity(request))
+    payload = PIPELINE_QUEUE.rubric_status(job_id, identity=require_google_identity(request))
     if payload is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return payload
@@ -562,7 +613,7 @@ async def pipeline_v2_rubric_confirm(job_id: str, payload: RubricConfirmationPay
         job_id,
         action=action,
         teacher_edits=teacher_edits,
-        identity=request_identity(request),
+        identity=require_google_identity(request),
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -571,7 +622,7 @@ async def pipeline_v2_rubric_confirm(job_id: str, payload: RubricConfirmationPay
 
 @app.get("/pipeline/v2/jobs/{job_id}/anchors")
 async def pipeline_v2_anchor_status(job_id: str, request: Request):
-    payload = PIPELINE_QUEUE.anchor_status(job_id, identity=request_identity(request))
+    payload = PIPELINE_QUEUE.anchor_status(job_id, identity=require_google_identity(request))
     if payload is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return payload
@@ -583,7 +634,7 @@ async def pipeline_v2_anchor_confirm(job_id: str, payload: AnchorConfirmationPay
         result = PIPELINE_QUEUE.confirm_anchor_scores(
             job_id,
             teacher_scores={"anchors": payload.anchors},
-            identity=request_identity(request),
+            identity=require_google_identity(request),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -592,7 +643,7 @@ async def pipeline_v2_anchor_confirm(job_id: str, payload: AnchorConfirmationPay
     return result
 @app.get("/pipeline/v2/jobs/{job_id}/events")
 async def pipeline_v2_events(job_id: str, request: Request, after: int = -1, limit: int = 200):
-    payload = PIPELINE_QUEUE.get_events(job_id, identity=request_identity(request), after=after, limit=limit)
+    payload = PIPELINE_QUEUE.get_events(job_id, identity=require_google_identity(request), after=after, limit=limit)
     if payload is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return payload

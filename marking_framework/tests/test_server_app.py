@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import json
 import shutil
@@ -11,7 +12,9 @@ from fastapi.testclient import TestClient
 from server.app import app
 import server.app as appmod
 import server.classroom as classroommod
+import server.google_session as google_session
 import server.projects as projmod
+import server.review_store as review_store
 
 
 def make_zip_bytes():
@@ -20,6 +23,25 @@ def make_zip_bytes():
         z.writestr("s1.txt", "hello")
     buf.seek(0)
     return buf
+
+
+def google_public(email="teacher@example.com"):
+    clean = email.strip().lower()
+    return {
+        "teacher_display_email": clean,
+        "teacher_identity_hash": hashlib.sha256(clean.encode("utf-8")).hexdigest()[:24],
+    }
+
+
+def attach_google_session(client: TestClient, base_dir: Path, email="teacher@example.com") -> dict:
+    session_id, identity = google_session.create_session(base_dir, google_public(email))
+    client.cookies.set(google_session.COOKIE_NAME, session_id)
+    return identity
+
+
+def google_request(base_dir: Path, email="teacher@example.com"):
+    session_id, identity = google_session.create_session(base_dir, google_public(email))
+    return types.SimpleNamespace(headers={}, cookies={google_session.COOKIE_NAME: session_id}), identity
 
 
 def test_create_job_success(tmp_path, monkeypatch):
@@ -118,6 +140,36 @@ def test_auth_status_and_set(monkeypatch):
     assert good.status_code == 200
     resp2 = client.get("/auth/status")
     assert resp2.json()["connected"] is True
+
+
+def test_google_callback_session_cookie_unlocks_scoped_projects(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+
+    class FakeGoogleOAuth:
+        def callback(self, *, state="", code="", error=None):
+            return {
+                "status": "connected",
+                "redirect_after": "/",
+                "google_auth": google_public("teacher@example.com"),
+            }
+
+    monkeypatch.setattr(appmod, "google_oauth_service", lambda: FakeGoogleOAuth())
+    client = TestClient(app)
+    assert client.get("/projects").status_code == 401
+
+    callback = client.get("/google/auth/callback?state=state&code=code")
+
+    assert callback.status_code == 200
+    assert google_session.COOKIE_NAME in callback.headers.get("set-cookie", "")
+    projects = client.get("/projects")
+    assert projects.status_code == 200
+    assert projects.json() == {"current": None, "projects": []}
 
 
 def test_validate_pipeline_mode_accepts_provider_generic_api_alias(monkeypatch):
@@ -320,11 +372,12 @@ def test_ui_routes(tmp_path, monkeypatch):
     assert resp_css.status_code == 200
     data_resp = client.get("/data.json")
     assert data_resp.status_code == 200
-    assert data_resp.json() == {"students": []}
+    assert data_resp.json()["auth_required"] is True
     out_dir = tmp_path / "outputs"
     out_dir.mkdir()
     data_path = out_dir / "dashboard_data.json"
     data_path.write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+    attach_google_session(client, server_dir)
     data_resp2 = client.get("/data.json")
     assert data_resp2.json()["students"][0]["student_id"] == "s1"
     (ui_dir / "app.js").unlink()
@@ -341,9 +394,11 @@ def test_data_json_hydrates_numeric_classroom_labels(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", projects_dir / "current.json")
+    client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
     project = {"id": "project-a", "name": "Project A", "scope_key": "project-a"}
-    projmod.CURRENT_PROJECT_PATH.write_text(json.dumps(project), encoding="utf-8")
-    workspace = projmod.workspace_root(None)
+    projmod.set_current_project(project, identity)
+    workspace = projmod.workspace_root(identity)
     outputs = workspace / "outputs"
     outputs.mkdir(parents=True, exist_ok=True)
     raw_google_user_id = "123456789012345678901"
@@ -378,7 +433,7 @@ def test_data_json_hydrates_numeric_classroom_labels(tmp_path, monkeypatch):
         },
     )
 
-    response = TestClient(app).get("/data.json")
+    response = client.get("/data.json")
 
     assert response.status_code == 200
     student = response.json()["students"][0]
@@ -399,10 +454,11 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
     client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
     (projects_dir / "empty").mkdir()
     resp = client.get("/projects")
     assert resp.json() == {"current": None, "projects": []}
-    workspace = projmod.workspace_root(None)
+    workspace = projmod.workspace_root(identity)
     (workspace / "inputs").mkdir(parents=True)
     (workspace / "inputs" / "exemplars").mkdir()
     (workspace / "inputs" / "exemplars" / "level_3.md").write_text("X", encoding="utf-8")
@@ -410,8 +466,9 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     save_resp = client.post("/projects/save", json={"name": "Class A", "aggregate_learning_mode": "opt_in", "aggregate_retention_days": 90})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
+    project_path = projmod.project_dir(project_id, identity)
     assert save_resp.json()["aggregate_learning"]["mode"] == "opt_in"
-    assert not (projects_dir / project_id / "inputs" / "exemplars").exists()
+    assert not (project_path / "inputs" / "exemplars").exists()
     save_resp2 = client.post("/projects/save", json={"project_id": project_id, "name": "Class A"})
     assert save_resp2.status_code == 200
     list_resp = client.get("/projects")
@@ -420,26 +477,26 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     (workspace / "outputs" / "latest-pass.txt").write_text("latest", encoding="utf-8")
     new_resp = client.post("/projects/new", json={"name": "New Project"})
     assert new_resp.status_code == 200
-    assert (projects_dir / project_id / "outputs" / "latest-pass.txt").read_text(encoding="utf-8") == "latest"
+    assert (project_path / "outputs" / "latest-pass.txt").read_text(encoding="utf-8") == "latest"
     assert not (workspace / "inputs" / "rubric.md").exists()
     assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
     clear_file = workspace / "outputs"
     clear_file.mkdir()
     (clear_file / "x.txt").write_text("x", encoding="utf-8")
-    current_path.write_text(json.dumps({"id": project_id, "name": "Class A"}), encoding="utf-8")
+    projmod.current_project_path(identity).write_text(json.dumps({"id": project_id, "name": "Class A"}), encoding="utf-8")
     clear_resp = client.post("/projects/clear")
     assert clear_resp.json()["status"] == "cleared"
     assert clear_resp.json()["current"] is None
     assert not (workspace / "outputs").exists()
-    assert not current_path.exists()
+    assert not projmod.current_project_path(identity).exists()
     assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
-    proj_dir = projects_dir / project_id
+    proj_dir = project_path
     (proj_dir / "outputs").mkdir(parents=True, exist_ok=True)
     (proj_dir / "outputs" / "y.txt").write_text("y", encoding="utf-8")
     load_resp = client.post("/projects/load", json={"project_id": project_id})
     assert load_resp.status_code == 200
     assert (workspace / "outputs" / "y.txt").exists()
-    current_path.write_text(json.dumps({"id": project_id}), encoding="utf-8")
+    projmod.current_project_path(identity).write_text(json.dumps({"id": project_id}), encoding="utf-8")
     del_resp = client.delete(f"/projects/{project_id}")
     assert del_resp.status_code == 200
     assert not proj_dir.exists()
@@ -455,7 +512,9 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
-    workspace = projmod.workspace_root(None)
+    client = TestClient(app)
+    identity = attach_google_session(client, server_dir)
+    workspace = projmod.workspace_root(identity)
     outputs = workspace / "outputs"
     outputs.mkdir()
     (workspace / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": "manifest-1"}), encoding="utf-8")
@@ -485,7 +544,6 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    client = TestClient(app)
     save_resp = client.post("/projects/save", json={"name": "Class A", "aggregate_learning_mode": "opt_in", "aggregate_retention_days": 120})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
@@ -524,7 +582,7 @@ def test_projects_review_endpoints(tmp_path, monkeypatch):
     )
     assert review_resp.status_code == 200
     payload = review_resp.json()
-    assert payload["scope_id"] == project_id
+    assert payload["scope_id"] == save_resp.json()["scope_key"]
     assert payload["draft_review"]["students"][0]["level_override"] == "4"
     assert payload["draft_review"]["curve_top"] == 96.0
     assert payload["draft_review"]["assigned_marks"][0]["mark"] == 96.0
@@ -591,6 +649,7 @@ def test_projects_load_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
     client = TestClient(app)
+    attach_google_session(client, server_dir)
     resp_missing = client.post("/projects/load", json={})
     assert resp_missing.status_code == 400
     resp_not_found = client.post("/projects/load", json={"project_id": "nope"})
@@ -609,20 +668,21 @@ def test_projects_delete_clears_current(tmp_path, monkeypatch):
     monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
+    request, identity = google_request(server_dir)
     project_id = "p1"
     other_id = "p2"
     for pid, label in [(project_id, "P"), (other_id, "O")]:
-        proj_dir = projects_dir / pid
+        proj_dir = projmod.project_dir(pid, identity)
         proj_dir.mkdir()
         (proj_dir / "project.json").write_text(json.dumps({"id": pid, "name": label}), encoding="utf-8")
-    projmod.set_current_project({"id": project_id, "name": "P"})
+    current_path = projmod.current_project_path(identity)
+    projmod.set_current_project({"id": project_id, "name": "P"}, identity)
     assert current_path.exists()
-    projmod.set_current_project(None)
+    projmod.set_current_project(None, identity)
     assert not current_path.exists()
-    projmod.set_current_project(None)
+    projmod.set_current_project(None, identity)
     assert not current_path.exists()
-    projmod.set_current_project({"id": other_id, "name": "O"})
-    request = types.SimpleNamespace(headers={})
+    projmod.set_current_project({"id": other_id, "name": "O"}, identity)
     asyncio.run(projmod.projects_delete(project_id, request))
     assert current_path.exists()
     asyncio.run(projmod.projects_delete(other_id, request))
@@ -662,22 +722,27 @@ def test_projects_save_promotes_unsaved_workspace_review_and_classroom_scopes(tm
     monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
     client = TestClient(app)
-    workspace = projmod.workspace_root(None)
+    identity = attach_google_session(client, server_dir)
+    workspace = projmod.workspace_root(identity)
     (workspace / "outputs").mkdir(parents=True)
     (workspace / "outputs" / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
-    review_path = server_dir / "data" / "reviews" / "workspace" / "draft_review.json"
+    workspace_project = projmod.workspace_project(identity)
+    workspace_scope = review_store.review_scope_id(workspace_project)
+    review_path = server_dir / "data" / "reviews" / workspace_scope / "draft_review.json"
     review_path.parent.mkdir(parents=True)
     review_path.write_text(json.dumps({"review_state": "draft", "students": [{"student_id": "s1"}]}), encoding="utf-8")
-    classroom_path = server_dir / "data" / "classroom" / "workspace" / "classroom_state.json"
+    classroom_path = server_dir / "data" / "classroom" / workspace_scope / "classroom_state.json"
     classroom_path.parent.mkdir(parents=True)
     classroom_path.write_text(json.dumps({"scope_id": "workspace", "classroom_link": {"course_id_hash": "abc"}}), encoding="utf-8")
 
     save_resp = client.post("/projects/save", json={"name": "Saved Workspace"})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
-    assert (projects_dir / project_id / "outputs" / "dashboard_data.json").exists()
-    assert (server_dir / "data" / "reviews" / project_id / "draft_review.json").exists()
-    assert (server_dir / "data" / "classroom" / project_id / "classroom_state.json").exists()
+    project_path = projmod.project_dir(project_id, identity)
+    project_scope = review_store.review_scope_id(save_resp.json())
+    assert (project_path / "outputs" / "dashboard_data.json").exists()
+    assert (server_dir / "data" / "reviews" / project_scope / "draft_review.json").exists()
+    assert (server_dir / "data" / "classroom" / project_scope / "classroom_state.json").exists()
 
 
 def test_strict_auth_requires_identity_and_uses_scoped_workspace(tmp_path, monkeypatch):
@@ -704,7 +769,15 @@ def test_strict_auth_requires_identity_and_uses_scoped_workspace(tmp_path, monke
 
     data_resp = client.get("/data.json", headers=headers)
     assert data_resp.status_code == 200
-    assert data_resp.json()["students"][0]["student_id"] == "s1"
+    assert data_resp.json()["auth_required"] is True
+
+    google_identity = attach_google_session(client, server_dir, "teacher-a@example.com")
+    google_root = projmod.workspace_root(google_identity)
+    (google_root / "outputs").mkdir(parents=True, exist_ok=True)
+    (google_root / "outputs" / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "g1"}]}), encoding="utf-8")
+    google_data_resp = client.get("/data.json")
+    assert google_data_resp.status_code == 200
+    assert google_data_resp.json()["students"][0]["student_id"] == "g1"
 
     blocked = client.post(
         "/jobs",
@@ -737,28 +810,36 @@ def test_strict_project_visibility_and_ops_admin_gate(tmp_path, monkeypatch):
             return {"dry_run": dry_run}
 
     monkeypatch.setattr(appmod, "PIPELINE_QUEUE", OpsQueue())
-    client = TestClient(app)
+    teacher_client = TestClient(app)
+    teacher_identity = attach_google_session(teacher_client, server_dir, "teacher-a@example.com")
     teacher_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "teacher-a", "x-teacher-role": "teacher"}
     other_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "teacher-b", "x-teacher-role": "teacher"}
     admin_headers = {"x-tenant-id": "tenant-a", "x-teacher-id": "admin-a", "x-teacher-role": "admin"}
 
-    save_resp = client.post("/projects/save", headers=teacher_headers, json={"name": "Strict Class"})
+    workspace = projmod.workspace_root(teacher_identity)
+    (workspace / "inputs").mkdir(parents=True)
+    (workspace / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
+
+    save_resp = teacher_client.post("/projects/save", json={"name": "Strict Class"})
     assert save_resp.status_code == 200
     project_id = save_resp.json()["id"]
 
-    teacher_list = client.get("/projects", headers=teacher_headers)
+    teacher_list = teacher_client.get("/projects")
     assert len(teacher_list.json()["projects"]) == 1
 
-    other_list = client.get("/projects", headers=other_headers)
+    other_client = TestClient(app)
+    attach_google_session(other_client, server_dir, "teacher-b@example.com")
+    other_list = other_client.get("/projects")
     assert other_list.status_code == 200
     assert other_list.json()["projects"] == []
 
-    admin_list = client.get("/projects", headers=admin_headers)
-    assert len(admin_list.json()["projects"]) == 1
+    header_only_list = TestClient(app).get("/projects", headers=admin_headers)
+    assert header_only_list.status_code == 401
 
-    denied = client.post("/projects/load", headers=other_headers, json={"project_id": project_id})
+    denied = other_client.post("/projects/load", json={"project_id": project_id})
     assert denied.status_code == 403
 
+    client = TestClient(app)
     teacher_ops = client.get("/pipeline/v2/ops/status", headers=teacher_headers)
     assert teacher_ops.status_code == 403
     admin_ops = client.get("/pipeline/v2/ops/status", headers=admin_headers)

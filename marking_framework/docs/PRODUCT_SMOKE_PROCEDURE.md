@@ -41,7 +41,7 @@ The smoke needs:
 - one teacher-owned rubric
 - one assignment outline
 - either a connected Codex OAuth runtime or a configured API provider key
-- optional Google OAuth configuration for live Classroom read sync
+- Google OAuth configuration for saved-project access and live Classroom read sync
 - a fresh server process, not an old process left on the same port
 
 ## Start The Product
@@ -83,6 +83,7 @@ Open `http://127.0.0.1:8000`.
 Expected:
 
 - the top bar shows project, connection, and pipeline state
+- saved project controls require Google sign-in and do not show another teacher's projects
 - the setup area is visible without navigation
 - the three required inputs are visible together: essays, rubric, outline
 - teacher review controls are hidden or inactive until there is a real result
@@ -144,6 +145,8 @@ Before the UI smoke, complete
 - create a Web OAuth client
 - add `http://127.0.0.1:8000/google/auth/callback` as an authorized redirect
   URI, and optionally `http://localhost:8000/google/auth/callback`
+- for the hosted smoke route, also add
+  `https://assessor.carboncaste.io/google/auth/callback`
 - set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
   `GOOGLE_OAUTH_REDIRECT_URI` in an ignored local env file or shell
 - keep client secret JSON outside git or in an ignored local path
@@ -158,6 +161,8 @@ Expected:
 - after connection, the app shows not configured, not connected, connected as
   teacher identity, reconnect required, missing scope, admin approval required,
   or API-disabled states in plain language
+- the Projects control unlocks only after Google sign-in and shows only
+  projects saved by that verified Google account
 - the teacher can choose a class and published assignment from dropdowns
 - `Sync submissions` imports supported attachments into the ignored local
   workspace under `inputs/submissions/classroom_import/` and records the
@@ -385,6 +390,8 @@ Fail if finalization is reversible by accident, invisible, or not durable.
 
 Use the project controls:
 
+- sign in with Google first; anonymous browsers and header-only requests must
+  not list, load, save, or run saved projects
 - save the project if it is unsaved
 - create another project only after the current pass has been saved or
   auto-saved by the app
@@ -393,6 +400,8 @@ Use the project controls:
 Expected:
 
 - saved projects are named clearly
+- switching Google accounts changes the project list to that account's scoped
+  projects only
 - starting a new project preserves the currently loaded pass before the
   workspace is cleared for another class set
 - loading a project restores the right cohort and review state
