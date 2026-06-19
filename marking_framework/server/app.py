@@ -301,7 +301,10 @@ def google_project_for_identity(identity: dict) -> dict:
 async def google_auth_status(request: Request):
     identity = request_google_identity(request) or google_session.anonymous_identity()
     project = google_project_for_identity(identity)
-    return google_oauth_service().status(identity, project)
+    payload = google_oauth_service().status(identity, project)
+    payload["project_session_connected"] = bool(identity.get("google_authenticated", False))
+    payload["project_auth_required"] = True
+    return payload
 
 
 @app.post("/google/auth/start")
@@ -336,13 +339,10 @@ async def google_auth_callback(request: Request, state: str = "", code: str = ""
             status_code=400,
         )
     session_id, _identity = google_session.create_session(BASE_DIR, payload.get("google_auth", {}))
-    redirect_after = html.escape(str(payload.get("redirect_after") or "/"), quote=True)
-    response = HTMLResponse(
-        "<!doctype html><title>Google Classroom connected</title>"
-        "<p>Google Classroom connected. You can close this tab and return to Assessor.</p>"
-        f"<p><a href=\"{redirect_after}\">Return to Assessor</a></p>",
-        status_code=200,
-    )
+    redirect_after = str(payload.get("redirect_after") or "/")
+    if not redirect_after.startswith("/") or redirect_after.startswith("//"):
+        redirect_after = "/"
+    response = RedirectResponse(redirect_after, status_code=303)
     response.set_cookie(
         google_session.COOKIE_NAME,
         session_id,

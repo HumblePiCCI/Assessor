@@ -159,14 +159,29 @@ def test_google_callback_session_cookie_unlocks_scoped_projects(tmp_path, monkey
                 "google_auth": google_public("teacher@example.com"),
             }
 
+        def status(self, identity, project):
+            return {
+                "configured": True,
+                "connected": True,
+                "teacher_display_email": "teacher@example.com",
+                "teacher_identity_hash": google_public("teacher@example.com")["teacher_identity_hash"],
+                "granted_scopes": [],
+                "missing_scopes": [],
+            }
+
     monkeypatch.setattr(appmod, "google_oauth_service", lambda: FakeGoogleOAuth())
     client = TestClient(app)
     assert client.get("/projects").status_code == 401
 
-    callback = client.get("/google/auth/callback?state=state&code=code")
+    callback = client.get("/google/auth/callback?state=state&code=code", follow_redirects=False)
 
-    assert callback.status_code == 200
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/"
     assert google_session.COOKIE_NAME in callback.headers.get("set-cookie", "")
+    status = client.get("/google/auth/status").json()
+    assert status["project_session_connected"] is True
+    assert "access_token" not in json.dumps(status)
+    assert "refresh_token" not in json.dumps(status)
     projects = client.get("/projects")
     assert projects.status_code == 200
     assert projects.json() == {"current": None, "projects": []}

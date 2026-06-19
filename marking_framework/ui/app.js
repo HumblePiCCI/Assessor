@@ -640,13 +640,19 @@ async function refreshGoogleAuth() {
       setGoogleStatus(`Missing required scope: ${googleAuth.missing_scopes.map(scope => scope.split('/').pop()).join(', ')}. ${googleAuth.remediation || 'Reconnect Google.'}`, 'danger');
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
-      await loadProjects();
+      if (googleAuth.project_session_connected) await loadProjects();
+      else setProjectControls(false, 'Reconnect Google to finish signing in for saved projects.');
     } else if (googleAuth.connected) {
       const who = googleAuth.teacher_display_email || googleAuth.teacher_identity_hash || 'Google connected';
       const suffix = googleAuth.expired || googleAuth.expiring ? ' Token refresh will run before the next live read.' : ' Choose a class.';
       setGoogleStatus(`Connected as ${who}.${suffix}`, 'ready');
       if (connectBtn) connectBtn.textContent = 'Reconnect Google';
       if (disconnectBtn) disconnectBtn.disabled = false;
+      if (!googleAuth.project_session_connected) {
+        setGoogleStatus(`Google connected as ${who}, but this browser is not signed in for saved projects. Reconnect Google to finish sign-in.`, 'warn');
+        setProjectControls(false, 'Reconnect Google to finish signing in for saved projects.');
+        return;
+      }
       await loadProjects();
       await loadGoogleCourses();
     } else {
@@ -666,10 +672,11 @@ async function refreshGoogleAuth() {
 async function startGoogleConnect() {
   setGoogleStatus('Starting Google connection...', 'warn');
   try {
+    const redirectAfter = `${location.pathname || '/'}${location.search || ''}`;
     const res = await fetch(apiUrl('/google/auth/start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ redirect_after: location.pathname }),
+      body: JSON.stringify({ redirect_after: redirectAfter }),
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok || !payload.authorization_url) throw new Error(apiErrorMessage(payload, 'Google connection is not configured'));
