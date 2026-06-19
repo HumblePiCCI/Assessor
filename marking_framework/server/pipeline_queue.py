@@ -453,6 +453,7 @@ class PipelineQueue:
                 {
                     "cache_hits": 0,
                     "cache_misses": 0,
+                    "cache_bypasses": 0,
                     "cache_validation_failures": 0,
                     "recent_gate_failures": [],
                     "recent_incidents": [],
@@ -664,6 +665,7 @@ class PipelineQueue:
         return {
             "cache_hits": 0,
             "cache_misses": 0,
+            "cache_bypasses": 0,
             "cache_validation_failures": 0,
             "recent_gate_failures": [],
             "recent_incidents": [],
@@ -1104,6 +1106,7 @@ class PipelineQueue:
         *,
         identity: dict | None = None,
         project_id: str = "",
+        allow_cache: bool = True,
     ) -> dict:
         identity = dict(identity or {})
         tenant_id = str(identity.get("tenant_id", "") or "local-dev-tenant")
@@ -1120,7 +1123,7 @@ class PipelineQueue:
         )
         snap = manifest["manifest_hash"]
         requires_confirmation = bool((rubric_artifacts.get("rubric_verification", {}) or {}).get("required_confirmation", False))
-        if not requires_confirmation:
+        if allow_cache and not requires_confirmation:
             cached = self._find_completed_snapshot(snap, tenant_id, teacher_id)
             if cached:
                 cached_job = self.get_job(cached["job_id"])
@@ -1133,10 +1136,13 @@ class PipelineQueue:
                     "job_id": cached["job_id"],
                     "status": "completed",
                     "cached": True,
+                    "cache_allowed": True,
                     "snapshot_hash": snap,
                     "manifest_hash": snap,
                     "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
                 }
+        elif not allow_cache:
+            self._update_ops_state(lambda payload: payload.__setitem__("cache_bypasses", int(payload.get("cache_bypasses", 0) or 0) + 1))
         self._update_ops_state(lambda payload: payload.__setitem__("cache_misses", int(payload.get("cache_misses", 0) or 0) + 1))
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id, tenant_id)
@@ -1175,6 +1181,7 @@ class PipelineQueue:
             "job_id": job_id,
             "status": initial_status,
             "cached": False,
+            "cache_allowed": bool(allow_cache),
             "snapshot_hash": snap,
             "manifest_hash": snap,
             "rubric_verification": rubric_artifacts.get("rubric_verification", {}),
@@ -1511,7 +1518,7 @@ class PipelineQueue:
             current=current_steps,
             total=total_steps,
             stage="teacher_review_ready",
-            message="Review ready. Validation is checking edge cases in the background.",
+            message="Review ready. SOTA validation is checking edge cases in the background.",
             product_phase="background_validating",
             review_ready_at=ready_at,
             validation_started_at=ready_at,
@@ -1916,6 +1923,7 @@ class PipelineQueue:
             "cache": {
                 "hits": int(ops.get("cache_hits", 0) or 0),
                 "misses": int(ops.get("cache_misses", 0) or 0),
+                "bypasses": int(ops.get("cache_bypasses", 0) or 0),
                 "validation_failures": int(ops.get("cache_validation_failures", 0) or 0),
             },
             "recent_gate_failures": list(ops.get("recent_gate_failures", []) or []),

@@ -572,6 +572,7 @@ async def run_pipeline_project_inputs(
         extra_paths=[workspace_root() / rel_path for rel_path in PIPELINE_EXTRA_PATHS],
         identity=identity,
         project_id=effective_project_id,
+        allow_cache=False,
     )
 @app.get("/pipeline/v2/jobs/{job_id}")
 async def pipeline_v2_status(job_id: str, request: Request):

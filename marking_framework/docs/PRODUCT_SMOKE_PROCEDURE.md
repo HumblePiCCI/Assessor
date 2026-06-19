@@ -235,8 +235,8 @@ When the app reports review ready, verify the dashboard has:
 Expected:
 
 - the app says the review is ready, not final
-- if validation is still running, the app says: "Review ready. Validation is
-  checking edge cases in the background."
+- if validation is still running, the app says: "Review ready. SOTA validation
+  is checking edge cases in the background."
 - if validation completes, the state changes to "Validation complete."
 - if validation finds exceptions, the Exceptions panel lists the cases to inspect
 - no grade is exported or published automatically

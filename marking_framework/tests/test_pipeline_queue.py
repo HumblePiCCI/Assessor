@@ -567,6 +567,28 @@ def test_submit_cached_completed_snapshot(tmp_path):
     assert out["manifest_hash"] == snap
 
 
+def test_submit_can_bypass_completed_snapshot_cache_for_fresh_sota_run(tmp_path):
+    queue, root, _data, _logs, _resets = _make_queue(tmp_path)
+    queue._start_worker = lambda: None
+    rubric, outline, subs = _write_inputs(tmp_path / "inputs")
+    rubric_artifacts = pqmod.build_rubric_artifacts(rubric, outline_path=outline, criteria_config_path=root / "config" / "rubric_criteria.json")
+    snap = snapshot_hash("openai", rubric, outline, subs, _extra_paths(root), root=root, rubric_artifacts=rubric_artifacts)
+    artifact = queue._artifact_dir(snap, "local-dev-tenant") / "outputs" / "dashboard_data.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("{}", encoding="utf-8")
+    (artifact.parent.parent / "pipeline_manifest.json").write_text(json.dumps({"manifest_hash": snap}), encoding="utf-8")
+    queue._insert_job("done", snap, "openai", queue._job_dir("done", "local-dev-tenant"), tenant_id="local-dev-tenant", teacher_id="local-dev-teacher", project_id="")
+    queue._update_job("done", "completed", artifact=artifact)
+
+    out = queue.submit("openai", rubric, outline, subs, _extra_paths(root), allow_cache=False)
+
+    assert out["cached"] is False
+    assert out["cache_allowed"] is False
+    assert out["job_id"] != "done"
+    assert out["manifest_hash"] == snap
+    assert queue.ops_summary()["cache"]["bypasses"] == 1
+
+
 def test_two_jobs_stage_inputs_into_separate_workspaces(tmp_path):
     queue, root, data, _logs, _resets = _make_queue(tmp_path)
     queue._start_worker = lambda: None

@@ -454,7 +454,7 @@ def validation_state(root: Path) -> dict:
         "exceptions": exceptions,
         "artifacts": artifacts,
         "teacher_message": (
-            "Review ready. Validation is checking edge cases in the background."
+            "Review ready. SOTA validation is checking edge cases in the background."
             if status == "pending"
             else ("Validation found cases to inspect." if exceptions else "Validation complete.")
         ),

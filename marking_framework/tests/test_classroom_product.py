@@ -148,6 +148,32 @@ def assert_project_inputs_reject_no_current_imports(tmp_path: Path, monkeypatch)
     assert response.json()["detail"]["code"] == "no_current_classroom_imports"
 
 
+def test_classroom_project_input_runs_bypass_completed_snapshot_cache(tmp_path, monkeypatch):
+    client = configure_app_workspace(tmp_path, monkeypatch)
+    identity = client.assessor_identity
+    root = projmod.workspace_root(identity)
+    project = projmod.workspace_project(identity)
+    inputs = root / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    (inputs / "rubric.md").write_text("rubric", encoding="utf-8")
+    (inputs / "assignment_outline.md").write_text("outline", encoding="utf-8")
+    classroom.read_only_sync(appmod.BASE_DIR, root, project, identity, classroom_sync_payload(student_id="s1", text="Essay ready."))
+    calls = []
+
+    def fake_submit(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["allow_cache"] is False
+        assert kwargs["submissions_dir"] == classroom.classroom_imports_run_directory(root)
+        return {"job_id": "fresh-classroom-job", "status": "queued", "cached": False, "cache_allowed": False}
+
+    monkeypatch.setattr(appmod.PIPELINE_QUEUE, "submit", fake_submit)
+    response = client.post("/pipeline/v2/run-project-inputs", data={"mode": "openai"})
+    assert response.status_code == 200
+    assert response.json()["cache_allowed"] is False
+    assert response.json()["cached"] is False
+    assert calls
+
+
 def finalize_review(base_dir: Path, root: Path, project: dict):
     payload = {
         "action": "finalize",

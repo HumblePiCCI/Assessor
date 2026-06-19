@@ -22,6 +22,7 @@ def test_pipeline_errors_are_teacher_facing():
     assert "recoverActivePipelineJob" in source
     assert "assessor.activePipelineJob" in source
     assert "Still running; keeping the background watch active." in source
+    assert "SOTA validation is checking edge cases in the background." in source
     assert "dataset.runningMode = mode" in source
     assert "setRunning(true, 'background');" in source
     assert 'body[data-running-mode="background"] .pipeline-overlay' in styles

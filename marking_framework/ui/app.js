@@ -1894,7 +1894,7 @@ function renderExceptions() {
   if (validation.teacher_message) {
     stateNode.textContent = validation.teacher_message;
   } else if (status === 'pending') {
-    stateNode.textContent = 'Review ready. Validation is checking edge cases in the background.';
+    stateNode.textContent = 'Review ready. SOTA validation is checking edge cases in the background.';
   } else if (exceptions.length) {
     stateNode.textContent = `Validation found ${exceptions.length} case${exceptions.length === 1 ? '' : 's'} to inspect.`;
   } else {
@@ -2041,7 +2041,7 @@ function updatePreviewFromUploads() {
 async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function validationText(job) {
   if (!job) return 'Review ready.';
-  if (job.validation_status === 'running' || job.product_phase === 'background_validating') return 'Review ready. Validation is checking edge cases in the background.';
+  if (job.validation_status === 'running' || job.product_phase === 'background_validating') return 'Review ready. SOTA validation is checking edge cases in the background.';
   if (job.validation_status === 'failed_nonblocking' || job.product_phase === 'validation_failed_nonblocking') return `Validation found ${job.validation_exception_count || 0} case${job.validation_exception_count === 1 ? '' : 's'} to inspect.`;
   if (job.validation_status === 'anchor_scores_required') return 'Review ready. Anchor calibration is needed before export.';
   if (job.validation_status === 'complete' || job.product_phase === 'validation_complete') return 'Validation complete.';

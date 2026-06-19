@@ -40,7 +40,7 @@ class FakeQueue:
         self.confirmed = None
         self.anchor = None
 
-    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id=""):
+    def submit(self, mode, rubric_path, outline_path, submissions_dir, extra_paths, identity=None, project_id="", allow_cache=True):
         self.submitted = {
             "mode": mode,
             "rubric": rubric_path.name,
@@ -49,8 +49,9 @@ class FakeQueue:
             "extra": [str(p) for p in extra_paths],
             "identity": dict(identity or {}),
             "project_id": project_id,
+            "allow_cache": allow_cache,
         }
-        return {"job_id": "j1", "status": "queued", "cached": False, "snapshot_hash": "abc", "manifest_hash": "abc"}
+        return {"job_id": "j1", "status": "queued", "cached": False, "cache_allowed": allow_cache, "snapshot_hash": "abc", "manifest_hash": "abc"}
 
     def get_job(self, job_id, identity=None):
         if self.job and self.job.get("id") == job_id:
