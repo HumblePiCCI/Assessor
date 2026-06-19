@@ -1,5 +1,7 @@
 let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, googleAuth = null, googleCourses = [], googleCoursework = [];
 let API_BASE = null;
+const ACTIVE_PIPELINE_JOB_KEY = 'assessor.activePipelineJob';
+let activeJobResumeStarted = false;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
   if (API_BASE !== null) return API_BASE;
@@ -279,9 +281,12 @@ function updateControlVisibility() {
   const hasScored = !!(data && data.students && data.students.length);
   const hasClassroomExceptions = !!(classroomState?.blockers?.length);
   const multipleStudents = hasScored && data.students.length > 1;
+  const anchorVisible = !!document.getElementById('anchorSection') && !document.getElementById('anchorSection').classList.contains('is-hidden');
+  const showAdvancedDrawer = hasScored || hasClassroomExceptions || anchorVisible;
   document.getElementById('actionsEmpty')?.classList.toggle('is-hidden', hasScored);
   document.getElementById('teacherSpotlight')?.classList.toggle('is-hidden', !hasScored);
   document.getElementById('exceptionsSection')?.classList.toggle('is-hidden', !(hasScored || hasClassroomExceptions));
+  document.getElementById('reviewAdvancedDrawer')?.classList.toggle('is-hidden', !showAdvancedDrawer);
   document.getElementById('feedbackSection')?.classList.toggle('is-hidden', !hasScored);
   document.getElementById('reviewSection')?.classList.toggle('is-hidden', !hasScored);
   const prevBtn = document.getElementById('prevBtn');
@@ -1237,6 +1242,7 @@ function ensureAnchorPanel() {
   if (section) return section;
   const actions = document.getElementById('actions');
   if (!actions) return null;
+  const slot = document.getElementById('anchorPanelSlot');
   section = document.createElement('div');
   section.id = 'anchorSection';
   section.className = 'auth review-section is-hidden';
@@ -1253,6 +1259,10 @@ function ensureAnchorPanel() {
     <div id="anchorReasons" class="auth-status"></div>
     <div id="anchorList" class="controls compact-controls"></div>
   `;
+  if (slot) {
+    slot.appendChild(section);
+    return section;
+  }
   const review = document.getElementById('reviewSection');
   const anchor = review || actionsInsertionAnchor(actions);
   if (anchor) actions.insertBefore(section, anchor);
@@ -1273,6 +1283,7 @@ function renderAnchorReview(bundle) {
     reasons.textContent = '';
     list.innerHTML = '';
     submitBtn.disabled = true;
+    updateControlVisibility();
     return;
   }
   const pending = bundle.status === 'awaiting_anchor_scores';
@@ -1311,6 +1322,7 @@ function renderAnchorReview(bundle) {
     if (markNode) markNode.value = anchor.teacher_mark || '';
   });
   submitBtn.disabled = !pending || !anchors.length;
+  updateControlVisibility();
 }
 async function fetchRubricReview(jobId) {
   const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/rubric`));
@@ -1705,6 +1717,7 @@ function applyPersistedReviewState(record) {
     const adj = getAdjustment(student.student_id);
     adj.overall = target - (grades[idx] ?? 0);
   });
+  seedBaselineFeedbackDrafts(true);
 }
 function getGradeForIndex(idx) {
   if (!data || !data.students || !data.students.length) return '';
@@ -1794,7 +1807,40 @@ function parseFeedback(text) {
     wish: grab('## One Wish', null),
   };
 }
-function feedbackForStudent(studentId, feedbackText) { if (!feedbackDrafts[studentId]) feedbackDrafts[studentId] = parseFeedback(feedbackText); return feedbackDrafts[studentId]; }
+function normalizeFeedbackDraft(item) {
+  return {
+    star1: String(item?.star1 || '').trim(),
+    star2: String(item?.star2 || '').trim(),
+    wish: String(item?.wish || '').trim(),
+  };
+}
+function feedbackDraftHasText(item) {
+  return !!(item && (item.star1 || item.star2 || item.wish));
+}
+function baselineFeedbackForStudent(student, fallbackText = '') {
+  const explicit = normalizeFeedbackDraft(student?.feedback_draft || {});
+  if (feedbackDraftHasText(explicit)) return explicit;
+  return normalizeFeedbackDraft(parseFeedback(fallbackText || student?.feedback_text || ''));
+}
+function seedBaselineFeedbackDrafts(preserveExisting = true) {
+  if (!data?.students?.length) return;
+  data.students.forEach(student => {
+    if (!student?.student_id) return;
+    if (preserveExisting && feedbackDraftHasText(feedbackDrafts[student.student_id])) return;
+    const draft = baselineFeedbackForStudent(student, student.feedback_text || '');
+    if (feedbackDraftHasText(draft)) feedbackDrafts[student.student_id] = draft;
+  });
+  if (window.feedbackGenerate?.generateAll) {
+    window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, false);
+  }
+}
+function feedbackForStudent(studentId, feedbackText) {
+  if (!feedbackDrafts[studentId]) {
+    const student = data?.students?.find(item => item.student_id === studentId);
+    feedbackDrafts[studentId] = baselineFeedbackForStudent(student, feedbackText);
+  }
+  return feedbackDrafts[studentId];
+}
 function renderSummary(student) {
   const summary = document.getElementById('summaryList');
   summary.innerHTML = '';
@@ -1969,10 +2015,16 @@ function updateGradesFromCurve() {
   updateRail();
   renderDetail();
 }
-function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; updateWorkflowState(); }
+function setRunning(on, mode = 'blocking') {
+  running = on;
+  document.body.dataset.running = on ? 'true' : 'false';
+  if (on) document.body.dataset.runningMode = mode;
+  else delete document.body.dataset.runningMode;
+  updateWorkflowState();
+}
 function pipelineLog(msg) { const log = document.getElementById('pipelineLog'); if (!log) return; const line = document.createElement('div'); line.textContent = msg; log.appendChild(line); log.scrollTop = log.scrollHeight; }
 function startPipelineNarrative() { const log = document.getElementById('pipelineLog'); if (log) log.innerHTML = ''; const steps = ['Getting your files ready and organized…', "In this first pass, we’re conducting an initial assessment based on the rubric.", 'Next, we compare essays side‑by‑side to keep the ordering consistent.', 'Now we scan conventions: spelling, grammar, sentence structure, and format.', 'We’re integrating all signals into a final, coherent ordering.', 'Building the teacher review dashboard…']; pipelineStep = 0; pipelineLog(steps[0]); pipelineTimer = setInterval(() => { pipelineStep += 1; if (pipelineStep < steps.length) pipelineLog(steps[pipelineStep]); }, 2400); }
-function stopPipelineNarrative(msg) { if (msg) pipelineLog(msg); if (pipelineTimer) clearInterval(pipelineTimer); pipelineTimer = null; setTimeout(() => setRunning(false), 2000); }
+function stopPipelineNarrative(msg, keepRunning = false) { if (msg) pipelineLog(msg); if (pipelineTimer) clearInterval(pipelineTimer); pipelineTimer = null; if (!keepRunning) setTimeout(() => setRunning(false), 2000); }
 function startShuffle() { if (shuffleTimer || !previewStudents.length) return; shuffleTimer = setInterval(() => { if (previewStudents.length < 2) return; const i = Math.floor(Math.random() * (previewStudents.length - 1)); const t = previewStudents[i]; previewStudents[i] = previewStudents[i + 1]; previewStudents[i + 1] = t; previewStudents.forEach((s, idx) => { s.rank = idx + 1; }); renderRail(true); }, 900); }
 function stopShuffle() { if (shuffleTimer) clearInterval(shuffleTimer); shuffleTimer = null; }
 function updatePreviewFromUploads() {
@@ -1995,6 +2047,34 @@ function validationText(job) {
   if (job.validation_status === 'complete' || job.product_phase === 'validation_complete') return 'Validation complete.';
   return 'Review ready.';
 }
+function rememberActivePipelineJob(jobId) {
+  activeJobId = jobId || activeJobId || '';
+  if (!activeJobId) return;
+  try {
+    localStorage.setItem(ACTIVE_PIPELINE_JOB_KEY, JSON.stringify({
+      job_id: activeJobId,
+      project_id: currentProject?.id || '',
+      saved_at: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+function clearActivePipelineJob(jobId = '') {
+  if (!jobId || jobId === activeJobId) activeJobId = '';
+  try {
+    const stored = JSON.parse(localStorage.getItem(ACTIVE_PIPELINE_JOB_KEY) || '{}');
+    if (!jobId || stored.job_id === jobId) localStorage.removeItem(ACTIVE_PIPELINE_JOB_KEY);
+  } catch (_) {
+    try { localStorage.removeItem(ACTIVE_PIPELINE_JOB_KEY); } catch (__) {}
+  }
+}
+function storedActivePipelineJob() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ACTIVE_PIPELINE_JOB_KEY) || '{}');
+    return stored && stored.job_id ? stored : null;
+  } catch (_) {
+    return null;
+  }
+}
 function stopBackgroundValidationWatch() {
   if (backgroundValidationTimer) clearInterval(backgroundValidationTimer);
   backgroundValidationTimer = null;
@@ -2014,6 +2094,20 @@ function watchBackgroundValidation(jobId) {
         const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/data`));
         if (dataRes.ok) {
           await boot(await dataRes.json());
+          if (job.status === 'completed') {
+            clearActivePipelineJob(jobId);
+            setRunning(false);
+          } else if (job.status === 'failed') {
+            clearActivePipelineJob(jobId);
+            setRunning(false);
+            setPipelineStatus('Review ready. Background checks stopped and need admin inspection.', 'warn');
+          } else {
+            setRunning(true, 'background');
+          }
+        } else if (job.status === 'failed') {
+          clearActivePipelineJob(jobId);
+          setRunning(false);
+          setPipelineStatus(runErrorForTeacher(job.error || 'Run failed'), 'danger');
         }
       }
     } catch (_) {
@@ -2024,10 +2118,23 @@ function watchBackgroundValidation(jobId) {
 async function waitForJob(jobId) {
   const start = Date.now();
   let longRunNoticeShown = false;
+  let statusErrorCount = 0;
   while (true) {
-    const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`));
-    if (!res.ok) throw new Error('Run status unavailable');
-    const job = await res.json();
+    let job = null;
+    try {
+      const res = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}`));
+      if (!res.ok) throw new Error('Run status unavailable');
+      job = await res.json();
+      statusErrorCount = 0;
+    } catch (err) {
+      statusErrorCount += 1;
+      const recovered = await recoverActivePipelineJob(jobId, err);
+      if (recovered) return recovered;
+      setPipelineStatus('Still running; status connection is retrying.', 'warn');
+      pipelineLog('Status check is retrying. The run is still being watched.');
+      await sleep(Math.min(10000, 2000 + statusErrorCount * 1000));
+      continue;
+    }
     if (job.teacher_can_review || job.product_phase === 'teacher_review_ready' || job.product_phase === 'background_validating') return job;
     if (job.status === 'completed' || job.status === 'awaiting_rubric_confirmation' || job.status === 'awaiting_anchor_scores') return job;
     if (job.status === 'failed') throw new Error(job.error || 'Run failed');
@@ -2043,6 +2150,70 @@ async function waitForJob(jobId) {
     await sleep(elapsed >= 45 * 60 * 1000 ? 5000 : 2000);
   }
 }
+async function recoverActivePipelineJob(jobId, err = null) {
+  if (!jobId) return null;
+  try {
+    const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/data`));
+    if (dataRes.ok) {
+      const payload = await dataRes.json();
+      previewStudents = [];
+      setRunning(true, 'background');
+      await boot(payload);
+      setPipelineStatus('Review ready. Background checks may still be running.', 'warn');
+      stopShuffle();
+      stopPipelineNarrative('Review dashboard recovered; continuing to watch background work.', true);
+      watchBackgroundValidation(jobId);
+      rememberActivePipelineJob(jobId);
+      return { id: jobId, status: 'running', teacher_can_review: true, product_phase: 'background_validating', validation_status: 'running' };
+    }
+  } catch (_) {}
+  if (err) {
+    const message = String(err.message || err || '');
+    if (message.toLowerCase().includes('timed out')) {
+      setPipelineStatus('Still running; keeping the background watch active.', 'warn');
+      rememberActivePipelineJob(jobId);
+      watchBackgroundValidation(jobId);
+      return { id: jobId, status: 'running', product_phase: 'running_fast_review', validation_status: 'pending' };
+    }
+  }
+  return null;
+}
+async function resumeActivePipelineJob() {
+  if (activeJobResumeStarted || running || activeJobId) return;
+  const stored = storedActivePipelineJob();
+  if (!stored?.job_id) return;
+  activeJobResumeStarted = true;
+  activeJobId = stored.job_id;
+  setRunning(true);
+  setPipelineStatus('Reconnecting to the running assessment...', 'warn');
+  pipelineLog('Reconnected to the active assessment job.');
+  try {
+    const job = await waitForJob(activeJobId);
+    if (job.status === 'awaiting_rubric_confirmation') {
+      setPipelineStatus('Rubric confirmation needed', 'warn');
+      stopPipelineNarrative('Rubric interpretation needs confirmation before scoring continues.');
+      await fetchRubricReview(activeJobId);
+      return;
+    }
+    if (job.status === 'awaiting_anchor_scores') {
+      setPipelineStatus('Anchor calibration needed', 'warn');
+      stopPipelineNarrative('Teacher anchor scores are needed before finalizing this cohort.');
+      await fetchAnchorReview(activeJobId);
+      return;
+    }
+    await loadReviewReadyJob(job, activeJobId);
+  } catch (err) {
+    const recovered = await recoverActivePipelineJob(activeJobId, err);
+    if (!recovered) {
+      const msg = runErrorForTeacher(err.message || 'connection lost');
+      setPipelineStatus(msg, 'danger');
+      stopPipelineNarrative(msg);
+      clearActivePipelineJob(activeJobId);
+    }
+  } finally {
+    activeJobResumeStarted = false;
+  }
+}
 async function loadReviewReadyJob(job, fallbackJobId) {
   const jobId = job.id || fallbackJobId;
   const dataRes = await fetch(apiUrl(`/pipeline/v2/jobs/${jobId}/data`));
@@ -2052,8 +2223,16 @@ async function loadReviewReadyJob(job, fallbackJobId) {
   const text = validationText(job);
   setPipelineStatus(text, job.validation_status === 'complete' ? 'ready' : 'warn');
   stopShuffle();
-  stopPipelineNarrative(text);
-  if (job.status !== 'completed' && job.status !== 'awaiting_anchor_scores') watchBackgroundValidation(jobId);
+  const backgroundRunning = job.status !== 'completed' && job.status !== 'awaiting_anchor_scores';
+  stopPipelineNarrative(backgroundRunning ? `${text} You can review now while background work continues.` : text, backgroundRunning);
+  if (backgroundRunning) {
+    rememberActivePipelineJob(jobId);
+    setRunning(true, 'background');
+    watchBackgroundValidation(jobId);
+  } else {
+    clearActivePipelineJob(jobId);
+    setRunning(false);
+  }
 }
 function runErrorForTeacher(message) {
   const raw = String(message || '').trim();
@@ -2065,7 +2244,7 @@ function runErrorForTeacher(message) {
   }
   if (lower.includes('codex not connected')) return 'Codex is not connected. Sign in with Codex, then run again.';
   if (lower.includes('api key') || lower.includes('is not set')) return 'The runtime is not connected. Connect Codex or an API key, then run again.';
-  if (lower.includes('timed out')) return 'The run took too long. Try again, or ask an admin to check the runtime.';
+  if (lower.includes('timed out')) return 'The status connection timed out. Assessor will keep watching any submitted run in the background.';
   if (!raw) return 'Run failed. Check the inputs and try again.';
   return raw.length > 180 ? 'Run failed. Check the inputs and try again; if it repeats, ask an admin to inspect the run.' : raw;
 }
@@ -2125,6 +2304,7 @@ async function runPipeline() {
     }
     const submit = await res.json();
     activeJobId = submit.job_id || '';
+    rememberActivePipelineJob(activeJobId);
     if (submit.cached) pipelineLog('Identical inputs found; using cached assessment.');
     if (submit.status === 'awaiting_rubric_confirmation') {
       setPipelineStatus('Rubric confirmation needed', 'warn');
@@ -2155,6 +2335,8 @@ async function runPipeline() {
     }
     await loadReviewReadyJob(job, activeJobId);
   } catch (err) {
+    const recovered = await recoverActivePipelineJob(activeJobId, err);
+    if (recovered) return;
     const msg = runErrorForTeacher(err.message || 'connection lost');
     setPipelineStatus(msg, 'danger');
     stopShuffle();
@@ -2314,6 +2496,7 @@ async function boot(payload) {
   if (data.curve_top) document.getElementById('topGrade').value = data.curve_top;
   if (data.curve_bottom) document.getElementById('bottomGrade').value = data.curve_bottom;
   applyCurveBounds(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), false);
+  seedBaselineFeedbackDrafts(true);
   await detectApiBase();
   setupControls();
   renderRubricReview(
@@ -2346,6 +2529,7 @@ async function boot(payload) {
   updateWorkflowState();
   refreshAuthStatus();
   refreshGoogleAuth();
+  resumeActivePipelineJob();
 }
 fetch(`/data.json?t=${Date.now()}`, { cache: 'no-store' })
   .then(res => res.ok ? res.text() : '')

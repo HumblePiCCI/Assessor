@@ -228,12 +228,6 @@
         </div>
       </div>
 
-      <details id="exceptionsSection" class="secondary-details" open>
-        <summary>Exceptions</summary>
-        <div id="validationState" class="auth-status">Validation has not run.</div>
-        <div id="exceptionsList" class="exception-list"></div>
-      </details>
-
       <details id="feedbackSection" class="secondary-details" open>
         <summary>Feedback</summary>
         <div class="feedback">
@@ -255,6 +249,16 @@
         </div>
       </details>
 
+      <details id="reviewAdvancedDrawer" class="secondary-details review-advanced-drawer">
+        <summary>Calibration and exceptions</summary>
+        <div id="anchorPanelSlot" class="review-advanced-slot"></div>
+        <section id="exceptionsSection" class="advanced-section">
+          <div class="label">Exceptions</div>
+          <div id="validationState" class="auth-status">Validation has not run.</div>
+          <div id="exceptionsList" class="exception-list"></div>
+        </section>
+      </details>
+
     </aside>
   </main>
   <div id="pipelineOverlay" class="pipeline-overlay">
@@ -265,7 +269,7 @@
   </div>
   <script src="grade_adjust.js?v=2"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

@@ -218,6 +218,40 @@ def fallback_feedback(row: dict, text: str, rank: int, cohort_size: int) -> str:
     return f"### Star 1\n{star1}\n\n### Star 2\n{star2}\n\n## One Wish\n{wish}\n"
 
 
+def parse_feedback_draft(text: str) -> dict:
+    raw = str(text or "")
+    if not raw.strip():
+        return {"star1": "", "star2": "", "wish": ""}
+
+    def grab(start: str, end: str | None = None) -> str:
+        offset = raw.find(start)
+        if offset < 0:
+            return ""
+        section = raw[offset + len(start) :]
+        if end:
+            end_offset = section.find(end)
+            if end_offset >= 0:
+                section = section[:end_offset]
+        return section.strip()
+
+    return {
+        "star1": grab("### Star 1", "### Star 2"),
+        "star2": grab("### Star 2", "## One Wish"),
+        "wish": grab("## One Wish", None),
+    }
+
+
+def feedback_draft_for_student(student_id: str, feedback_text: str) -> dict:
+    draft = parse_feedback_draft(feedback_text)
+    return {
+        "student_id": str(student_id or ""),
+        "star1": str(draft.get("star1", "") or "").strip(),
+        "star2": str(draft.get("star2", "") or "").strip(),
+        "wish": str(draft.get("wish", "") or "").strip(),
+        "source": "pipeline_baseline",
+    }
+
+
 def select_rank_key(rows: list[dict]) -> str:
     if not rows:
         return ""
@@ -527,6 +561,7 @@ def main() -> int:
     rank_key = select_rank_key(rows) or "consensus_rank"
 
     data = []
+    feedback_drafts = []
     cohort_size = len(rows)
     for row in rows:
         sid = row.get("student_id")
@@ -535,6 +570,11 @@ def main() -> int:
         rank = int(row.get(rank_key, row.get("consensus_rank", 0)) or 0)
         student_text = texts.get(sid, "")
         feedback_text = load_feedback_text(feedback_dir, sid)
+        if not any(parse_feedback_draft(feedback_text).values()):
+            feedback_text = fallback_feedback(row, student_text, rank or len(data) + 1, cohort_size)
+        feedback_draft = feedback_draft_for_student(sid, feedback_text)
+        if feedback_draft["star1"] or feedback_draft["star2"] or feedback_draft["wish"]:
+            feedback_drafts.append(feedback_draft)
         flags, reasons = student_uncertainty(row, uncertainty_by_student.get(sid, {}), boundaries)
         display_label = dashboard_display_label(sid, meta_row, label_maps)
         data.append(
@@ -567,6 +607,7 @@ def main() -> int:
                 "final_grade": grade_row.get("final_grade"),
                 "text": student_text,
                 "feedback_text": feedback_text,
+                "feedback_draft": feedback_draft,
                 "rerank_support_weight": row.get("rerank_support_weight"),
                 "rerank_opposition_weight": row.get("rerank_opposition_weight"),
                 "rerank_incident_weight": row.get("rerank_incident_weight"),
@@ -601,6 +642,8 @@ def main() -> int:
         "uncertainty_summary": uncertainty_summary,
         "validation": validation,
         "teacher_exceptions": teacher_exception_items(validation, uncertainty_summary, classroom_state),
+        "feedback_drafts": feedback_drafts,
+        "feedback_baseline_count": len(feedback_drafts),
         "class_metadata": class_metadata,
         "cost_report": cost_report,
         "consistency_report": consistency_report,

@@ -324,6 +324,26 @@ textarea {
   display: none;
 }
 
+.review-advanced-drawer {
+  margin-top: 18px;
+}
+
+.review-advanced-slot:empty {
+  display: none;
+}
+
+.review-advanced-slot .review-section {
+  margin-top: 12px;
+}
+
+.advanced-section {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+}
+
 .details-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -957,6 +977,7 @@ body[data-theme="dark"] .editable {
 #actionsEmpty.is-hidden,
 #teacherSpotlight.is-hidden,
 #exceptionsSection.is-hidden,
+#reviewAdvancedDrawer.is-hidden,
 #feedbackSection.is-hidden {
   display: none;
 }
@@ -983,10 +1004,10 @@ body[data-theme="dark"] .editable {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-body[data-running="true"] header,
-body[data-running="true"] #rail,
-body[data-running="true"] .layout,
-body[data-running="true"] .intake-shell {
+body[data-running="true"]:not([data-running-mode="background"]) header,
+body[data-running="true"]:not([data-running-mode="background"]) #rail,
+body[data-running="true"]:not([data-running-mode="background"]) .layout,
+body[data-running="true"]:not([data-running-mode="background"]) .intake-shell {
   opacity: 0.18;
   filter: blur(1px);
   pointer-events: none;
@@ -1005,6 +1026,13 @@ body[data-running="true"] .pipeline-overlay {
   display: flex;
 }
 
+body[data-running-mode="background"] .pipeline-overlay {
+  inset: auto 20px 20px auto;
+  align-items: flex-end;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
 .pipeline-card {
   width: min(760px, calc(100vw - 32px));
   padding: 30px 34px;
@@ -1014,10 +1042,23 @@ body[data-running="true"] .pipeline-overlay {
   box-shadow: var(--shadow-lg);
 }
 
+body[data-running-mode="background"] .pipeline-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+}
+
 .pipeline-title {
   margin-bottom: 16px;
   font-family: "Baskerville", "Iowan Old Style", "Georgia", serif;
   font-size: 30px;
+}
+
+body[data-running-mode="background"] .pipeline-title {
+  margin-bottom: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .pipeline-log {
@@ -1027,6 +1068,13 @@ body[data-running="true"] .pipeline-overlay {
   gap: 12px;
   font-size: 18px;
   line-height: 1.55;
+}
+
+body[data-running-mode="background"] .pipeline-log {
+  max-height: 140px;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 @media (max-width: 1080px) {

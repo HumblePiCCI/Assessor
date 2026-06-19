@@ -40,7 +40,12 @@ def test_build_dashboard_data(tmp_path, monkeypatch):
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["students"][0]["student_id"] == "s1"
     assert payload["curve_top"] == "92"
-    assert payload["students"][0]["feedback_text"] == "Star 1"
+    assert payload["feedback_baseline_count"] == 1
+    assert payload["feedback_drafts"][0]["student_id"] == "s1"
+    assert payload["feedback_drafts"][0]["source"] == "pipeline_baseline"
+    assert payload["students"][0]["feedback_draft"]["star1"]
+    assert payload["students"][0]["feedback_draft"]["star2"]
+    assert payload["students"][0]["feedback_draft"]["wish"]
 
 
 def test_build_dashboard_helpers(tmp_path):
@@ -148,7 +153,9 @@ def test_build_dashboard_data_empty_feedback_and_cost_report(tmp_path, monkeypat
     assert bdd.main() == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["cost_report"]["grand_total"] == 1.2345
-    assert payload["students"][0]["feedback_text"] == ""
+    assert payload["feedback_baseline_count"] == 1
+    assert "### Star 1" in payload["students"][0]["feedback_text"]
+    assert payload["students"][0]["feedback_draft"]["wish"]
     assert payload["distribution"]["cohort_size"] == 1
     assert payload["distribution"]["level_counts"]["2"] == 1
 
@@ -165,6 +172,8 @@ def test_feedback_helpers_cover_branches():
     assert "tightening your thesis" in low_conv
     assert "deepen analysis" in low_rubric
     assert "expand your strongest idea" in short
+    draft = bdd.parse_feedback_draft("### Star 1\nClear claim.\n\n### Star 2\nGood support.\n\n## One Wish\nExplain more.")
+    assert draft == {"star1": "Clear claim.", "star2": "Good support.", "wish": "Explain more."}
 
 
 def test_load_json_and_feedback_evidence_fallback(tmp_path):
