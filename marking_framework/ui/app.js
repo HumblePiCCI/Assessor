@@ -403,8 +403,42 @@ async function loadProjects() {
   } catch (_) {}
   updateWorkflowState();
 }
-async function saveProject() { const name = currentProject ? null : prompt('Project name', '') || ''; if (!currentProject && !name) return; try { const res = await fetch(apiUrl('/projects/save'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(name ? { name } : {}) }); if (!res.ok) return; currentProject = await res.json(); await loadProjects(); } catch (_) {} }
-async function newProject() { const name = prompt('New project name', '') || ''; if (!name) return; try { const res = await fetch(apiUrl('/projects/new'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); if (!res.ok) return; currentProject = await res.json(); location.reload(); } catch (_) {} }
+async function saveProject() {
+  const name = currentProject ? null : prompt('Project name', '') || '';
+  if (!currentProject && !name) return;
+  const status = document.getElementById('projectStatus');
+  if (status) status.textContent = currentProject ? 'Saving current pass...' : 'Saving project...';
+  try {
+    const res = await fetch(apiUrl('/projects/save'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(name ? { name } : {}),
+    });
+    if (!res.ok) throw new Error('save failed');
+    currentProject = await res.json();
+    await loadProjects();
+  } catch (_) {
+    if (status) status.textContent = 'Project save failed';
+  }
+}
+async function newProject() {
+  const name = prompt('New project name', '') || '';
+  if (!name) return;
+  const status = document.getElementById('projectStatus');
+  if (status) status.textContent = 'Saving current pass before new project...';
+  try {
+    const res = await fetch(apiUrl('/projects/new'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error('new project failed');
+    currentProject = await res.json();
+    location.reload();
+  } catch (_) {
+    if (status) status.textContent = 'New project failed; current pass was not cleared.';
+  }
+}
 function resetUploadLabels() {
   document.querySelectorAll('.upload').forEach(zone => {
     const input = zone.querySelector('input');

@@ -416,8 +416,11 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     assert save_resp2.status_code == 200
     list_resp = client.get("/projects")
     assert list_resp.json()["current"]["id"] == project_id
+    (workspace / "outputs").mkdir(parents=True)
+    (workspace / "outputs" / "latest-pass.txt").write_text("latest", encoding="utf-8")
     new_resp = client.post("/projects/new", json={"name": "New Project"})
     assert new_resp.status_code == 200
+    assert (projects_dir / project_id / "outputs" / "latest-pass.txt").read_text(encoding="utf-8") == "latest"
     assert not (workspace / "inputs" / "rubric.md").exists()
     assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
     clear_file = workspace / "outputs"
@@ -431,7 +434,7 @@ def test_projects_endpoints(tmp_path, monkeypatch):
     assert not current_path.exists()
     assert (workspace / "inputs" / "exemplars" / "level_3.md").exists()
     proj_dir = projects_dir / project_id
-    (proj_dir / "outputs").mkdir(parents=True)
+    (proj_dir / "outputs").mkdir(parents=True, exist_ok=True)
     (proj_dir / "outputs" / "y.txt").write_text("y", encoding="utf-8")
     load_resp = client.post("/projects/load", json={"project_id": project_id})
     assert load_resp.status_code == 200
@@ -646,6 +649,35 @@ def test_save_project_snapshot_skips_inputs_when_missing(tmp_path, monkeypatch):
     root.mkdir()
     meta = projmod.save_project_snapshot(root, "pid", "Name", include_logs=False)
     assert meta["id"] == "pid"
+
+
+def test_projects_save_promotes_unsaved_workspace_review_and_classroom_scopes(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    current_path = projects_dir / "current.json"
+    monkeypatch.setattr(appmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(projmod, "CURRENT_PROJECT_PATH", current_path)
+    client = TestClient(app)
+    workspace = projmod.workspace_root(None)
+    (workspace / "outputs").mkdir(parents=True)
+    (workspace / "outputs" / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+    review_path = server_dir / "data" / "reviews" / "workspace" / "draft_review.json"
+    review_path.parent.mkdir(parents=True)
+    review_path.write_text(json.dumps({"review_state": "draft", "students": [{"student_id": "s1"}]}), encoding="utf-8")
+    classroom_path = server_dir / "data" / "classroom" / "workspace" / "classroom_state.json"
+    classroom_path.parent.mkdir(parents=True)
+    classroom_path.write_text(json.dumps({"scope_id": "workspace", "classroom_link": {"course_id_hash": "abc"}}), encoding="utf-8")
+
+    save_resp = client.post("/projects/save", json={"name": "Saved Workspace"})
+    assert save_resp.status_code == 200
+    project_id = save_resp.json()["id"]
+    assert (projects_dir / project_id / "outputs" / "dashboard_data.json").exists()
+    assert (server_dir / "data" / "reviews" / project_id / "draft_review.json").exists()
+    assert (server_dir / "data" / "classroom" / project_id / "classroom_state.json").exists()
 
 
 def test_strict_auth_requires_identity_and_uses_scoped_workspace(tmp_path, monkeypatch):

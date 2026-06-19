@@ -386,17 +386,21 @@ Fail if finalization is reversible by accident, invisible, or not durable.
 Use the project controls:
 
 - save the project if it is unsaved
-- create or load another project only if you need to verify separation
+- create another project only after the current pass has been saved or
+  auto-saved by the app
 - return to the smoke project
 
 Expected:
 
 - saved projects are named clearly
+- starting a new project preserves the currently loaded pass before the
+  workspace is cleared for another class set
 - loading a project restores the right cohort and review state
 - clearing a session asks for confirmation
 - deleting a project asks for confirmation
 
-Fail if destructive actions are too easy or project identity is unclear.
+Fail if a teacher can accidentally lose a loaded pass while starting another
+class set.
 
 ### 14. Minimalist UX Check
 

@@ -247,6 +247,77 @@ def clear_workspace(root: Path):
             shutil.rmtree(path)
 
 
+def tree_has_files(path: Path) -> bool:
+    if not path.exists():
+        return False
+    if path.is_file():
+        return True
+    return any(item.is_file() for item in path.rglob("*"))
+
+
+def workspace_has_snapshot_content(root: Path) -> bool:
+    inputs = root / "inputs"
+    if inputs.exists():
+        for item in inputs.iterdir():
+            if item.name == "exemplars":
+                continue
+            if tree_has_files(item):
+                return True
+    return any(tree_has_files(root / name) for name in ["processing", "assessments", "outputs", "logs"])
+
+
+def copy_scope_tree(scope_root: Path, source_scope: str, target_scope: str, *, overwrite: bool = False) -> None:
+    if not source_scope or not target_scope or source_scope == target_scope:
+        return
+    source = scope_root / source_scope
+    target = scope_root / target_scope
+    if not source.exists() or (target.exists() and not overwrite):
+        return
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+
+
+def preserve_project_scopes(source_project: dict | None, target_project: dict, *, overwrite: bool = False) -> None:
+    source_scope = review_store.review_scope_id(source_project)
+    target_scope = review_store.review_scope_id(target_project)
+    copy_scope_tree(review_store.reviews_root(BASE_DIR), source_scope, target_scope, overwrite=overwrite)
+    copy_scope_tree(classroom.classroom_root(BASE_DIR), source_scope, target_scope, overwrite=overwrite)
+
+
+def project_scope_has_content(project: dict | None) -> bool:
+    scope_id = review_store.review_scope_id(project)
+    return tree_has_files(review_store.reviews_root(BASE_DIR) / scope_id) or tree_has_files(classroom.classroom_root(BASE_DIR) / scope_id)
+
+
+def preserve_current_workspace(root: Path, identity: dict, payload: ProjectPayload) -> dict | None:
+    current = get_current_project(identity)
+    source_project = current or workspace_project(identity)
+    if not workspace_has_snapshot_content(root) and not project_scope_has_content(source_project):
+        return None
+    if current:
+        name = current.get("name") or f"Project {datetime.now(timezone.utc).date()}"
+        return save_project_snapshot(
+            root,
+            str(current.get("id") or project_id_from_name(name)),
+            name,
+            aggregate_learning=aggregate_learning_from_payload(payload, current),
+            owner=project_owner(identity),
+            identity=identity,
+        )
+    name = f"Autosaved pass {datetime.now(timezone.utc).strftime('%Y-%m-%d %H-%M-%S UTC')}"
+    meta = save_project_snapshot(
+        root,
+        project_id_from_name(name),
+        name,
+        aggregate_learning=aggregate_learning_from_payload(payload),
+        owner=project_owner(identity),
+        identity=identity,
+    )
+    preserve_project_scopes(workspace_project(identity), meta)
+    return meta
+
+
 def project_id_from_name(name: str) -> str:
     slug = "".join(ch if ch.isalnum() else "-" for ch in name.strip().lower())
     slug = "-".join([part for part in slug.split("-") if part])
@@ -464,6 +535,7 @@ async def projects_save(payload: ProjectPayload, request: Request):
         owner=project_owner(identity),
         identity=identity,
     )
+    preserve_project_scopes(current or workspace_project(identity), meta)
     set_current_project(meta, identity)
     return meta
 
@@ -472,6 +544,7 @@ async def projects_save(payload: ProjectPayload, request: Request):
 async def projects_new(payload: ProjectPayload, request: Request):
     identity = identity_context(request)
     root = workspace_root(identity)
+    preserve_current_workspace(root, identity, payload)
     clear_workspace(root)
     name = payload.name or f"Project {datetime.now(timezone.utc).date()}"
     project_id = payload.project_id or project_id_from_name(name)
