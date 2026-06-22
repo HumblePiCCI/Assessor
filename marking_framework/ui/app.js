@@ -1,4 +1,5 @@
 let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, googleAuth = null, googleCourses = [], googleCoursework = [];
+let reviewAutosaveTimer = null, reviewAutosaveInFlight = false, reviewAutosavePending = false, reviewAutosaveDirty = false, reviewAutosaveLastSerialized = '';
 let API_BASE = null;
 const ACTIVE_PIPELINE_JOB_KEY = 'assessor.activePipelineJob';
 let activeJobResumeStarted = false;
@@ -455,13 +456,24 @@ async function persistDraftReviewBeforeProjectSave() {
   if (!data?.students?.length) return;
   const status = document.getElementById('projectStatus');
   if (status) status.textContent = 'Saving review choices...';
+  await waitForReviewAutosaveIdle();
+  if (reviewAutosaveTimer) {
+    clearTimeout(reviewAutosaveTimer);
+    reviewAutosaveTimer = null;
+  }
+  const payload = draftReviewPayload();
+  const serialized = serializedDraftReviewPayload(payload);
   const res = await fetch(apiUrl('/projects/review'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...reviewPayload(), action: 'draft' }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Review save failed'));
-  applyReviewBundle(await res.json());
+  const bundle = await res.json();
+  reviewAutosaveDirty = false;
+  reviewAutosaveLastSerialized = serialized;
+  clearLocalReviewDraftBackup(serialized);
+  applyReviewBundle(bundle);
 }
 async function saveProject() {
   const name = currentProject ? null : prompt('Project name', '') || '';
@@ -1536,9 +1548,9 @@ async function loadReviewBundle() {
   ensureReviewPanel();
   try {
     const res = await fetch(apiUrl('/projects/review'));
-    if (!res.ok) return;
-    applyReviewBundle(await res.json());
+    if (res.ok) applyReviewBundle(await res.json());
   } catch (_) {}
+  applyLocalReviewDraftBackupIfNewer();
 }
 function renderReviewPanel(student) {
   const section = ensureReviewPanel();
@@ -1607,6 +1619,168 @@ function reviewPayload() {
     feedback_drafts: feedback,
   };
 }
+function draftReviewPayload() {
+  return { ...reviewPayload(), action: 'draft' };
+}
+function serializedDraftReviewPayload(payload = draftReviewPayload()) {
+  return JSON.stringify(payload);
+}
+function reviewDraftStorageKey() {
+  const scope = compactText(
+    reviewBundle?.draft_review?.scope_id ||
+    reviewBundle?.latest_review?.scope_id ||
+    currentProject?.scope_key ||
+    currentProject?.id ||
+    data?.class_metadata?.classroom_import_manifest_hash ||
+    data?.class_metadata?.sync_id ||
+    'workspace',
+  );
+  return `assessor.reviewDraft.${scope.replace(/[^A-Za-z0-9_.:-]/g, '_')}`;
+}
+function latestServerDraftTimeMs() {
+  const times = [
+    reviewBundle?.draft_review?.saved_at,
+    reviewBundle?.latest_review?.saved_at,
+  ].map(value => Date.parse(value || '')).filter(Number.isFinite);
+  return times.length ? Math.max(...times) : 0;
+}
+function setReviewAutosaveStatus(text, state = 'idle') {
+  const node = document.getElementById('reviewDraftStatus');
+  if (!node) return;
+  node.textContent = text;
+  node.dataset.state = state;
+}
+function writeLocalReviewDraftBackup(reason = 'edit', payload = draftReviewPayload(), serialized = serializedDraftReviewPayload(payload)) {
+  if (!data?.students?.length) return;
+  try {
+    localStorage.setItem(reviewDraftStorageKey(), JSON.stringify({
+      saved_at_ms: Date.now(),
+      reason,
+      payload,
+      serialized,
+    }));
+  } catch (_) {}
+}
+function clearLocalReviewDraftBackup(serialized = '') {
+  try {
+    const key = reviewDraftStorageKey();
+    if (!serialized) {
+      localStorage.removeItem(key);
+      return;
+    }
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const record = JSON.parse(raw);
+    if (!record?.serialized || record.serialized === serialized) localStorage.removeItem(key);
+  } catch (_) {}
+}
+function applyAutosaveBundleMetadata(bundle, serialized) {
+  if (!bundle || typeof bundle !== 'object') return;
+  reviewBundle = bundle;
+  const draft = bundle.draft_review || {};
+  const latest = bundle.latest_review || {};
+  reviewSessionId = ((draft.review_session && draft.review_session.session_id) || (latest.review_session && latest.review_session.session_id) || reviewSessionId || '');
+  const savedAt = draft.saved_at || '';
+  setReviewAutosaveStatus(savedAt ? `Draft autosaved ${savedAt}` : 'Draft autosaved.', 'ready');
+  reviewAutosaveLastSerialized = serialized;
+}
+function applyLocalReviewDraftBackupIfNewer() {
+  if (!data?.students?.length) return;
+  try {
+    const raw = localStorage.getItem(reviewDraftStorageKey());
+    if (!raw) return;
+    const backup = JSON.parse(raw);
+    const payload = backup?.payload || {};
+    const savedAtMs = Number(backup?.saved_at_ms || 0);
+    if (!payload || !savedAtMs || savedAtMs <= latestServerDraftTimeMs() + 500) return;
+    const currentIds = new Set((data.students || []).map(student => student.student_id));
+    const marks = payload.assigned_marks || [];
+    if (marks.length && !marks.some(item => currentIds.has(item.student_id))) return;
+    const record = {
+      review_state: 'draft',
+      scope_id: reviewBundle?.draft_review?.scope_id || reviewBundle?.latest_review?.scope_id || currentProject?.scope_key || currentProject?.id || '',
+      saved_at: new Date(savedAtMs).toISOString(),
+      students: payload.students || [],
+      pairwise: payload.pairwise || [],
+      curve_top: payload.curve_top ?? null,
+      curve_bottom: payload.curve_bottom ?? null,
+      assigned_marks: payload.assigned_marks || [],
+      feedback_drafts: payload.feedback_drafts || [],
+      review_session: { session_id: payload.session_id || reviewSessionId || '' },
+    };
+    applyReviewBundle({ ...(reviewBundle || {}), draft_review: record });
+    setReviewAutosaveStatus('Recovered unsaved browser changes; autosaving...', 'warn');
+    queueReviewAutosave('recovered_browser_draft', { immediate: true });
+  } catch (_) {}
+}
+async function flushReviewAutosave() {
+  if (!data?.students?.length) return;
+  const payload = draftReviewPayload();
+  const serialized = serializedDraftReviewPayload(payload);
+  if (!reviewAutosaveDirty && serialized === reviewAutosaveLastSerialized) return;
+  if (reviewAutosaveInFlight) {
+    reviewAutosavePending = true;
+    return;
+  }
+  reviewAutosaveInFlight = true;
+  reviewAutosaveDirty = false;
+  let failed = false;
+  setReviewAutosaveStatus('Autosaving draft...', 'warn');
+  try {
+    const res = await fetch(apiUrl('/projects/review'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Autosave failed'));
+    applyAutosaveBundleMetadata(await res.json(), serialized);
+    clearLocalReviewDraftBackup(serialized);
+  } catch (_) {
+    failed = true;
+    reviewAutosaveDirty = true;
+    setReviewAutosaveStatus('Autosave failed; changes are still on this page.', 'danger');
+  } finally {
+    reviewAutosaveInFlight = false;
+    if (reviewAutosavePending || reviewAutosaveDirty) {
+      reviewAutosavePending = false;
+      queueReviewAutosave('pending_change', { delay: failed ? 5000 : 500 });
+    }
+  }
+}
+function queueReviewAutosave(reason = 'edit', options = {}) {
+  if (!data?.students?.length) return;
+  const payload = draftReviewPayload();
+  const serialized = serializedDraftReviewPayload(payload);
+  reviewAutosaveDirty = true;
+  writeLocalReviewDraftBackup(reason, payload, serialized);
+  setReviewAutosaveStatus('Unsaved changes; autosaving...', 'warn');
+  if (reviewAutosaveTimer) clearTimeout(reviewAutosaveTimer);
+  reviewAutosaveTimer = setTimeout(() => {
+    reviewAutosaveTimer = null;
+    flushReviewAutosave();
+  }, options.immediate ? 0 : Number(options.delay ?? 900));
+}
+function sendReviewAutosaveBeacon() {
+  if (!reviewAutosaveDirty || !data?.students?.length || !navigator.sendBeacon) return;
+  const payload = draftReviewPayload();
+  const serialized = serializedDraftReviewPayload(payload);
+  writeLocalReviewDraftBackup('page_hide', payload, serialized);
+  try {
+    navigator.sendBeacon(apiUrl('/projects/review'), new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+  } catch (_) {}
+}
+function waitForReviewAutosaveIdle(timeoutMs = 4000) {
+  if (!reviewAutosaveInFlight) return Promise.resolve();
+  return new Promise(resolve => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (!reviewAutosaveInFlight || Date.now() - started >= timeoutMs) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 100);
+  });
+}
 async function saveReviewBundle(action = 'draft') {
   const reviewStatus = document.getElementById('reviewStatus');
   const reviewDraftStatus = document.getElementById('reviewDraftStatus');
@@ -1616,13 +1790,24 @@ async function saveReviewBundle(action = 'draft') {
     reviewDraftStatus.textContent = 'Saving draft review...';
   }
   try {
+    await waitForReviewAutosaveIdle();
+    if (reviewAutosaveTimer) {
+      clearTimeout(reviewAutosaveTimer);
+      reviewAutosaveTimer = null;
+    }
+    const serialized = serializedDraftReviewPayload();
     const res = await fetch(apiUrl('/projects/review'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...reviewPayload(), action }),
     });
     if (!res.ok) throw new Error('save failed');
-    applyReviewBundle(await res.json());
+    const bundle = await res.json();
+    reviewAutosaveDirty = false;
+    reviewAutosavePending = false;
+    reviewAutosaveLastSerialized = action === 'finalize' ? '' : serialized;
+    clearLocalReviewDraftBackup();
+    applyReviewBundle(bundle);
     await refreshClassroomState();
     if (data?.students?.length) renderReviewPanel(data.students[currentIndex]);
   } catch (_) {
@@ -1953,9 +2138,9 @@ function renderFeedback(student) {
   star1.innerText = draft.star1;
   star2.innerText = draft.star2;
   wish.innerText = draft.wish;
-  star1.oninput = () => { draft.star1 = star1.innerText.trim(); };
-  star2.oninput = () => { draft.star2 = star2.innerText.trim(); };
-  wish.oninput = () => { draft.wish = wish.innerText.trim(); };
+  star1.oninput = () => { draft.star1 = star1.innerText.trim(); queueReviewAutosave('feedback_star1'); };
+  star2.oninput = () => { draft.star2 = star2.innerText.trim(); queueReviewAutosave('feedback_star2'); };
+  wish.oninput = () => { draft.wish = wish.innerText.trim(); queueReviewAutosave('feedback_wish'); };
 }
 function renderDetail() {
   const summaryPanel = document.getElementById('summary');
@@ -2014,9 +2199,75 @@ function renderDetail() {
   updateControlVisibility();
   updateWorkflowState();
 }
-function applyAdjustment(studentId, key, delta) { const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0); currentIndex = sidx; const adj = getAdjustment(studentId); adj[key] += delta; const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null; if (data?.students?.length && window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId)); if (target === null) break; const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
-function applyOverallTarget(target) { if (!data?.students?.length) return; const sid = sliderStudentId || data.students[currentIndex]?.student_id; const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex]; currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const curr = getGradeForIndex(currentIndex); const delta = target - curr; const adj = getAdjustment(s.student_id); const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 }; adj.rubric += num(spread.rubric, 0); adj.conventions += num(spread.conventions, 0); adj.comparative += num(spread.comparative, 0); adj.overall += delta; delete overrides[s.student_id]; const inp = document.getElementById('gradeOverride'); if (inp) inp.value = Math.round(target); const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = Math.round(target); if (window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
-function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true); renderDetail(); }
+function applyAdjustment(studentId, key, delta) {
+  const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0);
+  currentIndex = sidx;
+  const adj = getAdjustment(studentId);
+  adj[key] += delta;
+  const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null;
+  if (data?.students?.length && window.gradeAdjust?.resort) {
+    focusLock = true;
+    for (let i = 0; i < 3; i += 1) {
+      window.gradeAdjust.resort(data.students, getGradeForIndex);
+      currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId));
+      if (target === null) break;
+      const diff = target - getGradeForIndex(currentIndex);
+      if (Math.abs(diff) < 0.5) break;
+      adj.overall += diff;
+    }
+    renderRail(true);
+    scrollToIndex(currentIndex, false);
+    focusLock = false;
+    queueReviewAutosave('mark_adjustment');
+    return;
+  }
+  updateRail();
+  renderDetail();
+  queueReviewAutosave('mark_adjustment');
+}
+function applyOverallTarget(target) {
+  if (!data?.students?.length) return;
+  const sid = sliderStudentId || data.students[currentIndex]?.student_id;
+  const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex];
+  currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id));
+  const curr = getGradeForIndex(currentIndex);
+  const delta = target - curr;
+  const adj = getAdjustment(s.student_id);
+  const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 };
+  adj.rubric += num(spread.rubric, 0);
+  adj.conventions += num(spread.conventions, 0);
+  adj.comparative += num(spread.comparative, 0);
+  adj.overall += delta;
+  delete overrides[s.student_id];
+  const inp = document.getElementById('gradeOverride');
+  if (inp) inp.value = Math.round(target);
+  const slider = document.getElementById('overallGradeSlider');
+  if (slider) slider.value = Math.round(target);
+  if (window.gradeAdjust?.resort) {
+    focusLock = true;
+    for (let i = 0; i < 3; i += 1) {
+      window.gradeAdjust.resort(data.students, getGradeForIndex);
+      currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id));
+      const diff = target - getGradeForIndex(currentIndex);
+      if (Math.abs(diff) < 0.5) break;
+      adj.overall += diff;
+    }
+    renderRail(true);
+    scrollToIndex(currentIndex, false);
+    focusLock = false;
+    queueReviewAutosave('assigned_mark');
+    return;
+  }
+  updateRail();
+  renderDetail();
+  queueReviewAutosave('assigned_mark');
+}
+function generateFeedbackDrafts() {
+  if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return;
+  window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true);
+  renderDetail();
+  queueReviewAutosave('generated_feedback');
+}
 function updateGradesFromCurve() {
   if (!data || !data.students || !data.students.length) return;
   const topInput = document.getElementById('topGrade');
@@ -2028,6 +2279,7 @@ function updateGradesFromCurve() {
   if (!applyCurveBounds(top, bottom, true)) return;
   updateRail();
   renderDetail();
+  queueReviewAutosave('curve_bounds');
 }
 function setRunning(on, mode = 'blocking') {
   running = on;
@@ -2435,10 +2687,10 @@ function setupControls() {
   const preferCurrent = document.getElementById('preferCurrent');
   const preferCompare = document.getElementById('preferCompare');
   const clearPairwise = document.getElementById('clearPairwise');
-  if (reviewLevel) reviewLevel.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).level_override = e.target.value; });
-  if (reviewRank) reviewRank.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).desired_rank = e.target.value.trim() ? parseInt(e.target.value, 10) : ''; });
-  if (reviewQuality) reviewQuality.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_quality = e.target.value; });
-  if (reviewComment) reviewComment.addEventListener('input', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_comment = e.target.value.trim(); });
+  if (reviewLevel) reviewLevel.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).level_override = e.target.value; queueReviewAutosave('level_override'); });
+  if (reviewRank) reviewRank.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).desired_rank = e.target.value.trim() ? parseInt(e.target.value, 10) : ''; queueReviewAutosave('desired_rank'); });
+  if (reviewQuality) reviewQuality.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_quality = e.target.value; queueReviewAutosave('evidence_quality'); });
+  if (reviewComment) reviewComment.addEventListener('input', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_comment = e.target.value.trim(); queueReviewAutosave('evidence_comment'); });
   if (saveReview) saveReview.addEventListener('click', () => saveReviewBundle('draft'));
   if (finalizeReview) finalizeReview.addEventListener('click', () => saveReviewBundle('finalize'));
   if (preferCurrent) preferCurrent.addEventListener('click', () => {
@@ -2450,6 +2702,7 @@ function setupControls() {
     pair.preferred_student_id = student.student_id;
     pair.rationale = studentReview(student.student_id).evidence_comment || '';
     renderReviewPanel(student);
+    queueReviewAutosave('pairwise_prefer_current');
   });
   if (preferCompare) preferCompare.addEventListener('click', () => {
     const student = data?.students?.[currentIndex];
@@ -2460,6 +2713,7 @@ function setupControls() {
     pair.preferred_student_id = compare.student_id;
     pair.rationale = studentReview(student.student_id).evidence_comment || '';
     renderReviewPanel(student);
+    queueReviewAutosave('pairwise_prefer_compare');
   });
   if (clearPairwise) clearPairwise.addEventListener('click', () => {
     const student = data?.students?.[currentIndex];
@@ -2467,7 +2721,10 @@ function setupControls() {
     if (!student || compareIndex === null) return;
     delete reviewPairs[pairKey(student.student_id, data.students[compareIndex].student_id)];
     renderReviewPanel(student);
+    queueReviewAutosave('pairwise_clear');
   });
+  window.addEventListener('beforeunload', sendReviewAutosaveBeacon);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sendReviewAutosaveBeacon(); });
   setupUploads();
   loadProjects();
   const saveBtn = document.getElementById('saveProject'); if (saveBtn) saveBtn.addEventListener('click', saveProject);

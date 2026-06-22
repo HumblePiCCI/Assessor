@@ -75,9 +75,33 @@ def test_project_save_persists_draft_review_curve_before_snapshot():
 
     assert "async function persistDraftReviewBeforeProjectSave()" in source
     assert "Saving review choices..." in source
-    assert "body: JSON.stringify({ ...reviewPayload(), action: 'draft' })," in source
+    assert "const payload = draftReviewPayload();" in source
+    assert "body: JSON.stringify(payload)," in source
     assert "await persistDraftReviewBeforeProjectSave();" in source
     assert "fetch(apiUrl('/projects/save')" in source
     assert "curve_top: num(document.getElementById('topGrade')?.value, null)," in source
     assert "curve_bottom: num(document.getElementById('bottomGrade')?.value, null)," in source
     assert "assigned_marks: currentCohortMarks()," in source
+
+
+def test_teacher_review_autosaves_interactions_and_recovers_refresh():
+    source = UI_APP.read_text(encoding="utf-8")
+    markup = UI_INDEX.read_text(encoding="utf-8")
+
+    assert 'app.js?v=22' in markup
+    assert "function queueReviewAutosave" in source
+    assert "function flushReviewAutosave" in source
+    assert "function writeLocalReviewDraftBackup" in source
+    assert "function applyLocalReviewDraftBackupIfNewer" in source
+    assert "function sendReviewAutosaveBeacon" in source
+    assert "function waitForReviewAutosaveIdle" in source
+    assert "navigator.sendBeacon(apiUrl('/projects/review')" in source
+    assert "window.addEventListener('beforeunload', sendReviewAutosaveBeacon);" in source
+    assert "document.visibilityState === 'hidden'" in source
+    assert "queueReviewAutosave('assigned_mark')" in source
+    assert "queueReviewAutosave('curve_bounds')" in source
+    assert "queueReviewAutosave('feedback_star1')" in source
+    assert "queueReviewAutosave('evidence_comment')" in source
+    assert "queueReviewAutosave('pairwise_prefer_current')" in source
+    assert "applyLocalReviewDraftBackupIfNewer();" in source
+    assert "await waitForReviewAutosaveIdle();" in source
