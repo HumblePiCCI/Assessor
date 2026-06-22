@@ -451,12 +451,26 @@ async function loadProjects() {
   }
   updateWorkflowState();
 }
+async function persistDraftReviewBeforeProjectSave() {
+  if (!data?.students?.length) return;
+  const status = document.getElementById('projectStatus');
+  if (status) status.textContent = 'Saving review choices...';
+  const res = await fetch(apiUrl('/projects/review'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...reviewPayload(), action: 'draft' }),
+  });
+  if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), 'Review save failed'));
+  applyReviewBundle(await res.json());
+}
 async function saveProject() {
   const name = currentProject ? null : prompt('Project name', '') || '';
   if (!currentProject && !name) return;
   const status = document.getElementById('projectStatus');
   if (status) status.textContent = currentProject ? 'Saving current pass...' : 'Saving project...';
   try {
+    await persistDraftReviewBeforeProjectSave();
+    if (status) status.textContent = currentProject ? 'Saving current pass...' : 'Saving project...';
     const res = await fetch(apiUrl('/projects/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

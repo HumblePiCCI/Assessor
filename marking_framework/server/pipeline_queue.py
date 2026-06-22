@@ -1430,11 +1430,13 @@ class PipelineQueue:
     def _job_identity(self, tenant_id: str, teacher_id: str) -> dict:
         teacher = str(teacher_id or "local-dev-teacher")
         tenant = str(tenant_id or "local-dev-tenant")
+        local_dev_identity = tenant == "local-dev-tenant" and teacher == "local-dev-teacher"
+        strict_auth = strict_auth_enabled(self.root) or not local_dev_identity
         return {
             "tenant_id": tenant,
             "teacher_id": teacher,
             "role": "admin" if teacher == "local-dev-teacher" else "teacher",
-            "strict_auth": strict_auth_enabled(self.root),
+            "strict_auth": strict_auth,
             "tenant_token": identity_token(tenant),
             "teacher_token": identity_token(teacher),
         }

@@ -121,6 +121,62 @@ def _make_queue(tmp_path, run_fn=None, reset_fn=None):
     return queue, root, data, logs, resets
 
 
+def test_job_identity_keeps_google_runs_in_strict_project_namespace(tmp_path, monkeypatch):
+    monkeypatch.delenv("MARKING_STRICT_AUTH", raising=False)
+    monkeypatch.setenv("MARKING_RUNTIME_MODE", "development")
+    queue, _root, _data, _logs, _resets = _make_queue(tmp_path)
+
+    local_identity = queue._job_identity("local-dev-tenant", "local-dev-teacher")
+    assert local_identity["strict_auth"] is False
+    assert local_identity["tenant_token"] == pqmod.identity_token("local-dev-tenant")
+    assert local_identity["teacher_token"] == pqmod.identity_token("local-dev-teacher")
+
+    google_identity = queue._job_identity("teacher-tenant@example.com", "teacher@example.com")
+    assert google_identity["strict_auth"] is True
+    assert google_identity["tenant_token"] == pqmod.identity_token("teacher-tenant@example.com")
+    assert google_identity["teacher_token"] == pqmod.identity_token("teacher@example.com")
+
+
+def test_completed_google_job_snapshots_saved_project_in_strict_namespace(tmp_path, monkeypatch):
+    from server import projects as projectsmod
+    from server.runtime_context import project_owner
+
+    server_dir = tmp_path / "server"
+    projects_dir = tmp_path / "projects"
+    server_dir.mkdir()
+    projects_dir.mkdir()
+    monkeypatch.setattr(projectsmod, "BASE_DIR", server_dir)
+    monkeypatch.setattr(projectsmod, "PROJECTS_DIR", projects_dir)
+    monkeypatch.delenv("MARKING_STRICT_AUTH", raising=False)
+    monkeypatch.setenv("MARKING_RUNTIME_MODE", "development")
+
+    queue, _root, _data, _logs, _resets = _make_queue(tmp_path)
+    identity = queue._job_identity("tenant@example.com", "teacher@example.com")
+    project = {
+        "id": "google-class",
+        "name": "Google Class",
+        "owner": project_owner(identity),
+    }
+    projectsmod.set_current_project(project, identity)
+
+    workspace_dir = tmp_path / "completed-workspace"
+    (workspace_dir / "outputs").mkdir(parents=True)
+    (workspace_dir / "outputs" / "dashboard_data.json").write_text(json.dumps({"students": [{"student_id": "s1"}]}), encoding="utf-8")
+    (workspace_dir / "inputs").mkdir(parents=True)
+    (workspace_dir / "inputs" / "rubric.md").write_text("rubric", encoding="utf-8")
+
+    queue._sync_completed_project_state(
+        {"tenant_id": "tenant@example.com", "teacher_id": "teacher@example.com", "project_id": "google-class"},
+        workspace_dir,
+    )
+
+    strict_project_dir = projectsmod.project_dir("google-class", identity)
+    legacy_project_dir = projects_dir / "google-class"
+    assert (strict_project_dir / "outputs" / "dashboard_data.json").exists()
+    assert json.loads((strict_project_dir / "outputs" / "dashboard_data.json").read_text(encoding="utf-8"))["students"][0]["student_id"] == "s1"
+    assert not (legacy_project_dir / "outputs" / "dashboard_data.json").exists()
+
+
 def test_snapshot_hash_changes_with_inputs_and_manifest_round_trip(tmp_path):
     root = tmp_path / "root"
     root.mkdir()

@@ -68,3 +68,16 @@ def test_curve_controls_are_visible_and_rank_bound():
     assert "resetMarkAdjustments();" in source
     assert "Curve needs a top mark higher than bottom mark." in source
     assert "original assessment order" in source
+
+
+def test_project_save_persists_draft_review_curve_before_snapshot():
+    source = UI_APP.read_text(encoding="utf-8")
+
+    assert "async function persistDraftReviewBeforeProjectSave()" in source
+    assert "Saving review choices..." in source
+    assert "body: JSON.stringify({ ...reviewPayload(), action: 'draft' })," in source
+    assert "await persistDraftReviewBeforeProjectSave();" in source
+    assert "fetch(apiUrl('/projects/save')" in source
+    assert "curve_top: num(document.getElementById('topGrade')?.value, null)," in source
+    assert "curve_bottom: num(document.getElementById('bottomGrade')?.value, null)," in source
+    assert "assigned_marks: currentCohortMarks()," in source
