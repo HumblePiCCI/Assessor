@@ -448,10 +448,34 @@ def reproducibility_metrics(report_path: Path) -> dict:
     }
 
 
+def stability_harness_metrics(report_path: Path) -> dict:
+    report = load_json(report_path)
+    if not report:
+        return {
+            "present": False,
+            "runs": 0,
+            "mean_rank_sd": 0.0,
+            "max_rank_sd": 0.0,
+            "mean_top5_overlap": 0.0,
+            "mean_abs_displacement_vs_base": 0.0,
+        }
+    return {
+        "present": True,
+        "runs": int(report.get("runs", 0) or 0),
+        "mean_rank_sd": float(report.get("mean_rank_sd", 0.0) or 0.0),
+        "max_rank_sd": float(report.get("max_rank_sd", 0.0) or 0.0),
+        "mean_top5_overlap": float(report.get("mean_top5_overlap", 0.0) or 0.0),
+        "mean_abs_displacement_vs_base": float(report.get("mean_abs_displacement_vs_base", 0.0) or 0.0),
+    }
+
+
 def evaluate(metrics: dict, thresholds: dict) -> list[str]:
     failures = []
     release_mode = str(thresholds.get("release_mode", "development") or "development").strip().lower()
     strict_release = release_mode in {"candidate", "release", "production"}
+    if strict_release and int(metrics.get("tainted_top_pack_pair_count", 0) or 0) > 0:
+        # P0-3: no repair-tainted comparison may touch the top ten at release.
+        failures.append("repair_tainted_top_pack_pairs_present")
     if metrics["irr_rank_kendalls_w"] < float(thresholds.get("min_rank_kendall_w", 0.0)):
         failures.append("kendall_w_below_threshold")
     if metrics["irr_mean_rubric_sd"] > float(thresholds.get("max_mean_rubric_sd", 999.0)):
@@ -537,6 +561,21 @@ def evaluate(metrics: dict, thresholds: dict) -> list[str]:
             thresholds.get("reproducibility_max_intermediate_metric_delta", 999999.0)
         ):
             failures.append("reproducibility_intermediate_delta_above_threshold")
+    if thresholds.get("require_stability_harness_report", False) and not metrics.get("stability_harness_present", False):
+        failures.append("stability_harness_report_missing")
+    if metrics.get("stability_harness_present", False):
+        if metrics.get("stability_harness_runs", 0) < int(thresholds.get("stability_harness_min_runs", 0)):
+            failures.append("stability_harness_runs_below_threshold")
+        if metrics.get("stability_harness_mean_rank_sd", 0.0) > float(thresholds.get("stability_harness_max_mean_rank_sd", 999999.0)):
+            failures.append("stability_harness_mean_rank_sd_above_threshold")
+        if metrics.get("stability_harness_max_rank_sd", 0.0) > float(thresholds.get("stability_harness_max_rank_sd", 999999.0)):
+            failures.append("stability_harness_max_rank_sd_above_threshold")
+        if metrics.get("stability_harness_mean_abs_displacement_vs_base", 0.0) > float(
+            thresholds.get("stability_harness_max_mean_abs_displacement", 999999.0)
+        ):
+            failures.append("stability_harness_displacement_above_threshold")
+        if metrics.get("stability_harness_mean_top5_overlap", 1.0) < float(thresholds.get("stability_harness_min_top5_overlap", 0.0)):
+            failures.append("stability_harness_top5_overlap_below_threshold")
     if thresholds.get("require_benchmark_report", False) and not metrics["benchmark_report_present"]:
         failures.append("benchmark_report_missing")
     if metrics["benchmark_report_present"]:
@@ -620,11 +659,13 @@ def build_profile_metrics(
     level_bands: list[dict],
     benchmark_report_path: Path,
     pairwise_eval_report_path: Path,
+    stability_report_path: Path,
 ) -> dict:
     metrics = dict(base_metrics)
     boundary_margin = float(thresholds.get("boundary_margin_percent", 1.0) or 1.0)
     benchmark = benchmark_metrics(benchmark_report_path, str(thresholds.get("benchmark_mode", "")).strip())
     pairwise_eval = pairwise_eval_metrics(pairwise_eval_report_path)
+    stability = stability_harness_metrics(stability_report_path)
     metrics.update(
         {
             "boundary_count": boundary_count(rows, level_bands, boundary_margin),
@@ -660,6 +701,14 @@ def build_profile_metrics(
             "pairwise_eval_critical_accuracy": float(pairwise_eval.get("critical_accuracy", 0.0) or 0.0),
             "pairwise_eval_polish_bias_risk_count": int(pairwise_eval.get("polish_bias_risk_count", 0) or 0),
             "pairwise_eval_failures": list(pairwise_eval.get("failures", [])),
+            "stability_harness_present": bool(stability.get("present", False)),
+            "stability_harness_runs": int(stability.get("runs", 0) or 0),
+            "stability_harness_mean_rank_sd": float(stability.get("mean_rank_sd", 0.0) or 0.0),
+            "stability_harness_max_rank_sd": float(stability.get("max_rank_sd", 0.0) or 0.0),
+            "stability_harness_mean_top5_overlap": float(stability.get("mean_top5_overlap", 0.0) or 0.0),
+            "stability_harness_mean_abs_displacement_vs_base": float(
+                stability.get("mean_abs_displacement_vs_base", 0.0) or 0.0
+            ),
         }
     )
     return metrics
@@ -673,6 +722,7 @@ def evaluate_profiles(
     level_bands: list[dict],
     benchmark_report_path: Path,
     pairwise_eval_report_path: Path,
+    stability_report_path: Path,
 ) -> tuple[list[str], str, dict[str, dict]]:
     order, target_profile, profiles = resolve_gate_profiles(gate_cfg, fallback_profile="dev")
     results = {}
@@ -685,6 +735,7 @@ def evaluate_profiles(
             level_bands=level_bands,
             benchmark_report_path=benchmark_report_path,
             pairwise_eval_report_path=pairwise_eval_report_path,
+            stability_report_path=stability_report_path,
         )
         failures = evaluate(metrics, thresholds)
         results[name] = {
@@ -778,6 +829,12 @@ def write_markdown_report(path: Path, payload: dict) -> None:
         "reproducibility_final_outputs_exact_match",
         "reproducibility_within_tolerance",
         "reproducibility_max_intermediate_metric_delta",
+        "stability_harness_present",
+        "stability_harness_runs",
+        "stability_harness_mean_rank_sd",
+        "stability_harness_max_rank_sd",
+        "stability_harness_mean_abs_displacement_vs_base",
+        "stability_harness_mean_top5_overlap",
     ):
         lines.append(f"- **{key}**: {metrics.get(key)}")
     failures = payload.get("failures", [])
@@ -805,9 +862,11 @@ def main() -> int:
     parser.add_argument("--benchmark-report", default="outputs/benchmark_report.json", help="Optional benchmark report JSON")
     parser.add_argument("--pairwise-eval-report", default="outputs/pairwise_adjudicator_eval.json", help="Optional hard-pair pairwise adjudicator eval JSON")
     parser.add_argument("--reproducibility-report", default="outputs/reproducibility_report.json", help="Optional reproducibility report JSON")
+    parser.add_argument("--stability-report", default="outputs/stability_report.json", help="Optional rerank perturbation stability report JSON")
     parser.add_argument("--committee-candidates", default="outputs/committee_edge_candidates.json", help="Committee-edge candidates JSON")
     parser.add_argument("--evidence-neighborhood-report", default="outputs/evidence_neighborhood_report.json", help="Evidence neighborhood report JSON")
     parser.add_argument("--evidence-group-packets", default="outputs/evidence_group_calibration_packets.json", help="Evidence group-calibration packets JSON")
+    parser.add_argument("--consistency-report", default="outputs/consistency_report.json", help="Rerank consistency report JSON (repair-taint gate)")
     parser.add_argument("--assessors", default="A,B,C", help="Assessor IDs")
     parser.add_argument("--output", default="outputs/publish_gate.json", help="Gate result JSON")
     args = parser.parse_args()
@@ -838,6 +897,7 @@ def main() -> int:
     )
     scope_coverage = cal.get("coverage_scope", {}) if isinstance(cal.get("coverage_scope", {}), dict) else {}
     reproducibility = reproducibility_metrics(Path(args.reproducibility_report))
+    stability = stability_harness_metrics(Path(args.stability_report))
     evidence_packets = evidence_packet_metrics(
         Path(args.committee_candidates),
         Path(args.evidence_neighborhood_report),
@@ -845,8 +905,13 @@ def main() -> int:
     )
 
     anchors_total, anchor_hit_rate, anchor_level_mae = anchor_metrics(rows, metadata)
+    consistency_summary = load_json(Path(args.consistency_report)).get("summary", {})
+    if not isinstance(consistency_summary, dict):
+        consistency_summary = {}
     base_metrics = {
         "rows": len(rows),
+        "pairwise_repair_tainted_rate": float(consistency_summary.get("pairwise_repair_tainted_rate", 0.0) or 0.0),
+        "tainted_top_pack_pair_count": len(consistency_summary.get("tainted_top_pack_pairs", []) or []),
         "irr_rank_kendalls_w": float(irr.get("rank_kendall_w", 0.0) or 0.0),
         "irr_mean_rubric_sd": float(irr.get("mean_rubric_sd", 0.0) or 0.0),
         "model_coverage": model_coverage(Path(args.pass1)),
@@ -889,6 +954,12 @@ def main() -> int:
         "reproducibility_mismatched_intermediate_artifact_count": int(
             reproducibility.get("mismatched_intermediate_artifact_count", 0) or 0
         ),
+        "stability_harness_present": bool(stability.get("present", False)),
+        "stability_harness_runs": int(stability.get("runs", 0) or 0),
+        "stability_harness_mean_rank_sd": float(stability.get("mean_rank_sd", 0.0) or 0.0),
+        "stability_harness_max_rank_sd": float(stability.get("max_rank_sd", 0.0) or 0.0),
+        "stability_harness_mean_top5_overlap": float(stability.get("mean_top5_overlap", 0.0) or 0.0),
+        "stability_harness_mean_abs_displacement_vs_base": float(stability.get("mean_abs_displacement_vs_base", 0.0) or 0.0),
         **evidence_packets,
     }
     profile_order, target_profile, profile_results = evaluate_profiles(
@@ -898,6 +969,7 @@ def main() -> int:
         level_bands=bands,
         benchmark_report_path=Path(args.benchmark_report),
         pairwise_eval_report_path=Path(args.pairwise_eval_report),
+        stability_report_path=Path(args.stability_report),
     )
     highest_profile = highest_passing_profile(profile_order, profile_results)
     target_result = profile_results.get(

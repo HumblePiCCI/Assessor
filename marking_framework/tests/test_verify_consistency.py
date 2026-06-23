@@ -169,7 +169,9 @@ def test_verify_consistency_apply_runs_global_reranker(tmp_path, monkeypatch):
     )
     assert vc.main() == 0
     final_rows = list(csv.DictReader((tmp_path / "final_order.csv").open("r", encoding="utf-8")))
-    assert [row["student_id"] for row in final_rows] == ["s2", "s1"]
+    # A single uncorroborated read informs the score fit but no longer forms a
+    # hard constraint, so the seed order holds; the rerank plumbing still ran.
+    assert [row["student_id"] for row in final_rows] == ["s1", "s2"]
     assert (tmp_path / "consistency_adjusted.csv").exists()
     report = json.loads((tmp_path / "consistency_report.json").read_text(encoding="utf-8"))
     assert report["summary"]["judgment_count"] == 1
@@ -724,8 +726,7 @@ def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch)
     outline.write_text("outline", encoding="utf-8")
     out_path = tmp_path / "checks.json"
 
-    responses = iter(
-        [
+    response_list = [
             {"model": "gpt-5.4-mini", "output": [{"type": "output_text", "text": "decision=SWAP confidence=high"}]},
             {
                 "model": "gpt-5.4-mini",
@@ -792,7 +793,10 @@ def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch)
                 ],
             },
         ]
-    )
+    # The strict rerun (P0-3) re-judges the pair after a repair; give it the
+    # same clean SWAP payload so the rerun recovers and replaces the taint.
+    response_list.insert(2, response_list[1])
+    responses = iter(response_list)
     prompts = []
 
     def fake_create(model, messages, temperature, reasoning, routing_path, text_format=None, max_output_tokens=None):
@@ -819,10 +823,14 @@ def test_verify_consistency_repairs_invalid_json_response(tmp_path, monkeypatch)
     assert vc.main() == 0
     data = json.loads(out_path.read_text(encoding="utf-8"))
     assert data["checks"][0]["decision"] == "SWAP"
-    assert data["checks"][0]["model_metadata"]["repair_used"] is True
+    # Clean strict rerun replaced the repaired read: judgment is untainted.
+    assert data["checks"][0]["model_metadata"]["repair_used"] is False
+    assert data["checks"][0]["model_metadata"]["repair_rerun_attempted"] is True
+    assert data["checks"][0]["model_metadata"]["repair_rerun_recovered"] is True
     assert "Original adjudication prompt" in prompts[1]
     assert "Essay one" in prompts[1]
     assert "Essay two" in prompts[1]
+    assert "STRICT OUTPUT CONTRACT" in prompts[2]
 
 
 def test_judge_pair_repairs_semantically_incomplete_json(monkeypatch):
@@ -926,3 +934,160 @@ def test_verify_consistency_no_rows(tmp_path, monkeypatch):
     scores_path.write_text("student_id,consensus_rank\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["vc", "--scores", str(scores_path)])
     assert vc.main() == 1
+
+
+def test_post_surge_coverage_pairs_detects_uncompared_movers():
+    seed_rows = [{"student_id": f"s{i}", "seed_rank": i} for i in range(1, 9)]
+    final_rows = []
+    # s7 surged from seed 7 to provisional rank 2; everyone else shifts down.
+    order = ["s1", "s7", "s2", "s3", "s4", "s5", "s6", "s8"]
+    for rank, sid in enumerate(order, start=1):
+        final_rows.append(
+            {
+                "student_id": sid,
+                "final_rank": rank,
+                "rerank_support_weight": 12.0 if sid == "s7" else 1.0,
+                "rerank_opposition_weight": 0.0,
+            }
+        )
+    judgments = [{"pair": ["s1", "s7"]}]  # only one top-pack comparison exists
+    needed = vc.post_surge_coverage_pairs(seed_rows, final_rows, judgments)
+    movers = {item[0] for item in needed}
+    anchors = {item[1] for item in needed if item[0] == "s7"}
+    assert movers == {"s7"}
+    # Compared against the top pack (final ranks 1..5) minus itself and the
+    # already-judged s1.
+    assert anchors == {"s2", "s3", "s4"}
+    details = [item[2] for item in needed]
+    assert all(d["upward_move"] == 5 for d in details)
+
+
+def test_post_surge_coverage_pairs_quiet_when_no_movers():
+    seed_rows = [{"student_id": f"s{i}", "seed_rank": i} for i in range(1, 6)]
+    final_rows = [
+        {"student_id": f"s{i}", "final_rank": i, "rerank_support_weight": 0.5, "rerank_opposition_weight": 0.2}
+        for i in range(1, 6)
+    ]
+    assert vc.post_surge_coverage_pairs(seed_rows, final_rows, []) == []
+
+
+def _committee_judgment(decision_basis="completion", winner_side="A", deeper="tie", cleaner="A", repair=False):
+    return {
+        "winner": "s1" if winner_side == "A" else "s2",
+        "winner_side": winner_side,
+        "decision_basis": decision_basis,
+        "cautions_applied": [],
+        "decision_checks": {"deeper_interpretation": deeper, "cleaner_or_more_formulaic": cleaner},
+        "model_metadata": {"repair_used": repair},
+    }
+
+
+def test_structure_bias_risk_detects_failure_signatures():
+    assert "decision_basis:completion" in vc.structure_bias_risk(_committee_judgment())
+    assert "cleaner_won_without_deeper_interpretation" in vc.structure_bias_risk(
+        _committee_judgment(decision_basis="content_reasoning", deeper="tie", cleaner="A")
+    )
+    assert "tainted_judgment" in vc.structure_bias_risk(
+        _committee_judgment(decision_basis="content_reasoning", deeper="A", cleaner="B", repair=True)
+    )
+    clean = _committee_judgment(decision_basis="content_reasoning", deeper="A", cleaner="B")
+    assert vc.structure_bias_risk(clean) == []
+
+
+def test_close_pair_committee_triggers_require_decisive_pair():
+    risky = _committee_judgment()
+    top = {"student_id": "s1", "seed_rank": 2, "level": "3"}
+    deep = {"student_id": "s2", "seed_rank": 3, "level": "3"}
+    tail_a = {"student_id": "s8", "seed_rank": 18, "level": "2"}
+    tail_b = {"student_id": "s9", "seed_rank": 19, "level": "2"}
+    assert vc.close_pair_committee_triggers(risky, top, deep)
+    assert vc.close_pair_committee_triggers(risky, tail_a, tail_b) == []
+    cross_band = {"student_id": "s9", "seed_rank": 19, "level": "3"}
+    assert vc.close_pair_committee_triggers(risky, tail_a, cross_band)
+
+
+def test_close_pair_committee_majority_overrules_structure_biased_primary(monkeypatch):
+    higher = {"student_id": "s1", "seed_rank": 1, "level": "3"}
+    lower = {"student_id": "s2", "seed_rank": 2, "level": "3"}
+
+    structure_primary = {
+        "pair": ["s1", "s2"],
+        "winner": "s1",
+        "loser": "s2",
+        "winner_side": "A",
+        "decision": "KEEP",
+        "confidence": "high",
+        "decision_basis": "completion",
+        "cautions_applied": ["incomplete_or_scaffold"],
+        "decision_checks": {"deeper_interpretation": "tie", "cleaner_or_more_formulaic": "A"},
+        "model_metadata": {"repair_used": False},
+    }
+    depth_vote = {
+        "pair": ["s1", "s2"],
+        "winner": "s2",
+        "loser": "s1",
+        "winner_side": "B",
+        "decision": "SWAP",
+        "confidence": "high",
+        "decision_basis": "content_reasoning",
+        "cautions_applied": [],
+        "decision_checks": {"deeper_interpretation": "B", "cleaner_or_more_formulaic": "A"},
+        "model_metadata": {"repair_used": False},
+    }
+    monkeypatch.setattr(vc, "judge_pair_with_orientation_audit", lambda *a, **k: dict(structure_primary))
+    calls = {"n": 0}
+
+    def fake_judge_pair(*args, **kwargs):
+        calls["n"] += 1
+        return dict(depth_vote)
+
+    monkeypatch.setattr(vc, "judge_pair", fake_judge_pair)
+    monkeypatch.setattr(vc, "reorient_judgment_to_original", lambda j, h, l: j)
+
+    final = vc.judge_pair_with_close_committee(
+        "rubric", "outline", higher, lower, "text a", "text b",
+        model="m", routing="r", reasoning="low", max_output_tokens=500,
+        committee_budget={"remaining": 5},
+    )
+    assert calls["n"] == 2  # two committee depth reads
+    assert final["winner"] == "s2"
+    assert final["confidence"] == "medium"  # 2/3 majority
+    trace = final["model_metadata"]["close_pair_committee"]
+    assert trace["status"] == "voted" and trace["flipped"] is True
+    assert final["model_metadata"]["adjudication_source"] == "escalated_adjudication"
+
+
+def test_close_pair_committee_respects_budget_and_disable(monkeypatch):
+    higher = {"student_id": "s1", "seed_rank": 1, "level": "3"}
+    lower = {"student_id": "s2", "seed_rank": 2, "level": "3"}
+    primary = {
+        "pair": ["s1", "s2"], "winner": "s1", "loser": "s2", "winner_side": "A",
+        "decision": "KEEP", "confidence": "high", "decision_basis": "completion",
+        "cautions_applied": [], "decision_checks": {}, "model_metadata": {},
+    }
+    monkeypatch.setattr(vc, "judge_pair_with_orientation_audit", lambda *a, **k: dict(primary))
+    monkeypatch.setattr(vc, "judge_pair", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no reads allowed")))
+    out = vc.judge_pair_with_close_committee(
+        "r", "o", higher, lower, "a", "b",
+        model="m", routing="r", reasoning="low", max_output_tokens=500,
+        committee_budget={"remaining": 0},
+    )
+    assert out["model_metadata"]["close_pair_committee"]["status"] == "budget_exhausted"
+    out2 = vc.judge_pair_with_close_committee(
+        "r", "o", higher, lower, "a", "b",
+        model="m", routing="r", reasoning="low", max_output_tokens=500,
+        committee_enabled=False,
+    )
+    assert "close_pair_committee" not in (out2.get("model_metadata") or {})
+
+
+def test_close_pair_committee_skips_blowouts():
+    risky = _committee_judgment()  # completion basis, deeper=tie
+    strong = {"student_id": "s1", "seed_rank": 1, "level": "3", "rubric_after_penalty_percent": "82"}
+    weak = {"student_id": "s9", "seed_rank": 19, "level": "1", "rubric_after_penalty_percent": "55"}
+    # Wide rubric gap + depth tie -> still risky? deeper != winner -> re-read allowed
+    assert vc.close_pair_committee_triggers(risky, strong, weak)
+    deep_backed = _committee_judgment(deeper="A")  # depth backed the winner
+    assert vc.close_pair_committee_triggers(deep_backed, strong, weak) == []
+    close = {"student_id": "s2", "seed_rank": 2, "level": "3", "rubric_after_penalty_percent": "80"}
+    assert vc.close_pair_committee_triggers(deep_backed, strong, close)

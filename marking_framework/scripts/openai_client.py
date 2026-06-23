@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import http.client
 import json
 import os
 import subprocess
@@ -160,6 +161,14 @@ def _post_openai_with_compat(url: str, api_key: str, payload: dict) -> dict:
                 continue
             raise RuntimeError(f"OpenAI API error {exc.code}: {body[:500]}") from exc
         except urllib.error.URLError as exc:
+            if attempt < attempts:
+                time.sleep(_retry_backoff_seconds(attempt))
+                attempt += 1
+                continue
+            raise RuntimeError(f"OpenAI API network error: {exc}") from exc
+        except (TimeoutError, OSError, http.client.HTTPException) as exc:
+            # A read timeout mid-response (or a dropped connection) surfaces
+            # as a raw TimeoutError/OSError, not URLError — equally transient.
             if attempt < attempts:
                 time.sleep(_retry_backoff_seconds(attempt))
                 attempt += 1

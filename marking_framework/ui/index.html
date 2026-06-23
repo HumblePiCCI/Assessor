@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Assessor</title>
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body data-theme="light" data-view="single">
   <header class="topbar">
@@ -218,8 +218,11 @@
           <input id="gradeOverride" type="number" placeholder="Final mark" />
           <button id="copyFeedback" class="ghost">Copy feedback</button>
         </div>
+        <div id="pinState" class="pin-state"></div>
+        <div id="reorderNotice" class="reorder-notice is-hidden"></div>
+        <div id="curveStrip" class="curve-strip" aria-hidden="true"></div>
         <details class="secondary-details compact-details">
-          <summary>Curve</summary>
+          <summary>Class curve</summary>
           <div class="curve-range">
             <div class="control curve-control">
               <label for="topGrade">Top mark</label>
@@ -230,11 +233,12 @@
               <input id="bottomGrade" type="number" value="58" />
             </div>
           </div>
+          <div class="curve-hint">Pinned marks stay fixed; everyone else re-flows along the bell between your pins.</div>
         </details>
       </div>
 
-      <details id="exceptionsSection" class="secondary-details" open>
-        <summary>Exceptions</summary>
+      <details id="exceptionsSection" class="secondary-details">
+        <summary id="exceptionsSummary">Exceptions</summary>
         <div id="validationState" class="auth-status">Validation has not run.</div>
         <div id="exceptionsList" class="exception-list"></div>
       </details>
@@ -268,9 +272,9 @@
       <div id="pipelineLog" class="pipeline-log"></div>
     </div>
   </div>
-  <script src="grade_adjust.js?v=2"></script>
+  <script src="grade_adjust.js?v=3"></script>
   <script src="feedback_generate.js?v=1"></script>
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=23"></script>
   <script src="progress_stream.js?v=2"></script>
 </body>
 </html>

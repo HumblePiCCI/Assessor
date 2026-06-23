@@ -46,3 +46,28 @@ def test_normalize_teacher_scores_canonicalizes_level_aliases():
         {"levels": {"bands": [{"level": "1", "min": 50, "max": 59}, {"level": "4+", "min": 90, "max": 100}]}},
     )
     assert normalized["anchors"][0]["teacher_level"] == "4+"
+
+
+def test_patch_is_rank_evidence_mode_with_pairwise_judgments():
+    # Validated 2026-06-11 on blind-marked holdouts: score interpolation on
+    # seeds harms mis-ordered cohorts; teacher anchor order as adjudicated
+    # rank evidence strictly improves agreement.
+    rows = [
+        {"student_id": "s1", "rubric_after_penalty_percent": "80"},
+        {"student_id": "s2", "rubric_after_penalty_percent": "70"},
+        {"student_id": "s3", "rubric_after_penalty_percent": "60"},
+    ]
+    teacher = {"anchors": [
+        {"student_id": "s1", "teacher_mark": 65},
+        {"student_id": "s2", "teacher_mark": 85},
+        {"student_id": "s3", "teacher_mark": 65},
+    ]}
+    patch = aac.build_anchor_patch(rows=rows, teacher_scores=teacher, config={})
+    assert patch["seed_patch_enabled"] is False
+    assert patch["apply_mode"] == "rank_evidence_plus_curve_pins"
+    pairs = patch["anchor_pairwise_judgments"]
+    # s2 (85) above s1 (65) and s3 (65); s1 vs s3 tie -> no judgment.
+    keyed = {tuple(p["pair"]) for p in pairs}
+    assert ("s2", "s1") in keyed and ("s2", "s3") in keyed
+    assert len(pairs) == 2
+    assert all(p["model_metadata"]["adjudication_source"] == "committee_edge" for p in pairs)

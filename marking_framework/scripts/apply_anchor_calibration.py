@@ -161,8 +161,50 @@ def build_anchor_patch(*, rows: list[dict], teacher_scores: dict, config: dict) 
         "interpolation_basis": "rubric_after_penalty_percent",
         "interpolation_points": dedupe_points(points),
         "anchors": anchors,
+        # Validated on blind-marked holdout cohorts (2026-06-11): rewriting
+        # seed scores by interpolation HARMS cohorts whose machine order is
+        # wrong (exactly the cohorts anchors exist for), while feeding the
+        # teacher's relative anchor order into the rerank as adjudicated
+        # evidence strictly improves agreement. Seed patching is therefore
+        # disabled; anchor marks should flow into the grade curve as pins.
+        "seed_patch_enabled": False,
+        "apply_mode": "rank_evidence_plus_curve_pins",
+        "anchor_pairwise_judgments": build_anchor_pairwise_judgments(anchors),
         "fallback_reason": "",
     }
+
+
+def build_anchor_pairwise_judgments(anchors: list[dict]) -> list[dict]:
+    """Teacher's relative ordering of anchor papers as adjudicated evidence.
+
+    Each ordered anchor pair becomes a committee-grade judgment for the
+    rerank: the teacher read both papers and placed one above the other.
+    Ties (equal marks/levels) contribute no judgment.
+    """
+    judgments = []
+    for i, left in enumerate(anchors):
+        for right in anchors[i + 1 :]:
+            left_score = num(left.get("target_score"), None)
+            right_score = num(right.get("target_score"), None)
+            if left_score is None or right_score is None or left_score == right_score:
+                continue
+            higher, lower = (left, right) if left_score > right_score else (right, left)
+            judgments.append(
+                {
+                    "pair": [higher["student_id"], lower["student_id"]],
+                    "decision": "KEEP",
+                    "confidence": "high",
+                    "rationale": (
+                        "Teacher anchor adjudication: the teacher scored "
+                        f"{higher['student_id']} above {lower['student_id']} while calibrating anchors."
+                    ),
+                    "model_metadata": {
+                        "adjudication_source": "committee_edge",
+                        "committee_read": "teacher_anchor",
+                    },
+                }
+            )
+    return judgments
 
 
 def main() -> int:

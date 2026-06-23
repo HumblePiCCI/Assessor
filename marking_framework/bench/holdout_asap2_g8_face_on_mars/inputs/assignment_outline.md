@@ -1,0 +1,35 @@
+# Assignment
+
+You have read the article 'Unmasking the Face on Mars.' Imagine you are a scientist at NASA discussing the Face with someone who thinks it was created by aliens. Using information in the article, write an argumentative essay to convince someone that the Face is just a natural landform.Be sure to include: claims to support your argument that the Face is a natural landform; evidence from the article to support your claims; an introduction, a body, and a conclusion to your argumentative essay.
+
+## Source text
+
+Students read the following article during the assessment and were expected to use details from it. An essay that mostly retells or copies this article without developing its own position is source recall, not argument.
+
+# Unmasking the Face on Mars
+
+**Author:** NASA
+
+May 24, 2001—Twenty five years ago something funny happened around Mars. NASA’s Viking 1 spacecraft was circling the planet, snapping photos of possible landing sites for its sister ship Viking 2, when it spotted the shadowy likeness of a human face. An enormous head nearly two miles from end to end seemed to be staring back at the cameras from a region of the Red Planet called Cydonia.
+
+There must have been a degree of surprise among mission controllers back at the Jet Propulsion Lab when the face appeared on their monitors. But the sensation was short lived. Scientists figured it was just another Martian mesa, common enough around Cydonia, only this one had unusual shadows that made it look like an Egyptian Pharaoh.
+
+A few days later NASA unveiled the image for all to see. The caption noted a “huge rock formation . . . which resembles a human head . . . formed by shadows giving the illusion of eyes, nose, and mouth.” The authors reasoned it would be a good way to engage the public and attract attention to Mars.
+
+It certainly did!
+
+The “Face on Mars” has since become a pop icon. It has starred in a Hollywood film, appeared in books, magazines, radio talk shows—even haunted grocery store checkout lines for 25 years! Some people think the Face is bona fide evidence of life on Mars—evidence that NASA would rather hide, say conspiracy theorists. Meanwhile, defenders of the NASA budget wish there was an ancient civilization on Mars.
+
+Although few scientists believed the Face was an alien artifact, photographing Cydonia became a priority for NASA when Mars Global Surveyor (MGS) arrived at the Red Planet in Sept. 1997, eighteen long years after the Viking missions ended. “We felt this was important to taxpayers,” explained Jim Garvin, chief scientist for NASA’s Mars Exploration Program. “We photographed the Face as soon as we could get a good shot at it.”
+
+And so on April 5, 1998, when Mars Global Surveyor flew over Cydonia for the first time, Michael Malin and his Mars Orbiter Camera (MOC) team snapped a picture ten times sharper than the original Viking photos. Thousands of anxious web surfers were waiting when the image first appeared on a JPL web site, revealing . . . a natural landform. There was no alien monument after all.
+
+But not everyone was satisfied. The Face on Mars is located at 41 degrees north martian latitude where it was winter in April 1998—a cloudy time of year on the Red Planet. The camera on board MGS had to peer through wispy clouds to see the Face. Perhaps, said skeptics, alien markings were hidden by haze.
+
+Mission controllers prepared to look again. “It’s not easy to target Cydonia,” says Garvin. “In fact, it’s hard work.” Mars Global Surveyor is a mapping spacecraft that normally looks straight down and scans the planet like a fax machine in narrow 2.5 km-wide strips. “We just don’t pass over the Face very often,” he noted.
+
+Nevertheless, on April 8, 2001—a cloudless summer day in Cydonia—Mars Global Surveyor drew close enough for a second look. “We had to roll the spacecraft 25 degrees to center the Face in the field of view,” said Garvin. “Malin’s team captured an extraordinary photo using the camera’s absolute maximum resolution.” Each pixel in the 2001 image spans 1.56 meters, compared to 43 meters per pixel in the best 1976 Viking photo.
+
+“As a rule of thumb, you can discern things in a digital image 3 times bigger than the pixel size,” he added. “So, if there were objects in this picture like airplanes on the ground or Egyptian-style pyramids or even small shacks, you could see what they were!”
+
+What the picture actually shows is the Martian equivalent of a butte or mesa—landforms common around the American West. “It reminds me most of Middle Butte in the Snake River Plain of Idaho,” says Garvin. “That’s a lava dome that takes the form of an isolated mesa about the same height as the Face on Mars.”

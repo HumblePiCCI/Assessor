@@ -210,6 +210,12 @@
           "description": "Analysis of literary elements (theme, character, symbolism, author's craft)",
           "weight_override": null
         }
+      ],
+      "contract_guidance": [
+        "Score plot recall, evidence selection, explanation of evidence, and sustained interpretation as separate strengths. Retelling events accurately is the weakest of the four; explaining how evidence supports a claim about meaning is worth far more.",
+        "A response that is mostly a list of events or characters scores low on analysis even when every detail is correct. Content coverage never substitutes for meaning-making.",
+        "Reward sustained interpretation across paragraphs: a claim about theme or character that develops and deepens. Messy or rough prose with clear, sustained meaning outscores polished prose with thin insight.",
+        "Surface errors (spelling, punctuation, sentence boundaries) belong only in conventions-type criteria. Never deduct idea/analysis points for mechanical roughness when the interpretation is clear."
       ]
     },
     "argumentative": {
@@ -232,6 +238,12 @@
           "description": "Acknowledgment and refutation of opposing viewpoints",
           "weight_override": null
         }
+      ],
+      "contract_guidance": [
+        "Distinguish the writer's own position and reasoning from recall of any source material. Fluent retelling, summary, or close paraphrase of a source or prompt - however detailed and accurate - is NOT argument; an essay that mostly restates source content without developing its own position belongs in the lowest bands on ideas/argument criteria.",
+        "An argumentative response must take a discernible position. If no viable point of view is developed, score the ideas/argument criteria at the bottom of the scale even when the prose is fluent and the content is accurate.",
+        "Credit evidence only when the writer explains how it supports their position. Listing facts from a source without reasoning is source recall, not evidence use.",
+        "Reward rough-but-genuine argumentation: a clear position with the writer's own developing reasoning outscores polished prose that only repackages source content. Surface errors belong only in conventions-type criteria."
       ]
     },
     "informational_report": {

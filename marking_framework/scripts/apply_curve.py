@@ -90,6 +90,8 @@ def effective_rubric_grade(row: dict) -> float | None:
 def curve_position(index: int, count: int, profile: str, *, singleton: float = 1.0) -> float:
     if count <= 1:
         return float(singleton)
+    if profile in {"criterion", "criterion_referenced"}:
+        return 1.0 - (index / (count - 1))
     if profile == "linear":
         return 1.0 - (index / (count - 1))
     low_p = 0.5 / count
@@ -132,6 +134,12 @@ def calculate_curve_rows(
     level_lock = bool(curve.get("level_lock", True))
     rubric_weight = float(curve.get("rubric_weight", 0.65) or 0.65)
     rank_weight = float(curve.get("rank_weight", 0.35) or 0.35)
+    if profile in {"criterion", "criterion_referenced"}:
+        # Criterion-referenced grading is the default product posture. Ranking
+        # remains a reliability signal, but it does not force a distribution.
+        rubric_weight = float(curve.get("rubric_weight", 1.0) or 1.0)
+        rank_weight = float(curve.get("rank_weight", 0.0) or 0.0)
+    enforce_rank_monotonic = profile not in {"criterion", "criterion_referenced"}
     total_weight = rubric_weight + rank_weight
     if total_weight <= 0:
         rubric_weight = 1.0
@@ -151,6 +159,7 @@ def calculate_curve_rows(
             "level_lock": level_lock,
             "rubric_weight": rubric_weight,
             "rank_weight": rank_weight,
+            "rank_monotonic_enforced": enforce_rank_monotonic,
         }
 
     level_bands = get_level_bands(config)
@@ -179,6 +188,9 @@ def calculate_curve_rows(
         rubric_component = effective_rubric_grade(row)
         if rubric_component is None:
             rubric_component = band_component
+        if profile in {"criterion", "criterion_referenced"}:
+            rank_component = rubric_component
+            band_component = rubric_component
         if band is not None:
             band_min = float(band.get("min", 0.0) or 0.0)
             band_max = float(band.get("max", band_min) or band_min)
@@ -187,8 +199,9 @@ def calculate_curve_rows(
         if band is not None and level_lock:
             raw_grade = clamp(raw_grade, band_min, band_max)
         raw_grade = clamp(raw_grade, bottom, top)
-        raw_grade = min(raw_grade, last_grade)
-        last_grade = raw_grade
+        if enforce_rank_monotonic:
+            raw_grade = min(raw_grade, last_grade)
+            last_grade = raw_grade
         raw_grades.append(raw_grade)
         row["curve_top"] = top
         row["curve_bottom"] = bottom
@@ -199,9 +212,10 @@ def calculate_curve_rows(
         row["curve_grade_rubric"] = round(rubric_component, 2)
 
     rounded_grades = [round_grade(value, rounding) for value in raw_grades]
-    for idx in range(1, len(rounded_grades)):
-        if rounded_grades[idx] > rounded_grades[idx - 1]:
-            rounded_grades[idx] = rounded_grades[idx - 1]
+    if enforce_rank_monotonic:
+        for idx in range(1, len(rounded_grades)):
+            if rounded_grades[idx] > rounded_grades[idx - 1]:
+                rounded_grades[idx] = rounded_grades[idx - 1]
 
     for row, grade in zip(ordered, rounded_grades):
         row["final_grade"] = grade
@@ -215,6 +229,7 @@ def calculate_curve_rows(
         "level_lock": level_lock,
         "rubric_weight": rubric_weight,
         "rank_weight": rank_weight,
+        "rank_monotonic_enforced": enforce_rank_monotonic,
     }
 
 

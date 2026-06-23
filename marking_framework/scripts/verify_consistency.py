@@ -1178,6 +1178,39 @@ def judge_pair(
         parsed = parse_json(content)
         repair_reasons.extend(reason for reason in parsed_judgment_repair_reasons(parsed) if reason not in repair_reasons)
         response = repair_response
+    repair_rerun_attempted = False
+    repair_rerun_recovered = False
+    if repair_used:
+        # P0-3: a judgment must never survive in a repaired state without one
+        # clean rerun under stricter output constraints. A clean rerun
+        # replaces the tainted read entirely; a failed rerun leaves the
+        # judgment tainted (downweighted, never a hard constraint downstream).
+        repair_rerun_attempted = True
+        strict_prompt = (
+            prompt
+            + "\n\nSTRICT OUTPUT CONTRACT: Respond with ONLY the complete, valid JSON object."
+            + " No prose before or after. Every required field must be present and grounded in the essays above."
+        )
+        try:
+            rerun_response = responses_create(
+                model=model,
+                messages=[{"role": "user", "content": strict_prompt}],
+                temperature=0.0,
+                reasoning=reasoning,
+                routing_path=routing,
+                text_format=response_format or RESPONSE_FORMAT,
+                max_output_tokens=max_output_tokens,
+            )
+            rerun_content = extract_text(rerun_response)
+            rerun_parsed = parse_json(rerun_content)
+            if not parsed_judgment_repair_reasons(rerun_parsed):
+                parsed = rerun_parsed
+                response = rerun_response
+                repair_used = False
+                repair_reasons = []
+                repair_rerun_recovered = True
+        except Exception:  # noqa: BLE001 - rerun is best-effort (offline caches may miss)
+            pass
     parsed_decision = normalize_decision(parsed.get("decision"))
     winner_side = normalize_winner_side(parsed.get("winner_side"))
     decision = decision_from_winner_side(winner_side) or parsed_decision
@@ -1249,6 +1282,8 @@ def judge_pair(
             "routing_path": routing,
             "repair_used": repair_used,
             "repair_reasons": repair_reasons,
+            "repair_rerun_attempted": repair_rerun_attempted,
+            "repair_rerun_recovered": repair_rerun_recovered,
             "selfcheck_notes": selfcheck_notes,
             "reasoning": reasoning,
             "temperature": 0.0,
@@ -1569,6 +1604,275 @@ def judge_pair_with_orientation_audit(
     )
 
 
+def post_surge_coverage_pairs(
+    seed_rows: list[dict],
+    final_rows: list[dict],
+    judgments: list[dict],
+    *,
+    mover_displacement: int = 5,
+    mover_net_support: float = 10.0,
+    top_pack_depth: int = 5,
+) -> list[tuple[str, str, dict]]:
+    """P0-2: large movers must be directly compared against the current top
+    pack instead of standing on seed/level scaffolding.
+
+    Returns (mover_id, anchor_id, detail) for every missing comparison where
+    the mover surged into or near the top pack.
+    """
+    seed_by_id = {row["student_id"]: int(row["seed_rank"]) for row in seed_rows}
+    final_rank = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
+    support = {
+        row["student_id"]: float(row.get("rerank_support_weight", 0.0) or 0.0)
+        - float(row.get("rerank_opposition_weight", 0.0) or 0.0)
+        for row in final_rows
+    }
+    judged_pairs = set()
+    for judgment in judgments:
+        pair = judgment.get("pair") or []
+        if len(pair) == 2:
+            judged_pairs.add(tuple(sorted((str(pair[0]), str(pair[1])))))
+    top_depth = min(top_pack_depth, len(final_rows))
+    top_pack = [row["student_id"] for row in sorted(final_rows, key=lambda r: int(r["final_rank"]))[:top_depth]]
+    needed = []
+    for sid, fin in final_rank.items():
+        seed = seed_by_id.get(sid)
+        if seed is None:
+            continue
+        upward_move = seed - fin
+        is_mover = upward_move >= mover_displacement or support.get(sid, 0.0) >= mover_net_support
+        if not is_mover or fin > top_depth * 2:
+            continue
+        for anchor in top_pack:
+            if anchor == sid:
+                continue
+            token = tuple(sorted((sid, anchor)))
+            if token in judged_pairs:
+                continue
+            needed.append(
+                (
+                    sid,
+                    anchor,
+                    {
+                        "mover": sid,
+                        "anchor": anchor,
+                        "seed_rank": seed,
+                        "provisional_rank": fin,
+                        "upward_move": upward_move,
+                        "net_support": round(support.get(sid, 0.0), 4),
+                    },
+                )
+            )
+            judged_pairs.add(token)
+    return needed
+
+
+STRUCTURE_DECISION_BASES = {"completion", "organization", "structure", "organization_language"}
+STRUCTURE_CAUTION_MARKERS = ("formulaic", "scaffold", "incomplete", "cleaner")
+CLOSE_PAIR_COMMITTEE_LENS = (
+    "COMMITTEE DEPTH READ: You are the interpretive-depth adjudicator on a committee re-reading a "
+    "close pair. Decide which essay shows deeper meaning-making: sustained interpretation, the "
+    "writer's own reasoning, and explanation of how evidence supports their claim. Being more "
+    "essay-shaped, more complete-looking, tidier, or longer must NOT decide this comparison - a "
+    "rougher or scaffold-like response with deeper sustained thinking outranks a cleaner response "
+    "with thinner thinking. Mechanics count only where they block meaning."
+)
+
+
+def structure_bias_risk(judgment: dict) -> list[str]:
+    """Signatures of the measured judge failure mode: structure/completion
+    deciding a pair while interpretive depth did not favor the winner, or a
+    repair-tainted read surviving as the decider."""
+    reasons = []
+    basis = str(judgment.get("decision_basis", "") or "").strip().lower()
+    if basis in STRUCTURE_DECISION_BASES:
+        reasons.append(f"decision_basis:{basis}")
+    cautions = " ".join(str(c) for c in (judgment.get("cautions_applied") or [])).lower()
+    for marker in STRUCTURE_CAUTION_MARKERS:
+        if marker in cautions:
+            reasons.append(f"caution:{marker}")
+            break
+    checks = judgment.get("decision_checks") if isinstance(judgment.get("decision_checks"), dict) else {}
+    winner_side = str(judgment.get("winner_side", "") or "").strip().upper()
+    deeper = str(checks.get("deeper_interpretation", "") or "").strip().upper()
+    cleaner = str(checks.get("cleaner_or_more_formulaic", "") or "").strip().upper()
+    if winner_side and cleaner == winner_side and deeper != winner_side:
+        reasons.append("cleaner_won_without_deeper_interpretation")
+    metadata = judgment.get("model_metadata") if isinstance(judgment.get("model_metadata"), dict) else {}
+    if metadata.get("repair_used"):
+        reasons.append("tainted_judgment")
+    return reasons
+
+
+def close_pair_committee_triggers(
+    judgment: dict,
+    higher: dict,
+    lower: dict,
+    *,
+    top_pack_size: int = 10,
+    max_close_rubric_gap: float = 6.0,
+) -> list[str]:
+    """Route a judgment to the committee only when it is risky, decisive, and
+    CLOSE: the failure signature is present, the pair touches the top pack or
+    crosses a level band, and the essays are near each other on rubric signal.
+    Blowout pairs (a scaffold draft losing to a much stronger essay) are easy
+    calls and must not consume committee budget."""
+    risks = structure_bias_risk(judgment)
+    if not risks:
+        return []
+    best_rank = min(int(num(higher.get("seed_rank"), 999) or 999), int(num(lower.get("seed_rank"), 999) or 999))
+    in_top_pack = best_rank <= int(top_pack_size)
+    levels_differ = (normalize_level(higher.get("level") or higher.get("adjusted_level")) or "") != (
+        normalize_level(lower.get("level") or lower.get("adjusted_level")) or ""
+    )
+    if not (in_top_pack or levels_differ):
+        return []
+    higher_rubric = num(higher.get("rubric_after_penalty_percent"), -1.0)
+    lower_rubric = num(lower.get("rubric_after_penalty_percent"), -1.0)
+    if higher_rubric >= 0.0 and lower_rubric >= 0.0:
+        if abs(float(higher_rubric) - float(lower_rubric)) > float(max_close_rubric_gap):
+            checks = judgment.get("decision_checks") if isinstance(judgment.get("decision_checks"), dict) else {}
+            deeper = str(checks.get("deeper_interpretation", "") or "").strip().upper()
+            winner_side = str(judgment.get("winner_side", "") or "").strip().upper()
+            # Wide gap: only re-read when depth itself did not back the winner.
+            if deeper == winner_side:
+                return []
+    return risks
+
+
+def judge_pair_with_close_committee(
+    rubric: str,
+    outline: str,
+    higher: dict,
+    lower: dict,
+    higher_text: str,
+    lower_text: str,
+    *,
+    model: str,
+    routing: str,
+    reasoning: str,
+    max_output_tokens: int,
+    genre: str = "",
+    metadata: dict | None = None,
+    selection_reasons: list[str] | None = None,
+    selection_details: list[str] | None = None,
+    anchor_dir: str | Path | None = None,
+    orientation_audit: bool = True,
+    student_count: int = 0,
+    committee_enabled: bool = True,
+    committee_budget: dict | None = None,
+    committee_model: str = "",
+    committee_reasoning: str = "",
+) -> dict:
+    """Primary read plus, for risky decisive pairs, two committee depth reads
+    (one per orientation) with majority vote. Research: flip risk concentrates
+    in close pairs and perspective-diverse committees catch what redundancy
+    cannot; a committee verdict is adjudicated evidence."""
+    primary = judge_pair_with_orientation_audit(
+        rubric,
+        outline,
+        higher,
+        lower,
+        higher_text,
+        lower_text,
+        model=model,
+        routing=routing,
+        reasoning=reasoning,
+        max_output_tokens=max_output_tokens,
+        genre=genre,
+        metadata=metadata,
+        selection_reasons=selection_reasons,
+        selection_details=selection_details,
+        anchor_dir=anchor_dir,
+        orientation_audit=orientation_audit,
+        student_count=student_count,
+    )
+    if not committee_enabled:
+        return primary
+    triggers = close_pair_committee_triggers(primary, higher, lower)
+    if not triggers:
+        return primary
+    if committee_budget is not None and int(committee_budget.get("remaining", 0)) <= 0:
+        meta = dict(primary.get("model_metadata") or {})
+        meta["close_pair_committee"] = {"status": "budget_exhausted", "triggers": triggers}
+        primary["model_metadata"] = meta
+        return primary
+    if committee_budget is not None:
+        committee_budget["remaining"] = int(committee_budget.get("remaining", 0)) - 1
+
+    base_reasons = list(selection_reasons or [])
+    base_details = list(selection_details or [])
+    depth_model = str(committee_model or "").strip() or model
+    depth_reasoning = str(committee_reasoning or "").strip() or reasoning
+    votes = [primary]
+    try:
+        depth = judge_pair(
+            rubric,
+            outline,
+            higher,
+            lower,
+            higher_text,
+            lower_text,
+            model=depth_model,
+            routing=routing,
+            reasoning=depth_reasoning,
+            max_output_tokens=max_output_tokens,
+            genre=genre,
+            metadata=metadata,
+            selection_reasons=base_reasons + ["close_pair_committee_depth_read"],
+            selection_details=base_details + [CLOSE_PAIR_COMMITTEE_LENS],
+            anchor_dir=anchor_dir,
+        )
+        votes.append(depth)
+    except Exception:  # noqa: BLE001 - committee reads are best-effort
+        pass
+    try:
+        swapped = judge_pair(
+            rubric,
+            outline,
+            lower,
+            higher,
+            lower_text,
+            higher_text,
+            model=depth_model,
+            routing=routing,
+            reasoning=depth_reasoning,
+            max_output_tokens=max_output_tokens,
+            genre=genre,
+            metadata=metadata,
+            selection_reasons=base_reasons + ["close_pair_committee_depth_read_swapped"],
+            selection_details=base_details
+            + [CLOSE_PAIR_COMMITTEE_LENS, "Swapped read: Essay A/B positions are arbitrary."],
+            anchor_dir=anchor_dir,
+        )
+        votes.append(reorient_judgment_to_original(swapped, higher, lower))
+    except Exception:  # noqa: BLE001
+        pass
+    if len(votes) < 3:
+        meta = dict(primary.get("model_metadata") or {})
+        meta["close_pair_committee"] = {"status": "incomplete", "triggers": triggers, "votes": len(votes)}
+        primary["model_metadata"] = meta
+        return primary
+
+    tally = Counter(str(v.get("winner", "") or "") for v in votes)
+    winner, count = tally.most_common(1)[0]
+    majority = [v for v in votes if str(v.get("winner", "") or "") == winner]
+    clean_majority = [v for v in majority if not (v.get("model_metadata") or {}).get("repair_used")]
+    chosen = (clean_majority or majority)[0]
+    final = dict(chosen)
+    final["confidence"] = "high" if count >= 3 else "medium"
+    meta = dict(final.get("model_metadata") or {})
+    meta["adjudication_source"] = "escalated_adjudication"
+    meta["close_pair_committee"] = {
+        "status": "voted",
+        "triggers": triggers,
+        "majority": f"{count}/{len(votes)}",
+        "flipped": str(winner) != str(primary.get("winner", "") or ""),
+        "votes": [compact_judgment_for_orientation_audit(v) for v in votes],
+    }
+    final["model_metadata"] = meta
+    return final
+
+
 def rank_key(rows: list[dict]) -> str:
     if not rows:
         return ""
@@ -1762,8 +2066,13 @@ def collect_judgments(
     anchor_dir: str | Path | None = None,
     orientation_audit: bool = True,
     replicates: int = 1,
+    close_pair_committee: bool = True,
+    close_pair_committee_budget: int = 12,
+    close_pair_committee_model: str = "",
+    close_pair_committee_reasoning: str = "",
 ) -> list[dict]:
     judgments = []
+    committee_budget = {"remaining": max(0, int(close_pair_committee_budget))}
     genre = resolve_pairwise_genre(metadata)
     pair_specs = select_pair_specs(
         rows,
@@ -1790,7 +2099,7 @@ def collect_judgments(
             details = list(spec.get("selection_details", []))
             if replicates > 1:
                 details.append(f"Independent replicate {replicate_idx + 1} of {replicates}; re-read the essays from scratch.")
-            judgment = judge_pair_with_orientation_audit(
+            judgment = judge_pair_with_close_committee(
                 rubric,
                 outline,
                 higher,
@@ -1808,6 +2117,10 @@ def collect_judgments(
                 anchor_dir=anchor_dir,
                 orientation_audit=orientation_audit,
                 student_count=len(rows),
+                committee_enabled=close_pair_committee,
+                committee_budget=committee_budget,
+                committee_model=close_pair_committee_model,
+                committee_reasoning=close_pair_committee_reasoning,
             )
             judgments.append(judgment)
             completed += 1
@@ -1940,6 +2253,10 @@ def main() -> int:
     parser.add_argument("--disable-post-seam-expansion", action="store_true", help="Disable top-pack and large-mover pair expansion")
     parser.add_argument("--anchor-dir", default=str(DEFAULT_PAIRWISE_ANCHOR_DIR), help="Directory of genre-specific pairwise calibration anchor JSON files")
     parser.add_argument("--disable-orientation-audit", action="store_true", help="Disable swapped-read orientation auditing for high-risk literary-analysis pairs")
+    parser.add_argument("--disable-close-pair-committee", action="store_true", help="Disable committee depth reads for structure-biased decisive pairs")
+    parser.add_argument("--close-pair-committee-budget", type=int, default=12, help="Max pairs per cohort routed to committee depth reads")
+    parser.add_argument("--close-pair-committee-model", default="", help="Model for committee depth reads (set a stronger judge for diverse committees); empty = primary model")
+    parser.add_argument("--close-pair-committee-reasoning", default="", help="Reasoning effort for committee depth reads; empty = primary reasoning")
     parser.add_argument("--replicates", type=int, default=1, help="Independent judgments per selected pair")
     parser.add_argument("--max-output-tokens", type=int, default=900, help="Max model output tokens")
     parser.add_argument("--output", default="outputs/consistency_checks.json", help="Output JSON")
@@ -2002,6 +2319,10 @@ def main() -> int:
         anchor_dir=args.anchor_dir,
         orientation_audit=not args.disable_orientation_audit,
         replicates=max(1, int(args.replicates)),
+        close_pair_committee=not args.disable_close_pair_committee,
+        close_pair_committee_budget=max(0, int(args.close_pair_committee_budget)),
+        close_pair_committee_model=args.close_pair_committee_model,
+        close_pair_committee_reasoning=args.close_pair_committee_reasoning,
     )
     out_path = Path(args.output)
     expansion_report_path = Path(args.expansion_report)
@@ -2043,27 +2364,99 @@ def main() -> int:
     print(f"Pairwise judgments saved to {out_path}")
 
     if args.apply:
-        run_global_rerank(
-            scores_path=scores_path,
-            judgments_path=out_path,
-            config_path=Path(args.config),
-            local_prior_path=Path(args.local_prior),
-            final_order_path=Path(args.rerank_output),
-            matrix_output_path=Path(args.matrix_output),
-            score_output_path=Path(args.scores_output),
-            report_output_path=Path(args.report_output),
-            legacy_output_path=Path(args.legacy_output),
-            iterations=300,
-            learning_rate=0.18,
-            regularization=0.75,
-            low_confidence_max_displacement=1,
-            medium_confidence_max_displacement=3,
-            high_confidence_max_displacement=999999,
-            max_cross_level_gap=1,
-            max_cross_rubric_gap=2.0,
-            min_crossing_margin=1.5,
-            hard_evidence_margin=1.5,
-        )
+        def run_rerank_pass():
+            return run_global_rerank(
+                scores_path=scores_path,
+                judgments_path=out_path,
+                config_path=Path(args.config),
+                local_prior_path=Path(args.local_prior),
+                final_order_path=Path(args.rerank_output),
+                matrix_output_path=Path(args.matrix_output),
+                score_output_path=Path(args.scores_output),
+                report_output_path=Path(args.report_output),
+                legacy_output_path=Path(args.legacy_output),
+                iterations=300,
+                learning_rate=0.18,
+                regularization=0.75,
+                low_confidence_max_displacement=1,
+                medium_confidence_max_displacement=3,
+                high_confidence_max_displacement=999999,
+                max_cross_level_gap=1,
+                max_cross_rubric_gap=2.0,
+                min_crossing_margin=1.5,
+                hard_evidence_margin=1.5,
+            )
+
+        rerank_result = run_rerank_pass()
+
+        # P0-2: after the first solve, large movers get direct comparisons
+        # against the current top pack, then the rerank runs again on the
+        # expanded evidence. Offline (no runtime), the gaps are recorded
+        # instead of silently ignored.
+        coverage_needed = post_surge_coverage_pairs(seed_rows, rerank_result["final_rows"], judgments)
+        coverage_repairs = []
+        coverage_gaps = []
+        if coverage_needed:
+            rows_by_id = {row["student_id"]: row for row in seed_rows}
+            for mover_id, anchor_id, detail in coverage_needed:
+                left = rows_by_id.get(mover_id)
+                right = rows_by_id.get(anchor_id)
+                if not left or not right:
+                    continue
+                higher_row, lower_row = (left, right) if int(left["seed_rank"]) < int(right["seed_rank"]) else (right, left)
+                try:
+                    judgment = judge_pair_with_orientation_audit(
+                        rubric,
+                        outline,
+                        higher_row,
+                        lower_row,
+                        texts.get(higher_row["student_id"], ""),
+                        texts.get(lower_row["student_id"], ""),
+                        model=args.model,
+                        routing=args.routing,
+                        reasoning=args.reasoning,
+                        max_output_tokens=max(64, int(args.max_output_tokens)),
+                        genre=str(metadata.get("genre", "") or "") if isinstance(metadata, dict) else "",
+                        metadata=metadata,
+                        selection_reasons=["post_surge_top_pack_coverage"],
+                        selection_details=[
+                            f"Mover {detail['mover']} surged seed {detail['seed_rank']} -> provisional {detail['provisional_rank']}; direct top-pack comparison required."
+                        ],
+                        anchor_dir=args.anchor_dir,
+                        student_count=len(seed_rows),
+                    )
+                    judgments.append(judgment)
+                    coverage_repairs.append(detail)
+                except Exception as exc:  # noqa: BLE001 - offline runtimes record the gap
+                    coverage_gaps.append({**detail, "error": str(exc)[:200]})
+            if coverage_repairs:
+                write_judgment_payload(
+                    out_path,
+                    seed_rows,
+                    judgments,
+                    model=args.model,
+                    routing=args.routing,
+                    window=effective_window(max(1, int(args.window)), metadata),
+                    source_scores=str(scores_path),
+                    top_pack_size=top_pack_size,
+                    large_mover_window=large_mover_window,
+                    band_seam_report=str(band_seam_report_path) if expansion_enabled else "",
+                    cross_band_challenger_count=cross_band_challenger_count,
+                    cross_band_anchor_count=cross_band_anchor_count,
+                    uncertainty_challenger_count=uncertainty_challenger_count,
+                    uncertainty_anchor_count=uncertainty_anchor_count,
+                    orientation_audit=not args.disable_orientation_audit,
+                    replicates=max(1, int(args.replicates)),
+                )
+                run_rerank_pass()
+        report_path = Path(args.report_output)
+        try:
+            report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            report_payload["coverage_gap_repairs"] = coverage_repairs
+            report_payload["coverage_gaps"] = coverage_gaps
+            report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
         print(f"Global rerank saved to {args.rerank_output}")
 
     return 0

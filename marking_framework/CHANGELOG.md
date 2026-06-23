@@ -1,5 +1,180 @@
 # Changelog: Grading Infrastructure Improvements
 
+## 2026-06-22 - Criterion Evidence Cockpit + Local Teacher-Aid Hardening
+
+**Problem:** The product was still too rank/curve-forward. Numeric marks could
+look more precise than the evidence justified, teacher review depended on
+explicit saves in too many paths, and tracked benchmark run artifacts included
+private-looking `real_student_*` data that should not live in git.
+
+**Solution:**
+- Dashboard data now packages rubric-centered `rubric_claims`: criterion,
+  evidence excerpts, counter-evidence, uncertainty, and instructional tags.
+- Missing generated feedback no longer leaves blank feedback cards; dashboard
+  build emits baseline two-stars-and-a-wish drafts from available evidence.
+- Teacher review now includes an evidence cockpit, nearest-neighbor context,
+  override history, autosaved draft edits, local browser recovery clearing, and
+  data posture/PII-pattern counts.
+- `criterion_referenced` is the default curve profile; rank no longer forces a
+  bell distribution or monotonic cap in that mode.
+- Review finalization writes `outputs/review_analytics.json` with override and
+  drift summaries.
+- Candidate/release publish profiles can require the perturbation stability
+  harness report; missing or unstable stability evidence becomes a release
+  blocker.
+- Tracked `bench/runs/real_student_*` artifacts were removed. Local
+  `bench/runs/` remains ignored; committed benchmark packs must be licensed,
+  public or governed teacher-adjudicated cohorts with manifest review.
+
+**Impact:** The teacher sees marks as defensible rubric claims first, ranking as
+a reliability aid second, and local pilot data now has visible lifecycle and
+privacy posture.
+
+---
+
+## 2026-06-11 - Close-Pair Committee Reads (E5)
+
+**Problem:** Hard-pair eval showed single reads deciding close pairs on
+structure/completion grounds ("more essay-shaped") against interpretive
+depth, and one repair-tainted read surviving as a decider.
+
+**Solution:** `verify_consistency.py` routes risky decisive CLOSE pairs
+(structure-bias signature + top-pack/band-crossing + rubric gap <= 6 or
+depth-not-backing-winner) to a 3-vote committee: primary read plus two
+depth-lens reads (one per A/B orientation). Majority decides; clean votes
+outrank tainted ones; verdicts are adjudicated evidence with full per-vote
+traces; bounded by `--close-pair-committee-budget` (default 12; ~1.3x
+pairwise cost). `--close-pair-committee-model/-reasoning` enable a stronger
+diverse judge.
+
+**Measured (live Ghost, fresh judgments):** tau 0.629 -> 0.638, top-5 4/5,
+mean displacement improved; same-model committees uphold the model's sincere
+convictions (1 flip), a stronger judge flips more (3, incl. the human's #1/#2
+ordering) but net hard-pair accuracy is unchanged-to-slightly-lower. The
+remaining Ghost disagreements (Jack pairs) persist across model sizes,
+orientations, and lenses — a genuine judge-vs-this-teacher disagreement
+(plausibly the teacher-familiarity effect blind-marked holdouts exist to
+avoid), addressable per-cohort via the now-active anchor calibration, not by
+more orchestration. Defaults keep same-model committees for benchmark
+comparability.
+
+---
+
+## 2026-06-11 - Anchor Calibration: Rank-Evidence Redesign + Activation (R2)
+
+**Problem:** Simulating the teacher anchor loop against blind-marked gold on
+the holdout cohorts showed the score-interpolation patch HARMS the cohorts
+anchors exist for (non-anchor tau 0.60 -> 0.20 on grade 6): interpolation
+assumes machine scores are mis-scaled, but on novel scopes they are
+mis-ordered, so rewriting seeds amplifies the noise.
+
+**Solution (validated against gold on two holdout cohorts):**
+- `apply_anchor_calibration.py` now emits the teacher's relative anchor order
+  as `anchor_pairwise_judgments` (committee-grade adjudications) and disables
+  seed patching (`seed_patch_enabled: false`).
+- `global_rerank.py` injects those judgments when `ANCHOR_CALIBRATION_ACTIVE=1`
+  (highest precedence, protected edges); `aggregate_assessments.py` respects
+  rank-evidence mode and leaves seeds untouched. Anchor marks are reserved
+  for grade-curve pinning (the teacher-review pin & re-flow).
+- Measured effect (5 machine-selected anchors scored with gold): grade-6 tau
+  0.644 -> 0.689, grade-10 tau 0.527 -> 0.600, non-anchor agreement never
+  harmed. The old patch's hold-harmless reverts remain as backstop.
+- `scripts/simulate_anchor_calibration.py`: replayable gold-anchored
+  validation harness for any completed workspace.
+- **Activated:** `live_cohort.shadow_mode=false` in config — novel cohorts now
+  pause background auto-publish for teacher anchors (fast review unaffected).
+
+---
+
+## 2026-06-10 - Holdout Benchmark Cohorts (ASAP 2.0, grades 6-10)
+
+Added four blind-marked holdout datasets for release validation —
+`bench/holdout_asap2_g6_cowboy_waves`, `_g8_face_on_mars`,
+`_g9_electoral_college`, `_g10_driverless_cars` (44 essays total, holistic 1-6
+scores from trained state-assessment raters, full score-range coverage,
+CC BY 4.0). Sampled deterministically by `scripts/import_asap2_cohorts.py`
+from the ASAP 2.0 train split; never used for tuning. PERSUADE 2.0 and ELLIPSE
+were evaluated and excluded (CC BY-NC-SA licensing); Texas STAAR and NY
+Regents scoring guides identified as future grade-11/12 anchor sources.
+
+---
+
+## 2026-06-10 - Engine Consistency: Evidence-Adaptive Rerank + P0 Fixes
+
+**Problem:** On live novel scopes the deterministic rerank layer underperformed
+a plain fit of its own pairwise evidence (Ghost cohort: full pipeline tau 0.55
+vs human adjudication, pure pairwise fit 0.64). Single unopposed LLM reads
+became absolute constraint edges; seed-anchored protections (level locks,
+collapse rescue, displacement caps) re-imposed noisy pass-1 seeds; repaired
+judgments silently survived; large movers lacked top-pack comparisons.
+
+**Solution (measured on the live Ghost cohort, offline-reproducible):**
+- Seed trust is now earned: cohort-confidence signals (synthetic calibration,
+  novel scope, assessor SD) plus the judgments' own swap rate scale prior
+  regularization, displacement caps, and crossing margins
+  (`compute_seed_reliability`, report `seed_trust` block; `--seed-trust-mode
+  fixed` restores legacy behavior).
+- Hard precedence edges require corroboration (2+ clean reads, adjudicated
+  source, or redundant-agreement margins) and insert strongest-first;
+  uncorroborated single reads only inform the score fit.
+- On unvalidated scopes, seed-anchored edges that contradict the evidence-
+  fitted order are waived (auditable `*_waived_low_seed_trust` drop reasons).
+- P0-1: level-lock override hardened (named audit fields; completion/
+  off-prompt/scaffold guard, also applied to band-crossing hard edges).
+- P0-2: post-surge movers get direct top-pack comparisons and a second solve
+  (`coverage_gap_repairs` / `coverage_gaps` in the consistency report).
+- P0-3: repair-tainted judgments are detected, downweighted 0.25x, barred from
+  all hard constraints; one strict-contract rerun before accepting taint;
+  `pairwise_repair_tainted_rate` metric; publish gate blocks candidate/release
+  when tainted pairs touch the top ten.
+- P0-4: literary-analysis pass-1 scoring contract separates plot recall,
+  evidence, explanation, and sustained interpretation; penalizes event-lists;
+  protects rough-but-deep writing.
+- New: `scripts/evaluate_live_cohort.py` (human-gold eval by display name),
+  `scripts/stability_harness.py` (seeded Monte Carlo judge-noise harness).
+
+**Impact:** Ghost cohort tau vs human 0.5524 → 0.6476, top-5 overlap 2/5 →
+3/5, critical-pair accuracy 0.714 → 0.857, mean displacement 3.71 → 2.95.
+Top-5 stability under 8% simulated judge noise: 4.75/5. Benchmark-suite
+regression must be re-validated with a live API key before release (local
+LLM caches do not cover benchmark workspaces).
+
+---
+
+## 2026-06-10 - Server-Authoritative Pin & Re-flow Curve
+
+**Problem:** Teacher grade adjustments were client-side only — the server stored
+`assigned_marks` verbatim and never re-shaped the curve, the UI replaced the
+pipeline's band-aware bell with a plain linear spread, and moving one student's
+mark did not cascade to the rest of the cohort.
+
+**Solution:**
+- New deterministic core: `scripts/curve_reflow.py`. The machine curve
+  (unrounded `curve_grade_raw` when available) is the shape function; teacher
+  pins and curve bounds are anchors; every unpinned mark re-interpolates along
+  the machine shape between its nearest anchors. Precedence: monotonicity >
+  pins > bounds > shape. Rounding plateaus respace positionally so they stretch
+  rather than move as a block. Identity (no pins, no bounds) returns machine
+  marks verbatim.
+- Server authority: `POST /projects/curve/reflow` previews the cascade;
+  review saves with `pinned_marks` recompute `assigned_marks` server-side
+  (client marks are never trusted). Pin-implied rank changes require explicit
+  teacher confirmation (`accept_reorder`); finalize returns 409 otherwise.
+  Passback/CSV export consume the recomputed `assigned_marks` unchanged.
+- UI: the rail and workspace now display the pipeline's real curve. Setting a
+  mark pins that student (badge in rail + snapshot, unpin control); all other
+  marks re-flow live from the server; a curve strip shows machine vs adjusted
+  shape with pins; rank-change confirmations appear inline. Exceptions panel
+  is collapsed until findings exist; arrow keys move between essays.
+- Tests: `tests/test_curve_reflow.py` (algorithm), `tests/test_curve_reflow_server.py`
+  (endpoint, persistence, finalize gate), plus UI source contract assertions.
+
+**Impact:** Teacher keeps final authority with one-slider adjustments that
+cascade deterministically and repeatably; the whole bell stays in place and
+every mark is explainable via its anchors.
+
+---
+
 ## Version 2.0 - Fairness & Reliability Enhancements
 
 ### High-Priority Fixes Implemented

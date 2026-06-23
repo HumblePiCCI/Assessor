@@ -35,6 +35,8 @@ Notes:
 - Governed review-learning promotions stage benchmark assets under `bench/promoted/benchmark_gold/<proposal_id>/gold.jsonl`.
 - Governed review-learning promotions stage boundary challenge assets under `bench/promoted/boundary_challenges/<proposal_id>/boundary_challenges.jsonl`.
 - Promoted assets require a proposal manifest plus human adjudication metadata before they should be treated as official candidate data.
+- Do not commit raw owner/classroom/student run directories under `bench/runs/`. That path is ignored for local experiments and smoke evidence. Any cohort promoted into the repo must have a license/privacy review, a source manifest, and redacted teacher-adjudication metadata.
+- Benchmark packs should deliberately cover rough-but-strong, polished-but-thin, ELL/accommodation, off-task, incomplete, prompt-injection, and formulaic submissions so release gates measure the cases that routinely fool rank-only graders.
 
 Current public benchmark families in this repo include:
 
@@ -54,3 +56,17 @@ Current public benchmark families in this repo include:
 - `naep_1998_g12_persuasive_one_vote`
 - `uk_sta_2018_ks1_writing_portfolios`
 - `uk_sta_2018_ks2_writing_portfolios`
+
+Holdout families (release validation only — never use for prompt, calibration, or engine tuning):
+
+- `holdout_asap2_g6_cowboy_waves` (ASAP 2.0, grade 6, source-based argumentative, CC BY 4.0)
+- `holdout_asap2_g8_face_on_mars` (ASAP 2.0, grade 8)
+- `holdout_asap2_g9_electoral_college` (ASAP 2.0, grade 9)
+- `holdout_asap2_g10_driverless_cars` (ASAP 2.0, grade 10)
+
+Holdout policy: these cohorts were sampled deterministically from the ASAP 2.0 train split
+(`scripts/import_asap2_cohorts.py`; blind-scored 1-6 by trained state-assessment raters,
+github.com/scrosseye/ASAP_2.0, CC BY 4.0). They exist to provide virgin territory for release
+validation. Tuning iterations should exclude them (use `--dataset` filters); release gates should
+include them. Candidate NC-licensed corpora (PERSUADE 2.0, ELLIPSE — CC BY-NC-SA) were deliberately
+NOT committed; if licensing is cleared, fetch them at eval time instead of committing.

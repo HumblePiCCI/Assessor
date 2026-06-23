@@ -145,6 +145,18 @@ def test_pdf_extraction_rejects_raw_pdf_payload_and_uses_ghostscript(tmp_path, m
 
     monkeypatch.setattr(de.shutil, "which", fake_which)
     monkeypatch.setattr(de, "_run_command", fake_run_command)
+    # Force the CLI fallback path regardless of whether pypdf is installed in
+    # the environment; the fake PDF bytes are unreadable by pypdf anyway.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_pypdf(name, *args, **kwargs):
+        if name in {"pypdf", "PyPDF2"}:
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pypdf)
 
     pdf_text, pdf_meta = rc.extract_document_text(pdf)
 

@@ -796,7 +796,7 @@ def record_review_revision(
     stage: str,
 ) -> dict | None:
     affected = []
-    for key in ("students", "assigned_marks", "feedback_drafts"):
+    for key in ("students", "assigned_marks", "pinned_marks", "feedback_drafts"):
         for row in payload.get(key, []) or []:
             if isinstance(row, dict) and row.get("student_id"):
                 affected.append(str(row["student_id"]))

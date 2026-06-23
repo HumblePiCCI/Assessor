@@ -535,6 +535,55 @@ def test_publish_gate_helper_branches(tmp_path):
     assert committee_eval["escalated_path"] is True
 
 
+def test_publish_gate_stability_harness_can_block_release(tmp_path):
+    thresholds = {
+        "release_mode": "candidate",
+        "calibration_require_manifest": False,
+        "calibration_require_manifest_integrity": False,
+        "calibration_require_scope_match": False,
+        "calibration_require_production_profile": False,
+        "require_evidence_group_packets": False,
+        "require_stability_harness_report": True,
+        "stability_harness_min_runs": 20,
+        "stability_harness_max_mean_rank_sd": 0.35,
+        "stability_harness_max_rank_sd": 1.5,
+        "stability_harness_max_mean_abs_displacement": 0.6,
+        "stability_harness_min_top5_overlap": 4.6,
+    }
+    missing = {**_valid_publish_metrics(), "stability_harness_present": False}
+    assert "stability_harness_report_missing" in pg.evaluate(missing, thresholds)
+
+    report = tmp_path / "stability_report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "runs": 10,
+                "mean_rank_sd": 0.5,
+                "max_rank_sd": 2.0,
+                "mean_abs_displacement_vs_base": 0.9,
+                "mean_top5_overlap": 4.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    stability = pg.stability_harness_metrics(report)
+    metrics = {
+        **_valid_publish_metrics(),
+        "stability_harness_present": stability["present"],
+        "stability_harness_runs": stability["runs"],
+        "stability_harness_mean_rank_sd": stability["mean_rank_sd"],
+        "stability_harness_max_rank_sd": stability["max_rank_sd"],
+        "stability_harness_mean_abs_displacement_vs_base": stability["mean_abs_displacement_vs_base"],
+        "stability_harness_mean_top5_overlap": stability["mean_top5_overlap"],
+    }
+    failures = pg.evaluate(metrics, thresholds)
+    assert "stability_harness_runs_below_threshold" in failures
+    assert "stability_harness_mean_rank_sd_above_threshold" in failures
+    assert "stability_harness_max_rank_sd_above_threshold" in failures
+    assert "stability_harness_displacement_above_threshold" in failures
+    assert "stability_harness_top5_overlap_below_threshold" in failures
+
+
 def test_publish_gate_evidence_packet_metrics_and_failures(tmp_path):
     release_thresholds = {
         "release_mode": "candidate",

@@ -26,6 +26,8 @@ from scripts.aggregate_review_learning import (
     tombstone_path,
     write_json as write_aggregate_json,
 )
+from scripts.aggregate_helpers import get_level_bands
+from scripts.curve_reflow import normalize_pins, reflow_marks
 from scripts.engagement_gate import evaluate_engagement
 from scripts.local_teacher_prior import build_local_teacher_prior, write_json as write_prior_json
 
@@ -36,6 +38,14 @@ EVIDENCE_QUALITY = {"strong", "thin", "misaligned", "unclear"}
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class ReviewReorderPending(ValueError):
+    """Raised when a finalize is attempted with unconfirmed pin-implied rank moves."""
+
+    def __init__(self, implied_moves: list[dict]):
+        super().__init__("Pinned marks imply rank changes that need teacher confirmation")
+        self.implied_moves = implied_moves
 
 
 def load_json(path: Path):
@@ -302,6 +312,42 @@ def normalize_assigned_marks(raw_marks: list[dict], students: dict[str, dict]) -
     return normalized
 
 
+def dashboard_students_in_rank_order(dashboard: dict) -> list[dict]:
+    students = dashboard.get("students", []) if isinstance(dashboard, dict) else []
+    rows = [item for item in students if isinstance(item, dict) and item.get("student_id")]
+    rows.sort(key=lambda item: (_safe_rank(item.get("rank"), 999999), str(item.get("student_id", "")).lower()))
+    return rows
+
+
+def workspace_level_bands(root: Path) -> list[dict]:
+    config = load_json(root / "config" / "marking_config.json")
+    if not config:
+        config = load_json(Path(__file__).resolve().parent.parent / "config" / "marking_config.json")
+    return get_level_bands(config if isinstance(config, dict) else {})
+
+
+def compute_curve_reflow(
+    root: Path,
+    dashboard: dict,
+    raw_pins: list[dict],
+    *,
+    curve_top: float | None = None,
+    curve_bottom: float | None = None,
+    accept_reorder: bool = False,
+) -> dict:
+    """Server-authoritative pin & re-flow over the workspace machine curve."""
+    students = dashboard_students_in_rank_order(dashboard)
+    pins = normalize_pins(raw_pins, students)
+    return reflow_marks(
+        students,
+        pins,
+        curve_top=curve_top,
+        curve_bottom=curve_bottom,
+        accept_reorder=accept_reorder,
+        level_bands=workspace_level_bands(root),
+    )
+
+
 def normalize_feedback_drafts(raw_feedback: list[dict], students: dict[str, dict]) -> list[dict]:
     normalized = []
     seen = set()
@@ -566,6 +612,8 @@ def migrate_review_record(payload: dict) -> dict:
     record.setdefault("curve_top", None)
     record.setdefault("curve_bottom", None)
     record.setdefault("assigned_marks", [])
+    record.setdefault("pinned_marks", [])
+    record.setdefault("curve_reflow", {})
     record.setdefault("feedback_drafts", [])
     record.setdefault("version_context", {})
     record.setdefault("review_session", {})
@@ -651,6 +699,66 @@ def build_local_learning_profile(scope_id: str, records: list[dict]) -> dict:
             "prefer_seed_order_on_low_confidence": low_conf_reversal_rate >= 0.5,
             "teacher_rank_direction": "promote" if mean_rank_delta < 0 else "demote" if mean_rank_delta > 0 else "neutral",
         },
+    }
+
+
+def build_review_analytics(scope_id: str, records: list[dict]) -> dict:
+    """Teacher-facing drift and override analytics for a review scope."""
+    final_records = [record for record in records if str(record.get("review_state", "") or "") == "final"]
+    student_history: dict[str, list[dict]] = {}
+    level_override_count = 0
+    touched_student_count = 0
+    absolute_rank_deltas = []
+    evidence_quality_counts: dict[str, int] = {}
+    criterion_reason_counts: dict[str, int] = {}
+    for record in final_records:
+        saved_at = str(record.get("saved_at", "") or "")
+        for student in record.get("students", []) or []:
+            sid = str(student.get("student_id", "") or "")
+            if not sid:
+                continue
+            touched_student_count += 1
+            machine_level = str(student.get("machine_level", "") or "")
+            final_level = str(student.get("level_override") or machine_level)
+            if student.get("level_override") and final_level != machine_level:
+                level_override_count += 1
+            rank_delta = student.get("rank_delta")
+            if isinstance(rank_delta, int):
+                absolute_rank_deltas.append(abs(rank_delta))
+            quality = str(student.get("evidence_quality", "") or "").strip() or "unspecified"
+            evidence_quality_counts[quality] = evidence_quality_counts.get(quality, 0) + 1
+            for tag in student.get("reason_tags", []) or []:
+                key = str(tag or "").strip()
+                if key:
+                    criterion_reason_counts[key] = criterion_reason_counts.get(key, 0) + 1
+            student_history.setdefault(sid, []).append(
+                {
+                    "saved_at": saved_at,
+                    "review_id": record.get("review_id", ""),
+                    "machine_level": machine_level,
+                    "final_level": final_level,
+                    "machine_rank": student.get("machine_rank"),
+                    "desired_rank": student.get("desired_rank"),
+                    "rank_delta": rank_delta,
+                    "evidence_quality": student.get("evidence_quality", ""),
+                    "teacher_note_excerpt": str(student.get("evidence_comment", "") or "")[:180],
+                }
+            )
+    mean_abs_rank_delta = round(sum(absolute_rank_deltas) / len(absolute_rank_deltas), 6) if absolute_rank_deltas else 0.0
+    return {
+        "scope_id": scope_id,
+        "final_review_count": len(final_records),
+        "touched_student_count": touched_student_count,
+        "level_override_count": level_override_count,
+        "level_override_rate": round(level_override_count / touched_student_count, 6) if touched_student_count else 0.0,
+        "mean_abs_rank_delta": mean_abs_rank_delta,
+        "evidence_quality_counts": dict(sorted(evidence_quality_counts.items())),
+        "criterion_reason_counts": dict(sorted(criterion_reason_counts.items())),
+        "student_history": {
+            sid: sorted(rows, key=lambda item: item.get("saved_at", ""), reverse=True)[:5]
+            for sid, rows in sorted(student_history.items())
+        },
+        "teacher_message": "Use this to spot drift between machine recommendations and finalized teacher judgment.",
     }
 
 
@@ -1054,6 +1162,7 @@ def materialize_workspace_review_state(root: Path, bundle: dict) -> None:
     write_json(outputs / "review_replay_exports.json", bundle.get("replay_exports", {}))
     write_json(outputs / "aggregate_learning_summary.json", bundle.get("aggregate_learning", {}))
     write_json(outputs / "engagement_signal.json", bundle.get("engagement_signal", {}))
+    write_json(outputs / "review_analytics.json", bundle.get("review_analytics", {}))
 
 
 def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None) -> dict:
@@ -1075,6 +1184,8 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
             "curve_top": None,
             "curve_bottom": None,
             "assigned_marks": [],
+            "pinned_marks": [],
+            "curve_reflow": {},
             "feedback_drafts": [],
             "version_context": {},
             "review_session": {},
@@ -1085,6 +1196,7 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
     records = history_records(base_dir, scope_id)
     if latest.get("review_id") and not any(record.get("review_id") == latest.get("review_id") for record in records):
         records.append(latest)
+    review_analytics = build_review_analytics(scope_id, records)
     profile = load_json(local_profile_path(base_dir, scope_id))
     if not profile:
         profile = build_local_learning_profile(scope_id, records)
@@ -1116,6 +1228,7 @@ def load_review_bundle(base_dir: Path, root: Path, current_project: dict | None)
         "replay_exports": replay,
         "aggregate_learning": aggregate_summary,
         "engagement_signal": engagement_signal,
+        "review_analytics": review_analytics,
         "anonymized_aggregate": {
             "mode": aggregate_summary.get("mode", "local_only"),
             "collection_allowed": bool(aggregate_summary.get("collection_allowed", False)),
@@ -1159,6 +1272,8 @@ def ensure_draft_review(base_dir: Path, root: Path, current_project: dict | None
         "curve_top": existing.get("curve_top"),
         "curve_bottom": existing.get("curve_bottom"),
         "assigned_marks": existing.get("assigned_marks", []),
+        "pinned_marks": existing.get("pinned_marks", []),
+        "curve_reflow": existing.get("curve_reflow", {}),
         "feedback_drafts": existing.get("feedback_drafts", []),
         "version_context": review_context(root, dashboard),
         "review_session": session,
@@ -1179,8 +1294,37 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
     review_notes = str((payload or {}).get("review_notes", "") or "").strip()
     curve_top = normalize_curve_bound((payload or {}).get("curve_top"))
     curve_bottom = normalize_curve_bound((payload or {}).get("curve_bottom"))
-    assigned_marks = normalize_assigned_marks((payload or {}).get("assigned_marks", []), students)
     feedback_drafts = normalize_feedback_drafts((payload or {}).get("feedback_drafts", []), students)
+    pinned_marks: list[dict] = []
+    curve_reflow_state: dict = {}
+    if "pinned_marks" in (payload or {}):
+        # Server-authoritative pin & re-flow: the stored assigned marks are
+        # recomputed here from the machine curve plus the teacher's pins and
+        # bounds, never trusted from the client.
+        pins = normalize_pins((payload or {}).get("pinned_marks", []), list(students.values()))
+        reflow = compute_curve_reflow(
+            root,
+            dashboard,
+            [{"student_id": sid, "mark": mark} for sid, mark in pins.items()],
+            curve_top=curve_top,
+            curve_bottom=curve_bottom,
+            accept_reorder=bool((payload or {}).get("accept_reorder", False)),
+        )
+        pinned_marks = [{"student_id": sid, "mark": mark} for sid, mark in sorted(pins.items())]
+        assigned_marks = [
+            {"student_id": item["student_id"], "mark": float(item["mark"])} for item in reflow.get("marks", [])
+        ]
+        curve_reflow_state = {
+            "order_changed": bool(reflow.get("order_changed")),
+            "reorder_required": bool(reflow.get("reorder_required")),
+            "implied_moves": reflow.get("implied_moves", []),
+            "clamped_pins": reflow.get("clamped_pins", []),
+            "anchors": reflow.get("anchors", []),
+            "curve_top": reflow.get("curve_top"),
+            "curve_bottom": reflow.get("curve_bottom"),
+        }
+    else:
+        assigned_marks = normalize_assigned_marks((payload or {}).get("assigned_marks", []), students)
     record = {
         "review_state": "draft" if stage != "final" else "final",
         "review_id": uuid.uuid4().hex if stage == "final" else "",
@@ -1193,6 +1337,8 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
         "curve_top": curve_top,
         "curve_bottom": curve_bottom,
         "assigned_marks": assigned_marks,
+        "pinned_marks": pinned_marks,
+        "curve_reflow": curve_reflow_state,
         "feedback_drafts": feedback_drafts,
         "version_context": review_context(root, dashboard),
         "review_session": session,
@@ -1202,6 +1348,9 @@ def save_review_bundle(base_dir: Path, root: Path, current_project: dict | None,
         bundle = load_review_bundle(base_dir, root, current_project)
         materialize_workspace_review_state(root, bundle)
         return bundle
+
+    if curve_reflow_state.get("reorder_required"):
+        raise ReviewReorderPending(curve_reflow_state.get("implied_moves", []))
 
     delta = derive_review_delta(record)
     record["review_delta_summary"] = delta.get("summary", {})

@@ -176,6 +176,18 @@ def _interpolate_anchor_patch(score: float, patch: dict) -> tuple[float, float]:
 def apply_anchor_patch(rows: list[dict], patch: dict, level_bands: list[dict]) -> tuple[list[dict], dict]:
     if not isinstance(patch, dict) or not patch or not patch.get("active", False):
         return rows, {"active": False, "applied": 0, "fit_method": "", "movement_count": 0}
+    if not patch.get("seed_patch_enabled", True):
+        # Rank-evidence mode: anchor influence flows through the rerank as
+        # adjudicated pairwise judgments instead of rewriting seed scores
+        # (score interpolation measurably harmed mis-ordered cohorts).
+        return rows, {
+            "active": True,
+            "applied": 0,
+            "fit_method": str(patch.get("fit_method", "") or ""),
+            "movement_count": 0,
+            "seed_patch_enabled": False,
+            "apply_mode": str(patch.get("apply_mode", "") or ""),
+        }
     updated = []
     movement_count = 0
     for row in rows:

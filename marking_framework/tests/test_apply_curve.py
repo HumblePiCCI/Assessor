@@ -110,3 +110,26 @@ def test_calculate_curve_rows_handles_missing_levels():
     assert meta["rank_key"] == "consensus_rank"
     assert graded_rows[0]["final_grade"] == 90
     assert graded_rows[1]["final_grade"] == 80
+
+
+def test_criterion_referenced_profile_does_not_force_rank_distribution():
+    config = {
+        "curve": {
+            "top": 100,
+            "bottom": 0,
+            "rounding": "nearest",
+            "profile": "criterion_referenced",
+        }
+    }
+    rows = [
+        {"student_id": "s1", "consensus_rank": "1", "rubric_after_penalty_percent": "78"},
+        {"student_id": "s2", "consensus_rank": "2", "rubric_after_penalty_percent": "86"},
+    ]
+
+    graded_rows, meta = ac.calculate_curve_rows(rows, config)
+
+    assert meta["profile"] == "criterion_referenced"
+    assert meta["rubric_weight"] == 1.0
+    assert meta["rank_weight"] == 0.0
+    assert meta["rank_monotonic_enforced"] is False
+    assert [row["final_grade"] for row in graded_rows] == [78, 86]

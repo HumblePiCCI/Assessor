@@ -44,6 +44,8 @@ Important current checks:
 - calibration manifest/freshness/scope/routing/rubric checks
 - benchmark report coverage, accuracy, stability, cost, and latency thresholds
 - reproducibility report requirements for candidate/release profiles
+- rerank perturbation stability via `outputs/stability_report.json` from
+  `scripts/stability_harness.py`
 - routed hard-pair evaluation via `outputs/pairwise_adjudicator_eval.json`
 - pairwise eval must use the escalated/committee-edge path when required
 - final-order diagnostics should show zero unsuppressed `committee_edge`
@@ -55,6 +57,12 @@ and release profiles can fail when required evidence-neighborhood or
 evidence-group-packet artifacts are missing, disabled, empty, or exceed packet
 caps.
 
+Candidate and release profiles also treat stability harness evidence as a
+launch signal. A local smoke can run without that report, but candidate/release
+profiles can fail on a missing report, too few perturbation runs, rank standard
+deviation above threshold, excessive displacement from the base order, or weak
+top-five overlap.
+
 Minimum Workflow Coverage
 - Pass 1: independent scoring from all assessors
 - Pass 2: comparative ranking from all assessors
@@ -64,7 +72,8 @@ Minimum Workflow Coverage
 - evidence map and committee-edge resolver before rerank
 - global rerank using `outputs/consistency_checks.committee_edge.json`
 - routed hard-pair eval before publish/SOTA gates
-- curve review before finalizing grades
+- criterion-referenced mark review before finalizing grades; bell/curve
+  anchoring is an explicit teacher choice, not the default truth
 - quote validation for all feedback
 
 Fast teacher review is not a release-gate bypass. The queue may publish

@@ -185,8 +185,21 @@ def normalize_genre(value: str | None) -> str | None:
     return CANONICAL_GENRE_MAP.get(normalized, normalized)
 
 
+def strip_embedded_source_text(text: str) -> str:
+    """Drop any embedded source-article section before genre inference.
+
+    Source-based assignments may include the article under a '## Source text'
+    heading; its incidental vocabulary (e.g. "safety", "materials") must not
+    drive genre classification of the task itself."""
+    lowered = str(text or "").lower()
+    marker = lowered.find("## source text")
+    if marker == -1:
+        return str(text or "")
+    return str(text or "")[:marker]
+
+
 def infer_genre_from_text(rubric_text: str, outline_text: str) -> str | None:
-    merged = f"{rubric_text}\n{outline_text}".lower()
+    merged = f"{strip_embedded_source_text(rubric_text)}\n{strip_embedded_source_text(outline_text)}".lower()
     rules = [
         ("instructions", ("instructions", "procedure", "follow these steps", "materials", "safety")),
         ("summary_report", ("summary", "main idea", "key details", "in your own words")),

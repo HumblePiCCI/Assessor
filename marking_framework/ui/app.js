@@ -1,4 +1,4 @@
-let data = null, currentIndex = 0, grades = [], overrides = {}, adjustments = {}, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, projectInputsStatus = null, googleAuth = null, googleCourses = [], googleCoursework = [];
+let data = null, currentIndex = 0, pins = {}, serverMarks = {}, lastReflow = null, curveTouched = false, acceptReorder = false, reflowTimer = null, reflowSeq = 0, feedbackDrafts = {}, reviewBundle = null, reviewStudents = {}, reviewPairs = {}, reviewSessionId = '', scrollTicking = false, compareDirection = 1, previewStudents = [], running = false, shuffleTimer = null, pipelineTimer = null, backgroundValidationTimer = null, pipelineStep = 0, projects = [], currentProject = null, sliderStudentId = null, focusLock = false, activeJobId = '', rubricReview = null, anchorReview = null, classroomState = null, classroomPreflight = null, projectInputsStatus = null, googleAuth = null, googleCourses = [], googleCoursework = [], reviewAutosaveTimer = null, reviewAutosaveSeq = 0, applyingReviewBundle = false, dataPosture = null;
 let API_BASE = null;
 const apiUrl = path => API_BASE ? `${API_BASE}${path}` : path;
 async function detectApiBase() {
@@ -12,6 +12,15 @@ async function detectApiBase() {
 }
 function num(value, fallback = 0) { const n = parseFloat(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
 function computeGrades(top, bottom, count) { if (count <= 0) return []; if (count === 1) return [Math.round(top)]; const result = []; for (let i = 0; i < count; i += 1) { const grade = top - (top - bottom) * (i / (count - 1)); result.push(Math.round(grade)); } return result; }
 function baseName(name) { return name.replace(/\.[^.]+$/, ''); }
 function labelFor(s) { return (s && (s.display_name || s.student_id)) ? (s.display_name || s.student_id) : ''; }
@@ -26,6 +35,33 @@ function pairReview(studentId, otherStudentId) {
   if (!reviewPairs[key]) reviewPairs[key] = { student_id: studentId, other_student_id: otherStudentId, preferred_student_id: '', confidence: 'teacher', rationale: '' };
   return reviewPairs[key];
 }
+function reviewDraftStorageKey() {
+  const projectId = currentProject?.id || reviewBundle?.project?.id || data?.review_context?.pipeline_manifest?.manifest_hash || 'workspace';
+  return `assessor.reviewDraft.${projectId}`;
+}
+function persistBrowserReviewDraft() {
+  try {
+    localStorage.setItem(reviewDraftStorageKey(), JSON.stringify({ saved_at: new Date().toISOString(), payload: reviewPayload() }));
+  } catch (_) {}
+}
+function clearBrowserReviewDraft() {
+  try {
+    Object.keys(localStorage).filter(key => key.startsWith('assessor.reviewDraft.')).forEach(key => localStorage.removeItem(key));
+  } catch (_) {}
+  const node = document.getElementById('browserDraftStatus');
+  if (node) node.textContent = 'Browser draft cleared on this device.';
+}
+function scheduleReviewAutosave(reason = 'teacher edit') {
+  if (applyingReviewBundle || !data?.students?.length) return;
+  persistBrowserReviewDraft();
+  const status = document.getElementById('reviewDraftStatus');
+  if (status) status.textContent = `Autosaving ${reason}...`;
+  if (reviewAutosaveTimer) clearTimeout(reviewAutosaveTimer);
+  reviewAutosaveTimer = setTimeout(() => {
+    reviewAutosaveTimer = null;
+    saveReviewBundle('draft', { autosave: true });
+  }, 850);
+}
 function hasActiveReviewState(record) {
   return !!(
     record &&
@@ -34,6 +70,7 @@ function hasActiveReviewState(record) {
       (record.pairwise && record.pairwise.length) ||
       record.review_notes ||
       (record.assigned_marks && record.assigned_marks.length) ||
+      (record.pinned_marks && record.pinned_marks.length) ||
       (record.feedback_drafts && record.feedback_drafts.length) ||
       record.curve_top !== null && record.curve_top !== undefined ||
       record.curve_bottom !== null && record.curve_bottom !== undefined
@@ -338,8 +375,11 @@ function resetUploadLabels() {
 function clearLocalState() {
   data = { students: [] };
   previewStudents = [];
-  overrides = {};
-  adjustments = {};
+  pins = {};
+  serverMarks = {};
+  lastReflow = null;
+  curveTouched = false;
+  acceptReorder = false;
   feedbackDrafts = {};
   reviewBundle = null;
   reviewStudents = {};
@@ -348,7 +388,6 @@ function clearLocalState() {
   activeJobId = '';
   rubricReview = null;
   anchorReview = null;
-  grades = [];
   currentIndex = 0; sliderStudentId = null; focusLock = false;
   resetUploadLabels();
   setPipelineStatus('Idle', 'idle');
@@ -904,6 +943,7 @@ function ensureReviewPanel() {
       </div>
     </div>
     <div id="reviewUncertainty" class="review-flags"></div>
+    <div id="evidenceCockpit" class="evidence-cockpit"></div>
     <div class="controls">
       <div class="control">
         <label for="reviewLevelOverride">Final level</label>
@@ -953,6 +993,15 @@ function ensureReviewPanel() {
     <details class="secondary-details compact-details">
       <summary>Learning profile</summary>
       <div id="learningSummary" class="auth-status">Local profile unavailable.</div>
+      <div id="overrideHistory" class="override-history"></div>
+    </details>
+    <details class="secondary-details compact-details">
+      <summary>Data posture</summary>
+      <div id="dataPostureSummary" class="auth-status">Local data posture unavailable.</div>
+      <div id="browserDraftStatus" class="auth-status">Browser draft recovery is local to this device.</div>
+      <div class="project-actions">
+        <button id="clearBrowserDraft" class="ghost">Clear browser draft</button>
+      </div>
     </details>
   `;
   const anchor = actionsInsertionAnchor(actions);
@@ -1297,59 +1346,66 @@ async function submitRubricReview(action) {
   }
 }
 function applyReviewBundle(bundle) {
-  ensureRubricPanel();
-  ensureAnchorPanel();
-  ensureReviewPanel();
-  reviewBundle = bundle || null;
-  reviewStudents = {};
-  reviewPairs = {};
-  const draft = (bundle && bundle.draft_review) ? bundle.draft_review : {};
-  const latest = (bundle && bundle.latest_review) ? bundle.latest_review : {};
-  const active = hasActiveReviewState(draft) ? draft : latest;
-  reviewSessionId = ((draft && draft.review_session && draft.review_session.session_id) || (latest && latest.review_session && latest.review_session.session_id) || '');
-  (active.students || []).forEach(item => {
-    reviewStudents[item.student_id] = {
-      student_id: item.student_id,
-      level_override: item.level_override || '',
-      desired_rank: item.desired_rank ?? '',
-      evidence_quality: item.evidence_quality || '',
-      evidence_comment: item.evidence_comment || '',
-    };
-  });
-  (active.pairwise || []).forEach(item => {
-    const left = (item.pair && item.pair[0]) || item.student_id || item.higher_student_id;
-    const right = (item.pair && item.pair[1]) || item.other_student_id || item.lower_student_id;
-    if (!left || !right) return;
-    reviewPairs[pairKey(left, right)] = {
-      student_id: left,
-      other_student_id: right,
-      preferred_student_id: item.preferred_student_id || item.higher_student_id || '',
-      confidence: item.confidence || 'teacher',
-      rationale: item.rationale || item.evidence_comment || '',
-    };
-  });
-  const reviewStatus = document.getElementById('reviewStatus');
-  if (reviewStatus) {
-    const savedAt = latest.saved_at || '';
-    reviewStatus.textContent = savedAt ? `Latest finalized review saved ${savedAt}` : 'No finalized review yet.';
+  applyingReviewBundle = true;
+  try {
+    ensureRubricPanel();
+    ensureAnchorPanel();
+    ensureReviewPanel();
+    reviewBundle = bundle || null;
+    reviewStudents = {};
+    reviewPairs = {};
+    const draft = (bundle && bundle.draft_review) ? bundle.draft_review : {};
+    const latest = (bundle && bundle.latest_review) ? bundle.latest_review : {};
+    const active = hasActiveReviewState(draft) ? draft : latest;
+    reviewSessionId = ((draft && draft.review_session && draft.review_session.session_id) || (latest && latest.review_session && latest.review_session.session_id) || '');
+    (active.students || []).forEach(item => {
+      reviewStudents[item.student_id] = {
+        student_id: item.student_id,
+        level_override: item.level_override || '',
+        desired_rank: item.desired_rank ?? '',
+        evidence_quality: item.evidence_quality || '',
+        evidence_comment: item.evidence_comment || '',
+      };
+    });
+    (active.pairwise || []).forEach(item => {
+      const left = (item.pair && item.pair[0]) || item.student_id || item.higher_student_id;
+      const right = (item.pair && item.pair[1]) || item.other_student_id || item.lower_student_id;
+      if (!left || !right) return;
+      reviewPairs[pairKey(left, right)] = {
+        student_id: left,
+        other_student_id: right,
+        preferred_student_id: item.preferred_student_id || item.higher_student_id || '',
+        confidence: item.confidence || 'teacher',
+        rationale: item.rationale || item.evidence_comment || '',
+      };
+    });
+    const reviewStatus = document.getElementById('reviewStatus');
+    if (reviewStatus) {
+      const savedAt = latest.saved_at || '';
+      reviewStatus.textContent = savedAt ? `Latest finalized review saved ${savedAt}` : 'No finalized review yet.';
+    }
+    const reviewDraftStatus = document.getElementById('reviewDraftStatus');
+    if (reviewDraftStatus) {
+      const savedAt = draft.saved_at || '';
+      reviewDraftStatus.textContent = savedAt ? `Draft session saved ${savedAt}` : 'No draft review yet.';
+    }
+    const learningSummary = document.getElementById('learningSummary');
+    if (learningSummary) {
+      const profile = (bundle && bundle.local_learning_profile) ? bundle.local_learning_profile : {};
+      const prior = (bundle && bundle.local_teacher_prior) ? bundle.local_teacher_prior : {};
+      const aggregate = (bundle && bundle.aggregate_learning) ? bundle.aggregate_learning : {};
+      const anon = (bundle && bundle.anonymized_aggregate) ? bundle.anonymized_aggregate : {};
+      const activeLabel = prior.active ? 'active' : (prior.activation && prior.activation.reason) ? prior.activation.reason.replaceAll('_', ' ') : 'inactive';
+      const aggregateMode = aggregate.mode || anon.mode || 'local_only';
+      learningSummary.textContent = `Local learning: ${profile.review_count || 0} finalized reviews · ${profile.student_review_count || 0} essay decisions · ${profile.pairwise_adjudication_count || 0} pairwise calls · prior ${activeLabel} · aggregate mode ${aggregateMode}.`;
+    }
+    applyPersistedReviewState(active);
+    renderOverrideHistory(data?.students?.[currentIndex] || null);
+    renderDataPosture();
+    if (!data?.students?.length) renderReviewPanel(null);
+  } finally {
+    applyingReviewBundle = false;
   }
-  const reviewDraftStatus = document.getElementById('reviewDraftStatus');
-  if (reviewDraftStatus) {
-    const savedAt = draft.saved_at || '';
-    reviewDraftStatus.textContent = savedAt ? `Draft session saved ${savedAt}` : 'No draft review yet.';
-  }
-  const learningSummary = document.getElementById('learningSummary');
-  if (learningSummary) {
-    const profile = (bundle && bundle.local_learning_profile) ? bundle.local_learning_profile : {};
-    const prior = (bundle && bundle.local_teacher_prior) ? bundle.local_teacher_prior : {};
-    const aggregate = (bundle && bundle.aggregate_learning) ? bundle.aggregate_learning : {};
-    const anon = (bundle && bundle.anonymized_aggregate) ? bundle.anonymized_aggregate : {};
-    const activeLabel = prior.active ? 'active' : (prior.activation && prior.activation.reason) ? prior.activation.reason.replaceAll('_', ' ') : 'inactive';
-    const aggregateMode = aggregate.mode || anon.mode || 'local_only';
-    learningSummary.textContent = `Local learning: ${profile.review_count || 0} finalized reviews · ${profile.student_review_count || 0} essay decisions · ${profile.pairwise_adjudication_count || 0} pairwise calls · prior ${activeLabel} · aggregate mode ${aggregateMode}.`;
-  }
-  applyPersistedReviewState(active);
-  if (!data?.students?.length) renderReviewPanel(null);
 }
 async function loadReviewBundle() {
   ensureRubricPanel();
@@ -1377,6 +1433,8 @@ function renderReviewPanel(student) {
     quality.value = '';
     comment.value = '';
     pairStatus.textContent = 'Open split view to compare two essays.';
+    renderEvidenceCockpit(null);
+    renderOverrideHistory(null);
     return;
   }
   const entry = studentReview(student.student_id);
@@ -1407,6 +1465,90 @@ function renderReviewPanel(student) {
     const preferred = pair && pair.preferred_student_id ? labelFor(data.students.find(item => item.student_id === pair.preferred_student_id) || { student_id: pair.preferred_student_id }) : 'none saved';
     pairStatus.textContent = `Comparing with ${labelFor(compare)}. Saved preference: ${preferred}.`;
   }
+  renderEvidenceCockpit(student);
+  renderOverrideHistory(student);
+}
+function renderEvidenceCockpit(student) {
+  const node = document.getElementById('evidenceCockpit');
+  if (!node) return;
+  node.innerHTML = '';
+  if (!student) {
+    node.innerHTML = '<div class="auth-status">Run assessment to see criterion evidence.</div>';
+    return;
+  }
+  const claims = student.rubric_claims || [];
+  const moved = Number(student.rerank_displacement || 0);
+  const neighborIds = [currentIndex - 1, currentIndex + 1].filter(i => i >= 0 && i < (data?.students?.length || 0)).map(i => data.students[i]);
+  const header = document.createElement('div');
+  header.className = 'evidence-head';
+  header.innerHTML = `
+    <div>
+      <div class="label">Rubric evidence cockpit</div>
+      <div class="auth-status">${claims.length} criterion claim${claims.length === 1 ? '' : 's'} · ${student.criterion_summary?.teacher_read_required ? 'teacher read required' : 'evidence ready'}</div>
+    </div>
+    <div class="evidence-move">${moved ? `Moved ${moved > 0 ? '+' : ''}${moved} ranks` : 'No rank movement'}</div>
+  `;
+  node.appendChild(header);
+  claims.slice(0, 5).forEach(claim => {
+    const card = document.createElement('div');
+    card.className = 'criterion-card';
+    const evidence = (claim.evidence || []).slice(0, 2).map(item => `<blockquote>${escapeHtml(item.quote || '')}</blockquote>`).join('');
+    const counter = (claim.counter_evidence || []).slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+    const uncertainty = claim.uncertainty || {};
+    const state = String(uncertainty.label || 'medium');
+    card.innerHTML = `
+      <div class="criterion-row">
+        <div>
+          <div class="criterion-title">${escapeHtml(claim.criterion_name || claim.criterion_id)}</div>
+          <div class="criterion-claim">${escapeHtml(claim.claim || '')}</div>
+        </div>
+        <span class="confidence-pill" data-state="${escapeHtml(state)}">${escapeHtml(state.replaceAll('_', ' '))}</span>
+      </div>
+      <div class="criterion-evidence">${evidence || '<div class="auth-status">No cited sentence found for this criterion.</div>'}</div>
+      ${counter ? `<ul class="criterion-counter">${counter}</ul>` : ''}
+    `;
+    node.appendChild(card);
+  });
+  const footer = document.createElement('div');
+  footer.className = 'nearest-neighbors';
+  footer.textContent = neighborIds.length ? `Nearest in order: ${neighborIds.map(labelFor).join(' · ')}` : 'No adjacent essays in this cohort.';
+  node.appendChild(footer);
+}
+function renderOverrideHistory(student) {
+  const node = document.getElementById('overrideHistory');
+  if (!node) return;
+  node.innerHTML = '';
+  if (!student) return;
+  const analytics = reviewBundle?.review_analytics || data?.review_analytics || {};
+  const rows = (analytics.student_history || {})[student.student_id] || [];
+  if (!rows.length) {
+    node.innerHTML = '<div class="auth-status">No prior teacher override history for this essay.</div>';
+    return;
+  }
+  rows.slice(0, 4).forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-row';
+    row.textContent = `${item.saved_at || 'saved'} · level ${item.machine_level || '—'} → ${item.final_level || '—'} · rank delta ${item.rank_delta ?? '—'}`;
+    node.appendChild(row);
+  });
+}
+function renderDataPosture() {
+  const node = document.getElementById('dataPostureSummary');
+  if (!node) return;
+  const posture = dataPosture || data?.data_posture || {};
+  const counts = posture.file_counts || {};
+  const pii = posture.pii_scan || {};
+  node.textContent = posture.teacher_message
+    ? `${posture.teacher_message} Files: submissions ${counts.inputs_submissions || 0}, processing ${counts.processing_text || 0}, outputs ${counts.outputs || 0}. PII scan: email ${pii.email_count || 0}, phone ${pii.phone_like_count || 0}, long IDs ${pii.long_id_count || 0}.`
+    : 'Local data posture unavailable.';
+}
+async function refreshDataPosture() {
+  try {
+    const res = await fetch(apiUrl('/projects/data-posture'));
+    if (!res.ok) return;
+    dataPosture = await res.json();
+    renderDataPosture();
+  } catch (_) {}
 }
 function reviewPayload() {
   const students = Object.values(reviewStudents).filter(item => item.level_override || item.evidence_quality || item.evidence_comment || item.desired_rank !== '');
@@ -1421,21 +1563,23 @@ function reviewPayload() {
     students,
     pairwise,
     session_id: reviewSessionId,
-    curve_top: num(document.getElementById('topGrade')?.value, null),
-    curve_bottom: num(document.getElementById('bottomGrade')?.value, null),
-    assigned_marks: currentCohortMarks(),
+    curve_top: curveTouched ? num(document.getElementById('topGrade')?.value, null) : null,
+    curve_bottom: curveTouched ? num(document.getElementById('bottomGrade')?.value, null) : null,
+    pinned_marks: Object.entries(pins).map(([student_id, mark]) => ({ student_id, mark })),
+    accept_reorder: acceptReorder,
     feedback_drafts: feedback,
   };
 }
-async function saveReviewBundle(action = 'draft') {
+async function saveReviewBundle(action = 'draft', opts = {}) {
   const reviewStatus = document.getElementById('reviewStatus');
   const reviewDraftStatus = document.getElementById('reviewDraftStatus');
   if (action === 'finalize') {
     if (reviewStatus) reviewStatus.textContent = 'Finalizing review...';
-  } else if (reviewDraftStatus) {
+  } else if (reviewDraftStatus && !opts.silent) {
     reviewDraftStatus.textContent = 'Saving draft review...';
   }
   try {
+    const seq = ++reviewAutosaveSeq;
     const res = await fetch(apiUrl('/projects/review'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1443,6 +1587,9 @@ async function saveReviewBundle(action = 'draft') {
     });
     if (!res.ok) throw new Error('save failed');
     applyReviewBundle(await res.json());
+    if (action !== 'finalize' && reviewDraftStatus && opts.autosave && seq === reviewAutosaveSeq) {
+      reviewDraftStatus.textContent = `Draft autosaved ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    }
     await refreshClassroomState();
     if (data?.students?.length) renderReviewPanel(data.students[currentIndex]);
   } catch (_) {
@@ -1454,41 +1601,164 @@ async function saveReviewBundle(action = 'draft') {
   }
 }
 function getCompareIndex() { if (!data || data.students.length < 2) return null; const target = currentIndex + compareDirection; if (target >= 0 && target < data.students.length) return target; const fallback = currentIndex - compareDirection; if (fallback >= 0 && fallback < data.students.length) return fallback; return null; }
-function getAdjustment(studentId) { if (!adjustments[studentId]) adjustments[studentId] = { overall: 0, rubric: 0, conventions: 0, comparative: 0 }; return adjustments[studentId]; }
-function currentCohortMarks() {
-  if (!data?.students?.length) return [];
-  return data.students.map((student, idx) => ({ student_id: student.student_id, mark: num(getGradeForIndex(idx), 0) }));
+function machineMarkForStudent(student, idx, count) {
+  const machine = num(student?.final_grade, null);
+  if (machine !== null) return Math.round(machine);
+  // Old runs without final grades: fall back to a linear spread so the rail
+  // still shows numbers. The server uses the same fallback when re-flowing.
+  return computeGrades(92, 58, count)[idx] ?? 0;
 }
-function scaledMarksForRange(existingMarks, top, bottom) {
-  const count = existingMarks.length;
-  if (!count) return [];
-  if (count === 1) return [Math.round(top)];
-  const oldTop = num(existingMarks[0]?.mark, top);
-  const oldBottom = num(existingMarks[count - 1]?.mark, bottom);
-  if (oldTop <= oldBottom) return computeGrades(top, bottom, count);
-  return existingMarks.map(({ mark }, idx) => {
-    if (idx === 0) return Math.round(top);
-    if (idx === count - 1) return Math.round(bottom);
-    const ratio = clamp((num(mark, oldBottom) - oldBottom) / (oldTop - oldBottom), 0, 1);
-    return Math.round(bottom + ((top - bottom) * ratio));
-  });
+function getGradeForIndex(idx) {
+  if (!data || !data.students || !data.students.length) return '';
+  const s = data.students[idx];
+  const serverMark = serverMarks[s.student_id];
+  if (serverMark !== undefined) return clamp(Math.round(serverMark), 0, 100);
+  return clamp(machineMarkForStudent(s, idx, data.students.length), 0, 100);
 }
-function applyCurveBounds(top, bottom, preserveShape = true) {
-  if (!data?.students?.length) return;
-  const currentMarks = preserveShape ? currentCohortMarks() : [];
-  grades = computeGrades(top, bottom, data.students.length);
-  delete data.curve_top;
-  delete data.curve_bottom;
-  data.curve_top = top;
-  data.curve_bottom = bottom;
-  if (preserveShape) {
-    const scaledMarks = scaledMarksForRange(currentMarks, top, bottom);
-    overrides = {};
-    data.students.forEach((student, idx) => {
-      const adj = getAdjustment(student.student_id);
-      adj.overall = (scaledMarks[idx] ?? grades[idx] ?? 0) - (grades[idx] ?? 0);
-    });
+function isPinned(studentId) { return pins[studentId] !== undefined; }
+function curveBoundsPayload() {
+  if (!curveTouched) return { curve_top: null, curve_bottom: null };
+  return {
+    curve_top: clamp(num(document.getElementById('topGrade')?.value, 92), 0, 100),
+    curve_bottom: clamp(num(document.getElementById('bottomGrade')?.value, 58), 0, 100),
+  };
+}
+function applyReflowResult(body, keepFocusOn) {
+  lastReflow = body || null;
+  serverMarks = {};
+  (body?.marks || []).forEach(item => { serverMarks[item.student_id] = item.mark; });
+  if (body?.marks?.length && data?.students?.length) {
+    const byId = new Map(data.students.map(s => [s.student_id, s]));
+    const ordered = body.marks.map(item => byId.get(item.student_id)).filter(Boolean);
+    if (ordered.length === data.students.length) {
+      data.students = ordered;
+      data.students.forEach((s, i) => { s.rank = i + 1; });
+    }
   }
+  if (keepFocusOn) {
+    const idx = data?.students?.findIndex(s => s.student_id === keepFocusOn);
+    if (idx >= 0) currentIndex = idx;
+  }
+  focusLock = true;
+  renderRail(true);
+  scrollToIndex(currentIndex, false);
+  focusLock = false;
+  renderReorderNotice();
+}
+async function requestReflow(keepFocusOn) {
+  if (!data?.students?.length) return;
+  const seq = ++reflowSeq;
+  const payload = {
+    pinned_marks: Object.entries(pins).map(([student_id, mark]) => ({ student_id, mark })),
+    accept_reorder: acceptReorder,
+    ...curveBoundsPayload(),
+  };
+  try {
+    const res = await fetch(apiUrl('/projects/curve/reflow'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok || seq !== reflowSeq) return;
+    applyReflowResult(await res.json(), keepFocusOn);
+  } catch (_) {
+    // Local server unreachable; keep the optimistic mark until the next sync.
+  }
+}
+function scheduleReflow(keepFocusOn) {
+  if (reflowTimer) clearTimeout(reflowTimer);
+  reflowTimer = setTimeout(() => { reflowTimer = null; requestReflow(keepFocusOn); }, 120);
+}
+function setPin(studentId, mark) {
+  if (!studentId) return;
+  pins[studentId] = clamp(Math.round(num(mark, 0)), 0, 100);
+  serverMarks[studentId] = pins[studentId];
+  updateRail();
+  scheduleReflow(studentId);
+  scheduleReviewAutosave('mark change');
+}
+function clearPin(studentId) {
+  if (!isPinned(studentId)) return;
+  delete pins[studentId];
+  if (!Object.keys(pins).length && !curveTouched) {
+    serverMarks = {};
+    lastReflow = null;
+    acceptReorder = false;
+    data?.students?.sort((a, b) => num(a.final_rank, a.rank) - num(b.final_rank, b.rank));
+    data?.students?.forEach((s, i) => { s.rank = i + 1; });
+    focusLock = true;
+    renderRail(true);
+    scrollToIndex(Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0), false);
+    focusLock = false;
+    renderDetail();
+    renderReorderNotice();
+    return;
+  }
+  scheduleReflow(studentId);
+  scheduleReviewAutosave('mark change');
+  renderDetail();
+}
+function renderReorderNotice() {
+  const notice = document.getElementById('reorderNotice');
+  if (!notice) return;
+  const moves = lastReflow?.implied_moves || [];
+  const clamped = lastReflow?.clamped_pins || [];
+  if (lastReflow?.reorder_required && moves.length) {
+    const pinnedMoves = moves.filter(m => isPinned(m.student_id));
+    const shown = pinnedMoves.length ? pinnedMoves : moves;
+    const names = shown.slice(0, 3).map(m => {
+      const s = data?.students?.find(x => x.student_id === m.student_id);
+      return `${labelFor(s) || m.student_id} → rank ${m.to_rank}`;
+    }).join(', ');
+    notice.innerHTML = `
+      <div class="reorder-text">This mark changes rank order: ${names}${shown.length > 3 ? '…' : ''}</div>
+      <div class="reorder-actions">
+        <button id="confirmReorder" class="primary">Apply rank change</button>
+        <button id="keepOrder" class="ghost">Keep order</button>
+      </div>`;
+    notice.classList.remove('is-hidden');
+    document.getElementById('confirmReorder')?.addEventListener('click', () => {
+      acceptReorder = true;
+      requestReflow(data?.students?.[currentIndex]?.student_id);
+    });
+    document.getElementById('keepOrder')?.addEventListener('click', () => {
+      (lastReflow?.clamped_pins || []).forEach(item => {
+        if (pins[item.student_id] !== undefined) pins[item.student_id] = Math.round(num(item.applied, pins[item.student_id]));
+      });
+      requestReflow(data?.students?.[currentIndex]?.student_id);
+    });
+  } else if (clamped.length && !lastReflow?.order_changed) {
+    notice.innerHTML = `<div class="reorder-text">Some pins were limited to keep the order intact.</div>`;
+    notice.classList.remove('is-hidden');
+  } else {
+    notice.innerHTML = '';
+    notice.classList.add('is-hidden');
+  }
+  renderCurveStrip();
+}
+function renderCurveStrip() {
+  const strip = document.getElementById('curveStrip');
+  if (!strip) return;
+  const students = data?.students || [];
+  if (students.length < 2) { strip.innerHTML = ''; return; }
+  const count = students.length;
+  const w = 260, h = 56, pad = 4;
+  const marks = students.map((s, i) => num(getGradeForIndex(i), 0));
+  const machine = students.map((s, i) => machineMarkForStudent(s, i, count));
+  const lo = Math.min(...marks, ...machine) - 2;
+  const hi = Math.max(...marks, ...machine) + 2;
+  const x = i => pad + (i * (w - 2 * pad) / (count - 1));
+  const y = m => h - pad - ((m - lo) * (h - 2 * pad) / Math.max(1, hi - lo));
+  const path = vals => vals.map((m, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(m).toFixed(1)}`).join(' ');
+  const dots = students.map((s, i) => isPinned(s.student_id)
+    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(marks[i]).toFixed(1)}" r="3.4" class="strip-pin"${i === currentIndex ? ' data-current="true"' : ''}/>`
+    : (i === currentIndex ? `<circle cx="${x(i).toFixed(1)}" cy="${y(marks[i]).toFixed(1)}" r="2.6" class="strip-current"/>` : '')
+  ).join('');
+  strip.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Grade curve">
+    <path d="${path(machine)}" class="strip-machine"/>
+    <path d="${path(marks)}" class="strip-marks"/>
+    ${dots}
+  </svg>`;
 }
 function applyPersistedReviewState(record) {
   feedbackDrafts = {};
@@ -1501,31 +1771,36 @@ function applyPersistedReviewState(record) {
     };
   });
   if (!data?.students?.length) return;
-  adjustments = {};
-  overrides = {};
+  pins = {};
+  (record?.pinned_marks || []).forEach(item => {
+    if (item?.student_id) pins[item.student_id] = clamp(Math.round(num(item.mark, 0)), 0, 100);
+  });
+  curveTouched = record?.curve_top !== null && record?.curve_top !== undefined
+    || record?.curve_bottom !== null && record?.curve_bottom !== undefined;
+  acceptReorder = !!record?.curve_reflow?.order_changed;
   const topInput = document.getElementById('topGrade');
   const bottomInput = document.getElementById('bottomGrade');
-  const top = num(record?.curve_top, num(topInput?.value, 92));
-  const bottom = num(record?.curve_bottom, num(bottomInput?.value, 58));
-  if (topInput) topInput.value = Math.round(top);
-  if (bottomInput) bottomInput.value = Math.round(bottom);
-  applyCurveBounds(top, bottom, false);
-  const markMap = new Map((record?.assigned_marks || []).map(item => [item.student_id, num(item.mark, null)]));
-  data.students.forEach((student, idx) => {
-    if (!markMap.has(student.student_id)) return;
-    const target = clamp(num(markMap.get(student.student_id), grades[idx] ?? 0), 0, 100);
-    const adj = getAdjustment(student.student_id);
-    adj.overall = target - (grades[idx] ?? 0);
-  });
-}
-function getGradeForIndex(idx) {
-  if (!data || !data.students || !data.students.length) return '';
-  const s = data.students[idx];
-  const override = overrides[s.student_id];
-  if (override !== undefined) return override;
-  const base = grades[idx] ?? 0;
-  const adj = getAdjustment(s.student_id);
-  return clamp(Math.round(base + adj.overall), 0, 100);
+  if (curveTouched) {
+    if (topInput && record?.curve_top !== null && record?.curve_top !== undefined) topInput.value = Math.round(num(record.curve_top, 92));
+    if (bottomInput && record?.curve_bottom !== null && record?.curve_bottom !== undefined) bottomInput.value = Math.round(num(record.curve_bottom, 58));
+  }
+  serverMarks = {};
+  const persisted = record?.assigned_marks || [];
+  // Legacy records persisted client-computed marks for every student; only
+  // trust them when the record carries pins (server-computed re-flow).
+  if ((record?.pinned_marks || []).length || curveTouched) {
+    persisted.forEach(item => {
+      if (item?.student_id) serverMarks[item.student_id] = Math.round(num(item.mark, 0));
+    });
+    if (persisted.length && data.students.length === persisted.length) {
+      const byId = new Map(data.students.map(s => [s.student_id, s]));
+      const ordered = persisted.map(item => byId.get(item.student_id)).filter(Boolean);
+      if (ordered.length === data.students.length) {
+        data.students = ordered;
+        data.students.forEach((s, i) => { s.rank = i + 1; });
+      }
+    }
+  }
 }
 function renderRail(animate = false) {
   const rail = document.getElementById('railScroll');
@@ -1544,7 +1819,7 @@ function renderRail(animate = false) {
       item.addEventListener('click', () => scrollToIndex(parseInt(item.dataset.index, 10), true));
 		}
 		item.dataset.index = idx;
-		item.innerHTML = `<div class="rail-rank">Rank ${s.rank || idx + 1}</div><div class="rail-name">${labelFor(s)}</div><div class="rail-grade"></div>`;
+		item.innerHTML = `<div class="rail-rank">Rank ${s.rank || idx + 1}<span class="rail-pin" title="Pinned by teacher">●</span></div><div class="rail-name">${labelFor(s)}</div><div class="rail-grade"></div>`;
 		rail.appendChild(item);
 	});
   rail.querySelectorAll('.rail-item').forEach(el => { if (!keep.has(el.dataset.id)) el.remove(); });
@@ -1558,7 +1833,7 @@ function renderRail(animate = false) {
   updateRail();
   updateWorkflowState();
 }
-function updateRail() { const rail = document.getElementById('railScroll'); rail.querySelectorAll('.rail-item').forEach((item, idx) => { item.classList.toggle('active', idx === currentIndex); const gradeEl = item.querySelector('.rail-grade'); if (gradeEl) gradeEl.textContent = getGradeForIndex(idx) || '—'; }); }
+function updateRail() { const rail = document.getElementById('railScroll'); rail.querySelectorAll('.rail-item').forEach((item, idx) => { item.classList.toggle('active', idx === currentIndex); item.classList.toggle('pinned', isPinned(item.dataset.id)); const gradeEl = item.querySelector('.rail-grade'); if (gradeEl) gradeEl.textContent = getGradeForIndex(idx) || '—'; }); }
 function scrollToIndex(idx, smooth) { if (!getStudents().length) return; const rail = document.getElementById('railScroll'); const item = rail.querySelector(`[data-index="${idx}"]`); if (!item) return; item.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', inline: 'center', block: 'nearest' }); currentIndex = idx; updateRail(); renderDetail(); }
 function findCenteredIndex() {
   const rail = document.getElementById('railScroll');
@@ -1620,8 +1895,14 @@ function renderSummary(student) {
     },
     {
       label: 'Assigned mark',
-      value: getGradeForIndex(currentIndex) || '—',
-      support: `Rank ${student.rank} of ${data.students.length}`,
+      value: `${getGradeForIndex(currentIndex) || '—'}${isPinned(student.student_id) ? ' ●' : ''}`,
+      support: (() => {
+        const machine = machineMarkForStudent(student, currentIndex, data.students.length);
+        const current = num(getGradeForIndex(currentIndex), machine);
+        const base = `Rank ${student.rank} of ${data.students.length}`;
+        if (isPinned(student.student_id)) return `${base} · pinned (machine ${machine})`;
+        return current !== machine ? `${base} · re-flowed from ${machine}` : `${base} · machine mark`;
+      })(),
     },
     {
       label: 'Rubric signal',
@@ -1671,6 +1952,10 @@ function renderExceptions() {
     stateNode.textContent = 'Validation complete.';
   }
   stateNode.dataset.state = status === 'pending' ? 'warn' : (exceptions.length ? 'warn' : 'ready');
+  const summaryNode = document.getElementById('exceptionsSummary');
+  if (summaryNode) summaryNode.textContent = exceptions.length ? `Exceptions (${exceptions.length})` : 'Exceptions';
+  const sectionNode = document.getElementById('exceptionsSection');
+  if (sectionNode && exceptions.length && !sectionNode.dataset.userToggled) sectionNode.open = true;
   listNode.innerHTML = '';
   if (!exceptions.length) {
     const empty = document.createElement('div');
@@ -1709,9 +1994,9 @@ function renderFeedback(student) {
   star1.innerText = draft.star1;
   star2.innerText = draft.star2;
   wish.innerText = draft.wish;
-  star1.oninput = () => { draft.star1 = star1.innerText.trim(); };
-  star2.oninput = () => { draft.star2 = star2.innerText.trim(); };
-  wish.oninput = () => { draft.wish = wish.innerText.trim(); };
+  star1.oninput = () => { draft.star1 = star1.innerText.trim(); scheduleReviewAutosave('feedback'); };
+  star2.oninput = () => { draft.star2 = star2.innerText.trim(); scheduleReviewAutosave('feedback'); };
+  wish.oninput = () => { draft.wish = wish.innerText.trim(); scheduleReviewAutosave('feedback'); };
 }
 function renderDetail() {
   const summaryPanel = document.getElementById('summary');
@@ -1791,15 +2076,39 @@ function renderDetail() {
   renderFeedback(student);
   renderReviewPanel(student);
   const gradeInput = document.getElementById('gradeOverride');
-  const override = overrides[student.student_id];
-  gradeInput.value = override !== undefined ? override : getGradeForIndex(currentIndex);
+  gradeInput.value = getGradeForIndex(currentIndex);
   const gradeSlider = document.getElementById('overallGradeSlider'); if (gradeSlider) gradeSlider.value = gradeInput.value || getGradeForIndex(currentIndex);
+  renderPinState(student);
+  renderCurveStrip();
   updateControlVisibility();
   updateWorkflowState();
 }
-function applyAdjustment(studentId, key, delta) { const sidx = Math.max(0, data?.students?.findIndex(s => s.student_id === studentId) ?? 0); currentIndex = sidx; const adj = getAdjustment(studentId); adj[key] += delta; const target = key === 'overall' && data?.students?.length ? getGradeForIndex(sidx) : null; if (data?.students?.length && window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(s => s.student_id === studentId)); if (target === null) break; const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
-function applyOverallTarget(target) { if (!data?.students?.length) return; const sid = sliderStudentId || data.students[currentIndex]?.student_id; const s = data.students.find(x => x.student_id === sid) || data.students[currentIndex]; currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const curr = getGradeForIndex(currentIndex); const delta = target - curr; const adj = getAdjustment(s.student_id); const spread = (window.gradeAdjust && window.gradeAdjust.distribute) ? window.gradeAdjust.distribute(s, delta) : { rubric: delta * 0.7, conventions: delta * 0.15, comparative: delta * 0.15 }; adj.rubric += num(spread.rubric, 0); adj.conventions += num(spread.conventions, 0); adj.comparative += num(spread.comparative, 0); adj.overall += delta; delete overrides[s.student_id]; const inp = document.getElementById('gradeOverride'); if (inp) inp.value = Math.round(target); const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = Math.round(target); if (window.gradeAdjust?.resort) { focusLock = true; for (let i = 0; i < 3; i += 1) { window.gradeAdjust.resort(data.students, getGradeForIndex); currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === s.student_id)); const diff = target - getGradeForIndex(currentIndex); if (Math.abs(diff) < 0.5) break; adj.overall += diff; } renderRail(true); scrollToIndex(currentIndex, false); focusLock = false; return; } updateRail(); renderDetail(); }
-function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, adjustments, feedbackDrafts, true); renderDetail(); }
+function renderPinState(student) {
+  const stateNode = document.getElementById('pinState');
+  if (!stateNode || !student) return;
+  const machine = machineMarkForStudent(student, currentIndex, data?.students?.length || 1);
+  if (isPinned(student.student_id)) {
+    stateNode.innerHTML = `<span class="pin-flag">Pinned at ${pins[student.student_id]}</span><span class="pin-machine">machine ${machine}</span><button id="unpinStudent" class="ghost pin-clear">Unpin</button>`;
+    document.getElementById('unpinStudent')?.addEventListener('click', () => clearPin(student.student_id));
+  } else {
+    const current = num(getGradeForIndex(currentIndex), machine);
+    stateNode.innerHTML = current !== machine
+      ? `<span class="pin-machine">Re-flowed from machine ${machine}. Move the slider to pin.</span>`
+      : `<span class="pin-machine">Machine mark ${machine}. Move the slider to pin.</span>`;
+  }
+}
+function applyOverallTarget(target) {
+  if (!data?.students?.length) return;
+  const sid = sliderStudentId || data.students[currentIndex]?.student_id;
+  if (!sid) return;
+  currentIndex = Math.max(0, data.students.findIndex(x => x.student_id === sid));
+  const mark = clamp(Math.round(num(target, 0)), 0, 100);
+  const inp = document.getElementById('gradeOverride'); if (inp) inp.value = mark;
+  const slider = document.getElementById('overallGradeSlider'); if (slider) slider.value = mark;
+  setPin(sid, mark);
+  renderPinState(data.students[currentIndex]);
+}
+function generateFeedbackDrafts() { if (!data?.students?.length || !window.feedbackGenerate?.generateAll) return; window.feedbackGenerate.generateAll(data.students, getGradeForIndex, {}, feedbackDrafts, true); renderDetail(); }
 function updateGradesFromCurve() {
   if (!data || !data.students || !data.students.length) return;
   const topInput = document.getElementById('topGrade');
@@ -1807,11 +2116,9 @@ function updateGradesFromCurve() {
   const top = clamp(num(topInput?.value, 92), 0, 100);
   const bottom = clamp(num(bottomInput?.value, 58), 0, 100);
   if (top <= bottom) return;
-  if (topInput) topInput.value = Math.round(top);
-  if (bottomInput) bottomInput.value = Math.round(bottom);
-  applyCurveBounds(top, bottom, true);
-  updateRail();
-  renderDetail();
+  curveTouched = true;
+  scheduleReflow(data.students[currentIndex]?.student_id);
+  scheduleReviewAutosave('curve change');
 }
 function setRunning(on) { running = on; document.body.dataset.running = on ? 'true' : 'false'; updateWorkflowState(); }
 function pipelineLog(msg) { const log = document.getElementById('pipelineLog'); if (!log) return; const line = document.createElement('div'); line.textContent = msg; log.appendChild(line); log.scrollTop = log.scrollHeight; }
@@ -2091,14 +2398,18 @@ function setupControls() {
   const runBtn = document.getElementById('runPipelinePrimary');
   if (runBtn) runBtn.addEventListener('click', runPipeline);
   document.addEventListener('keydown', (e) => {
-    if (e.key.toLowerCase() !== 'f') return;
     const active = document.activeElement;
-    if (active && (active.isContentEditable || ['INPUT', 'TEXTAREA'].includes(active.tagName))) {
+    if (active && (active.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName))) {
       return;
     }
+    if (e.key === 'ArrowLeft' && currentIndex > 0) { e.preventDefault(); scrollToIndex(currentIndex - 1, true); return; }
+    if (e.key === 'ArrowRight' && data?.students?.length && currentIndex < data.students.length - 1) { e.preventDefault(); scrollToIndex(currentIndex + 1, true); return; }
+    if (e.key.toLowerCase() !== 'f') return;
     compareDirection *= -1;
     renderDetail();
   });
+  const exceptionsSummaryNode = document.getElementById('exceptionsSummary');
+  if (exceptionsSummaryNode) exceptionsSummaryNode.addEventListener('click', () => { document.getElementById('exceptionsSection').dataset.userToggled = 'true'; });
   const viewToggle = document.getElementById('viewToggle');
   viewToggle.addEventListener('click', () => {
     const body = document.body;
@@ -2116,10 +2427,10 @@ function setupControls() {
   const preferCurrent = document.getElementById('preferCurrent');
   const preferCompare = document.getElementById('preferCompare');
   const clearPairwise = document.getElementById('clearPairwise');
-  if (reviewLevel) reviewLevel.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).level_override = e.target.value; });
-  if (reviewRank) reviewRank.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).desired_rank = e.target.value.trim() ? parseInt(e.target.value, 10) : ''; });
-  if (reviewQuality) reviewQuality.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_quality = e.target.value; });
-  if (reviewComment) reviewComment.addEventListener('input', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_comment = e.target.value.trim(); });
+  if (reviewLevel) reviewLevel.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).level_override = e.target.value; scheduleReviewAutosave('review decision'); });
+  if (reviewRank) reviewRank.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).desired_rank = e.target.value.trim() ? parseInt(e.target.value, 10) : ''; scheduleReviewAutosave('review decision'); });
+  if (reviewQuality) reviewQuality.addEventListener('change', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_quality = e.target.value; scheduleReviewAutosave('review evidence'); });
+  if (reviewComment) reviewComment.addEventListener('input', e => { const student = data?.students?.[currentIndex]; if (!student) return; studentReview(student.student_id).evidence_comment = e.target.value.trim(); scheduleReviewAutosave('review note'); });
   if (saveReview) saveReview.addEventListener('click', () => saveReviewBundle('draft'));
   if (finalizeReview) finalizeReview.addEventListener('click', () => saveReviewBundle('finalize'));
   if (preferCurrent) preferCurrent.addEventListener('click', () => {
@@ -2130,6 +2441,7 @@ function setupControls() {
     const pair = pairReview(student.student_id, compare.student_id);
     pair.preferred_student_id = student.student_id;
     pair.rationale = studentReview(student.student_id).evidence_comment || '';
+    scheduleReviewAutosave('pairwise decision');
     renderReviewPanel(student);
   });
   if (preferCompare) preferCompare.addEventListener('click', () => {
@@ -2140,6 +2452,7 @@ function setupControls() {
     const pair = pairReview(student.student_id, compare.student_id);
     pair.preferred_student_id = compare.student_id;
     pair.rationale = studentReview(student.student_id).evidence_comment || '';
+    scheduleReviewAutosave('pairwise decision');
     renderReviewPanel(student);
   });
   if (clearPairwise) clearPairwise.addEventListener('click', () => {
@@ -2147,6 +2460,7 @@ function setupControls() {
     const compareIndex = getCompareIndex();
     if (!student || compareIndex === null) return;
     delete reviewPairs[pairKey(student.student_id, data.students[compareIndex].student_id)];
+    scheduleReviewAutosave('pairwise decision');
     renderReviewPanel(student);
   });
   setupUploads();
@@ -2173,10 +2487,12 @@ function setupControls() {
   const saveRubricEdits = document.getElementById('saveRubricEdits'); if (saveRubricEdits) saveRubricEdits.addEventListener('click', () => submitRubricReview('edit'));
   const rejectRubric = document.getElementById('rejectRubric'); if (rejectRubric) rejectRubric.addEventListener('click', () => submitRubricReview('reject'));
   const submitAnchors = document.getElementById('submitAnchors'); if (submitAnchors) submitAnchors.addEventListener('click', submitAnchorReview);
+  const clearBrowserDraft = document.getElementById('clearBrowserDraft'); if (clearBrowserDraft) clearBrowserDraft.addEventListener('click', clearBrowserReviewDraft);
   handleGoogleReturnParams();
   updateWorkflowState();
   refreshClassroomState();
   refreshGoogleAuth();
+  refreshDataPosture();
 }
 async function boot(payload) {
   data = payload;
@@ -2188,9 +2504,17 @@ async function boot(payload) {
     title.textContent = 'Assessor';
     document.title = `Assessor • Grade ${data.class_metadata.grade_level}`;
   }
-  if (data.curve_top) document.getElementById('topGrade').value = data.curve_top;
-  if (data.curve_bottom) document.getElementById('bottomGrade').value = data.curve_bottom;
-  applyCurveBounds(num(document.getElementById('topGrade').value, 92), num(document.getElementById('bottomGrade').value, 58), false);
+  pins = {};
+  serverMarks = {};
+  lastReflow = null;
+  curveTouched = false;
+  acceptReorder = false;
+  if (data.students.length) {
+    // Curve inputs mirror the machine curve's actual extremes until touched.
+    const count = data.students.length;
+    document.getElementById('topGrade').value = machineMarkForStudent(data.students[0], 0, count);
+    document.getElementById('bottomGrade').value = machineMarkForStudent(data.students[count - 1], count - 1, count);
+  }
   await detectApiBase();
   setupControls();
   renderRubricReview(
@@ -2215,6 +2539,7 @@ async function boot(payload) {
       : null,
   );
   await loadReviewBundle();
+  await refreshDataPosture();
   await refreshClassroomState();
   renderRail();
   if (data.students.length) scrollToIndex(0, false);

@@ -6,6 +6,19 @@ import json
 import re
 from pathlib import Path
 
+try:
+    from scripts.rubric_validity import (
+        build_data_posture,
+        build_instructional_summary,
+        build_rubric_claims,
+    )
+except ImportError:  # pragma: no cover - script execution
+    from rubric_validity import (  # pragma: no cover
+        build_data_posture,  # pragma: no cover
+        build_instructional_summary,  # pragma: no cover
+        build_rubric_claims,  # pragma: no cover
+    )
+
 
 def load_csv(path: Path):
     if not path.exists():
@@ -446,6 +459,7 @@ def main() -> int:
     review_draft = load_json(Path("outputs/review_feedback_draft.json"))
     review_feedback = load_json(Path("outputs/review_feedback_latest.json"))
     review_delta = load_json(Path("outputs/review_delta_latest.json"))
+    review_analytics = load_json(Path("outputs/review_analytics.json"))
     local_learning_profile = load_json(Path("outputs/local_learning_profile.json"))
     local_teacher_prior = load_json(Path("outputs/local_teacher_prior.json"))
     aggregate_learning = load_json(Path("outputs/aggregate_learning_summary.json"))
@@ -477,6 +491,11 @@ def main() -> int:
         student_text = texts.get(sid, "")
         feedback_text = load_feedback_text(feedback_dir, sid)
         flags, reasons = student_uncertainty(row, uncertainty_by_student.get(sid, {}), boundaries)
+        rubric_claims = build_rubric_claims(row, student_text, normalized_rubric, flags, reasons)
+        generated_feedback = False
+        if not feedback_text:
+            feedback_text = fallback_feedback(row, student_text, rank, cohort_size)
+            generated_feedback = True
         data.append(
             {
                 "student_id": sid,
@@ -503,8 +522,10 @@ def main() -> int:
                 "level_with_modifier": row.get("level_with_modifier"),
                 "flags": row.get("flags"),
                 "final_grade": grade_row.get("final_grade"),
+                "final_grade_raw": grade_row.get("curve_grade_raw"),
                 "text": student_text,
                 "feedback_text": feedback_text,
+                "feedback_generated": generated_feedback,
                 "rerank_support_weight": row.get("rerank_support_weight"),
                 "rerank_opposition_weight": row.get("rerank_opposition_weight"),
                 "rerank_incident_weight": row.get("rerank_incident_weight"),
@@ -516,6 +537,15 @@ def main() -> int:
                 "uncertainty_flags": flags,
                 "uncertainty_reasons": reasons,
                 "uncertainty_score": len(flags),
+                "rubric_claims": rubric_claims,
+                "criterion_summary": {
+                    "claim_count": len(rubric_claims),
+                    "teacher_read_required": any(
+                        claim.get("uncertainty", {}).get("label") == "teacher_read_required"
+                        for claim in rubric_claims
+                    ),
+                    "evidence_excerpt_count": sum(len(claim.get("evidence", []) or []) for claim in rubric_claims),
+                },
             }
         )
 
@@ -537,6 +567,8 @@ def main() -> int:
         "curve_profile": grades_rows[0].get("curve_profile") if grades_rows else None,
         "distribution": build_distribution(data),
         "uncertainty_summary": uncertainty_summary,
+        "instructional_summary": build_instructional_summary(data),
+        "data_posture": build_data_posture(Path(".")),
         "validation": validation,
         "teacher_exceptions": teacher_exception_items(validation, uncertainty_summary, classroom_state),
         "class_metadata": class_metadata,
@@ -546,6 +578,7 @@ def main() -> int:
         "review_draft": review_draft,
         "review_feedback": review_feedback,
         "review_delta": review_delta,
+        "review_analytics": review_analytics,
         "local_learning_profile": local_learning_profile,
         "local_teacher_prior": local_teacher_prior,
         "aggregate_learning": aggregate_learning,

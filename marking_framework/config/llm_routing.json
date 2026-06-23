@@ -45,6 +45,10 @@
     "max_level_gap": 1,
     "anchor_blend": 0.35
   },
+  "runtime_posture": {
+    "profile": "development_fixture",
+    "production_note": "Production/candidate launch must require a fresh non-synthetic calibration manifest through scripts/validate_production_launch.py and publish/SOTA gates."
+  },
   "quality_gates": {
     "min_model_coverage": 0.8
   },

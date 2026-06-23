@@ -797,6 +797,110 @@ body[data-view="split"] #comparePanel {
   color: var(--muted);
 }
 
+.curve-hint {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.pin-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  min-height: 22px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.pin-flag {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pin-clear {
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+.rail-pin {
+  display: none;
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+.rail-item.pinned .rail-pin {
+  display: inline;
+}
+
+.reorder-notice {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--warn, #b78a2c);
+  border-radius: var(--radius-sm);
+  background: rgba(183, 138, 44, 0.08);
+  font-size: 0.8rem;
+}
+
+.reorder-notice.is-hidden {
+  display: none;
+}
+
+.reorder-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.reorder-actions button {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+}
+
+.curve-strip {
+  margin-top: 10px;
+}
+
+.curve-strip svg {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+
+.strip-machine {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.strip-marks {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.strip-pin {
+  fill: var(--accent);
+}
+
+.strip-pin[data-current="true"] {
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+
+.strip-current {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+}
+
 .control label {
   display: block;
   margin-bottom: 6px;
@@ -880,6 +984,126 @@ body[data-theme="dark"] .editable {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.evidence-cockpit {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.evidence-head,
+.criterion-card,
+.nearest-neighbors,
+.history-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+body[data-theme="dark"] .evidence-head,
+body[data-theme="dark"] .criterion-card,
+body[data-theme="dark"] .nearest-neighbors,
+body[data-theme="dark"] .history-row {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.evidence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.evidence-move {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.criterion-card {
+  padding: 14px;
+}
+
+.criterion-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.criterion-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.criterion-claim {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.confidence-pill {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 1px solid rgba(31, 95, 91, 0.22);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.confidence-pill[data-state="teacher_read_required"] {
+  border-color: rgba(181, 91, 69, 0.35);
+  background: rgba(181, 91, 69, 0.12);
+  color: var(--danger);
+}
+
+.criterion-evidence {
+  display: grid;
+  gap: 8px;
+}
+
+.criterion-evidence blockquote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(31, 95, 91, 0.07);
+  color: var(--ink);
+  font-family: "Baskerville", "Iowan Old Style", "Georgia", serif;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.criterion-counter {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.nearest-neighbors,
+.history-row {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.override-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .review-badge {

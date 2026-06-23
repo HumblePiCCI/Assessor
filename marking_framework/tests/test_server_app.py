@@ -373,6 +373,25 @@ def test_google_auth_preflight_endpoint_is_redacted(tmp_path, monkeypatch):
     assert "client-secret" not in blob
 
 
+def test_projects_data_posture_returns_counts_not_raw_pii(tmp_path, monkeypatch):
+    text_dir = tmp_path / "processing" / "normalized_text"
+    text_dir.mkdir(parents=True)
+    (text_dir / "s001.txt").write_text("Student email student@example.com and id 123456789012.", encoding="utf-8")
+    monkeypatch.setattr(projmod, "workspace_root", lambda identity=None: tmp_path)
+    monkeypatch.setattr(projmod, "get_current_project", lambda identity=None: None)
+
+    client = TestClient(app)
+    resp = client.get("/projects/data-posture")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "local_private_workspace"
+    assert payload["pii_scan"]["email_count"] == 1
+    assert payload["pii_scan"]["long_id_count"] == 1
+    assert "student@example.com" not in resp.text
+    assert "123456789012" not in resp.text
+
+
 def test_projects_endpoints(tmp_path, monkeypatch):
     server_dir = tmp_path / "server"
     server_dir.mkdir()

@@ -412,8 +412,11 @@ def test_global_rerank_prioritizes_strong_pairwise_edges_before_generic_level_lo
         {"student_id": "s3", "seed_rank": "3", "consensus_rank": "3", "adjusted_level": "2", "rubric_after_penalty_percent": "68", "composite_score": "0.76"},
     ]
     checks = [
+        # Hard precedence edges need corroboration: two clean same-direction reads.
         {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s3 interprets the text better."},
+        {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "Second read agrees s3 is stronger."},
         {"pair": ["s2", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s3 interprets the text better."},
+        {"pair": ["s2", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "Second read agrees s3 is stronger."},
     ]
     result, final_order, _matrix, _score_csv, report, _legacy = run_rerank(tmp_path, seed_rows, checks)
     rows = list(csv.DictReader(final_order.open("r", encoding="utf-8")))
@@ -449,12 +452,19 @@ def test_global_rerank_allows_large_downward_move_for_strong_opposition_outlier(
         {"student_id": "s7", "seed_rank": "7", "consensus_rank": "7", "adjusted_level": "3", "rubric_after_penalty_percent": "68", "composite_score": "0.68", "borda_percent": "0.80"},
     ]
     checks = [
+        # Corroborated opposition: two clean same-direction reads per pair.
         {"pair": ["s1", "s2"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s2"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
         {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s3"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
         {"pair": ["s1", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s4"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
         {"pair": ["s1", "s5"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s5"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
         {"pair": ["s1", "s6"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s6"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
         {"pair": ["s1", "s7"], "decision": "SWAP", "confidence": "high", "rationale": "s1 is weaker."},
+        {"pair": ["s1", "s7"], "decision": "SWAP", "confidence": "high", "rationale": "Second read: s1 weaker."},
     ]
     result, *_ = run_rerank(tmp_path, seed_rows, checks)
     row = next(item for item in result["final_rows"] if item["student_id"] == "s1")

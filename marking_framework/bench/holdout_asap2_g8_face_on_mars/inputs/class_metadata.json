@@ -1,0 +1,37 @@
+{
+  "dataset_name": "holdout_asap2_g8_face_on_mars",
+  "assessment_unit": "single_prompt",
+  "grade": "Grade 8",
+  "grade_numeric": 8,
+  "grade_level": 8,
+  "country": "United States",
+  "language": "English",
+  "genre": "argumentative",
+  "genre_form": "source-based argumentative essay",
+  "source_family": "ASAP 2.0 / The Learning Agency Lab",
+  "rubric_family": "ASAP 2.0 holistic 1-6 writing rubric",
+  "prompt_shared": true,
+  "sample_count": 11,
+  "holdout": true,
+  "source_text_included": true,
+  "license": "CC BY 4.0",
+  "scoring_scale": {
+    "type": "ordinal",
+    "labels": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6"
+    ],
+    "canonical_mapping": {
+      "6": "4+",
+      "5": "4",
+      "4": "3",
+      "3": "3",
+      "2": "2",
+      "1": "1"
+    }
+  }
+}

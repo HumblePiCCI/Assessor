@@ -2,7 +2,8 @@ Standardized Marking Workspace
 
 Purpose
 - Provide a repeatable, multi-pass marking workflow using a rubric, an assignment outline, and a set of student submissions.
-- Enforce conventions tracking, rubric adherence, comparative ranking, and consensus ordering before curve-based grades.
+- Center criterion-referenced rubric evidence: every score should be reviewable as a claim tied to criterion evidence, counter-evidence, and uncertainty.
+- Use comparative ranking as a reliability signal and review aid, not as the default grading truth. Bell/curve grading is an explicit teacher choice.
 
 Quick Start
 0) Optional Hero Path orchestration
@@ -49,10 +50,11 @@ Quick Start
      - `python3 scripts/evaluate_pairwise_adjudicator.py --judgments outputs/consistency_checks.committee_edge.json --output outputs/pairwise_adjudicator_eval.json`
    - The default gold set targets the Ghost literary-analysis failure mode, including rougher-but-stronger and polished-but-shallow edges.
 
-7) Review and apply grade curve
+7) Review criterion marks and optional curve anchors
    - `python3 scripts/review_and_grade.py`
    - Or run the deterministic default directly: `python3 scripts/review_and_grade.py --non-interactive`
-   - Grades are now level-locked and band-aware, then organized into a bell-shaped distribution within the resolved order
+   - The default profile is `criterion_referenced`: rubric evidence drives marks and rank does not force a bell distribution.
+   - Teachers can still pin top/bottom or individual marks when they intentionally want cohort curve anchoring.
 
 8) Generate Two Stars and a Wish feedback (post-curve)
    - `python3 scripts/generate_feedback.py`
@@ -62,8 +64,11 @@ Quick Start
 9) Teacher review UI
    - `python3 scripts/build_dashboard_data.py`
    - `python3 scripts/serve_ui.py`
-   - Save exploratory edits as draft state, then finalize the review when the curve is settled
+   - The review surface is an evidence cockpit: rubric criteria, cited student excerpts, counter-evidence, uncertainty, nearest neighbors, and teacher override history.
+   - Grade adjustment is pin & re-flow: setting a mark pins that student, and every other mark re-flows deterministically along the machine curve between the teacher's anchors (pins + curve top/bottom). The server recomputes all marks on save (`POST /projects/curve/reflow` previews the cascade); pin-implied rank changes require explicit teacher confirmation before finalize.
+   - Teacher edits autosave as draft state, with local browser recovery as a fallback. Finalize the review only when the evidence, marks, and feedback are settled.
    - Only finalized reviews feed the local teacher prior used on future reranks in the same scope
+   - The Data posture drawer shows local file counts, PII-pattern counts, project retention/delete/export affordances, and browser-draft clearing.
    - For supervised classroom testing, use `docs/TEACHER_PILOT_RUNBOOK.md`; teacher pilot is not production launch and teachers retain final authority.
    - For the Classroom-facing product path, use `docs/GOOGLE_CLASSROOM_HERO_PATH.md`; Google OAuth + Classroom/Drive read sync can import supported submissions, CSV export is the shipped passback path, and live Classroom writes remain fail-closed.
    - For local Google setup, copy `.env.google.example` to an untracked local env file and run `python3 scripts/google_classroom_setup_check.py`.
@@ -97,7 +102,7 @@ Key Outputs
 - `outputs/pairwise_adjudicator_eval.json` (hard-pair accuracy report for the pairwise adjudicator)
 - `outputs/final_order.csv` (post global rerank order)
 - `outputs/feedback_summaries/` (two stars and a wish with validated quotes)
-- `outputs/dashboard_data.json` (UI data)
+- `outputs/dashboard_data.json` (UI data, rubric evidence claims, instructional clusters, data posture, and review analytics)
 - `outputs/normalized_rubric.json` (canonical runtime rubric contract)
 - `outputs/rubric_manifest.json` (rubric contract hash, family, confidence, and confirmation state)
 - `outputs/rubric_validation_report.json` (parse checks, warnings, and proceed mode)
@@ -112,8 +117,10 @@ Key Outputs
 
 Notes
 - The conventions scan is a heuristic baseline. For high-stakes marking, replace with a dedicated grammar engine.
-- The consensus step is required before curve-based grading.
+- The consensus/rerank steps are reliability checks. Criterion-referenced marks remain the default unless a teacher explicitly chooses curve anchoring.
 - Teacher review feedback is split into draft and finalized state. Only finalized reviews feed learning.
+- Draft review, mark pins, pairwise decisions, and feedback edits are autosaved by the product contract; explicit save/finalize remains available for teacher intent.
+- Candidate/release gates can require `outputs/stability_report.json` from `scripts/stability_harness.py`; missing or unstable perturbation evidence blocks launch profiles.
 - Local personalization stays scoped and runtime-bounded through the local teacher prior.
 - Product-wide learning now uses anonymized finalized-only records, project-level opt-in or policy-compliant collection, governed export/ingestion packages, and adjudication-required promotion staging under `bench/promoted/` and `inputs/exemplars/promoted/`.
 - See `docs/LEGAL_NOTES.md` before production use.

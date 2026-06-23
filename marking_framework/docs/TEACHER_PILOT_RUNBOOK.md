@@ -20,6 +20,8 @@ The pilot asks:
   supported submissions, and run without downloading/re-uploading essays?
 - Do the confidence, anchor, and disagreement surfaces point the teacher to the
   right places?
+- Does the evidence cockpit let the teacher verify each mark as a rubric claim
+  with cited excerpts, counter-evidence, uncertainty, and override history?
 - Do teacher overrides concentrate around a specific failure mode that should
   become the next engineering slice?
 
@@ -131,15 +133,20 @@ Recommended cohort shape:
 
 8. Teacher reviews:
 
-   - final order
+   - criterion evidence and confidence before trusting the final order
    - exceptions while background validation catches up
    - level/mark suggestions
    - disagreement and confidence signals
+   - nearest neighbors and why a paper moved
    - generated feedback
-   - curve top/bottom settings
+   - optional curve top/bottom settings when the teacher explicitly wants
+     cohort anchoring
+   - local data posture, retention/delete/export controls, and browser draft
+     recovery state
 
-9. Teacher saves draft changes as needed, then finalizes only when the curve and
-   review decisions are settled.
+9. Teacher edits autosave as draft state. The teacher can still save manually,
+   then finalizes only when the criterion evidence, optional curve anchors,
+   review decisions, and feedback are settled.
 
 10. Operator records pilot evidence before moving to the next cohort.
 
@@ -154,6 +161,9 @@ Keep the project and job identifiers with these artifacts:
 - `outputs/final_order.csv`
 - `outputs/grade_curve.csv`
 - `outputs/dashboard_data.json`
+- `outputs/review_analytics.json`
+- `outputs/stability_report.json` when candidate/release gate evidence is being
+  prepared
 - `outputs/review_feedback_latest.json`
 - `outputs/engagement_signal.json`
 - `outputs/local_learning_profile.json`

@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from scripts.aggregate_review_learning import default_aggregate_learning_policy, normalize_aggregate_learning_policy
+from scripts.rubric_validity import build_data_posture
 from server import classroom
 from server.google_classroom_adapter import GoogleClassroomAdapter, GoogleClassroomError
 from server.google_oauth import GoogleOAuthError, GoogleOAuthService
@@ -42,7 +43,16 @@ class ProjectReviewPayload(BaseModel):
     curve_top: float | None = None
     curve_bottom: float | None = None
     assigned_marks: list[dict] = Field(default_factory=list)
+    pinned_marks: list[dict] | None = None
+    accept_reorder: bool = False
     feedback_drafts: list[dict] = Field(default_factory=list)
+
+
+class CurveReflowPayload(BaseModel):
+    pinned_marks: list[dict] = Field(default_factory=list)
+    curve_top: float | None = None
+    curve_bottom: float | None = None
+    accept_reorder: bool = False
 
 
 class ClassroomLinkPayload(BaseModel):
@@ -421,6 +431,25 @@ async def projects_list(request: Request):
     return {"current": current_project_with_review(identity), "projects": list_projects(identity)}
 
 
+@router.get("/projects/data-posture")
+async def projects_data_posture(request: Request):
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    project = get_current_project(identity) or workspace_project(identity)
+    posture = build_data_posture(root)
+    posture["project"] = {
+        "id": project.get("id"),
+        "name": project.get("name"),
+        "aggregate_learning": project.get("aggregate_learning", {}),
+    }
+    posture["auth"] = {
+        "strict_identity": _strict_identity(identity),
+        "tenant_scoped": bool((identity or {}).get("tenant_id")),
+        "teacher_scoped": bool((identity or {}).get("teacher_id")),
+    }
+    return posture
+
+
 @router.post("/projects/save")
 async def projects_save(payload: ProjectPayload, request: Request):
     identity = identity_context(request)
@@ -528,15 +557,43 @@ async def projects_review_save(payload: ProjectReviewPayload, request: Request):
     action = str(payload.action or "draft").strip().lower()
     stage = "final" if action in {"final", "finalize", "publish"} else "draft"
     request_payload = payload.model_dump(exclude_none=True)
-    bundle = review_store.save_review_bundle(
-        BASE_DIR,
-        root,
-        project,
-        request_payload,
-        stage=stage,
-    )
+    try:
+        bundle = review_store.save_review_bundle(
+            BASE_DIR,
+            root,
+            project,
+            request_payload,
+            stage=stage,
+        )
+    except review_store.ReviewReorderPending as pending:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "reorder_confirmation_required",
+                "message": "Pinned marks imply rank changes. Confirm the reorder before finalizing.",
+                "implied_moves": pending.implied_moves,
+            },
+        )
     classroom.record_review_revision(BASE_DIR, root, project, identity, request_payload, stage=stage)
     return bundle
+
+
+@router.post("/projects/curve/reflow")
+async def projects_curve_reflow(payload: CurveReflowPayload, request: Request):
+    """Stateless pin & re-flow preview over the current workspace machine curve."""
+    identity = identity_context(request)
+    root = workspace_root(identity)
+    dashboard = review_store.load_dashboard(root)
+    if not review_store.dashboard_students_in_rank_order(dashboard):
+        raise HTTPException(status_code=409, detail="No cohort results to re-flow yet")
+    return review_store.compute_curve_reflow(
+        root,
+        dashboard,
+        payload.pinned_marks,
+        curve_top=payload.curve_top,
+        curve_bottom=payload.curve_bottom,
+        accept_reorder=payload.accept_reorder,
+    )
 
 
 @router.get("/projects/classroom")

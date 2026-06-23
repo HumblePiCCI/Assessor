@@ -196,3 +196,19 @@ def test_load_exemplars_empty_text(tmp_path):
     exemplars_dir.mkdir()
     (exemplars_dir / "level_1.txt").write_text("", encoding="utf-8")
     assert load_exemplars(exemplars_dir) == {}
+
+
+def test_genre_inference_ignores_embedded_source_articles():
+    # Holdout finding 2026-06-11: the word "safety" inside an embedded source
+    # article made text inference classify an argumentative task as
+    # "instructions". Inference must only read the task portion.
+    from scripts.assessor_context import infer_genre_from_text
+
+    outline = (
+        "# Assignment\n\nCreate an argument for or against driverless cars, "
+        "using details from the article.\n\n## Source text\n\n"
+        "Follow these steps for safety. Materials and instructions for the procedure are listed."
+    )
+    assert infer_genre_from_text("", outline) == "argumentative"
+    # Without the heading the article words still classify (legacy behavior).
+    assert infer_genre_from_text("", "Follow these steps for safety and materials.") == "instructions"

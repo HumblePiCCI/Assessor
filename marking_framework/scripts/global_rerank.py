@@ -205,11 +205,49 @@ def load_seed_rows(path: Path, config: dict) -> list[dict]:
     return normalized
 
 
+TAINT_RATIONALE_MARKERS = (
+    "not valid json",
+    "invalid json",
+    "prior response",
+    "previous response",
+    "essay content missing",
+    "content was missing",
+    "could not parse",
+    "unable to parse",
+)
+TAINT_WEIGHT_FACTOR = 0.25
+
+
+def judgment_taint_reasons(model_metadata: dict, rationale: str) -> list[str]:
+    """A judgment is tainted when its response needed repair or its rationale
+    admits the model never saw clean inputs. Tainted judgments are
+    downweighted and may never form hard constraints."""
+    reasons = []
+    if model_metadata.get("repair_used"):
+        reasons.append("repair_used")
+    raw_reasons = model_metadata.get("repair_reasons")
+    if isinstance(raw_reasons, list):
+        reasons.extend(str(reason) for reason in raw_reasons if reason)
+    low = str(rationale or "").lower()
+    for marker in TAINT_RATIONALE_MARKERS:
+        if marker in low:
+            reasons.append(f"rationale_marker:{marker.replace(' ', '_')}")
+    return sorted(set(reasons))
+
+
 def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[dict]]:
     payload = load_json(path)
     raw_items = payload.get("checks", payload.get("judgments", [])) if isinstance(payload, dict) else []
+    normalized = load_judgments_from_items(raw_items, rows_by_id)
+    normalized = dedupe_by_precedence(normalized, key_fn=lambda item: item["pair_key"])
+    for idx, item in enumerate(normalized, start=1):
+        item["id"] = idx
+    return payload if isinstance(payload, dict) else {}, normalized
+
+
+def load_judgments_from_items(raw_items: list, rows_by_id: dict[str, dict], id_offset: int = 0) -> list[dict]:
     normalized = []
-    for idx, item in enumerate(raw_items):
+    for idx, item in enumerate(raw_items, start=id_offset):
         if not isinstance(item, dict):
             continue
         pair = item.get("pair")
@@ -235,6 +273,8 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
         source = adjudication_source(item)
         winner = higher if decision == "KEEP" else lower
         loser = lower if decision == "KEEP" else higher
+        taint_reasons = judgment_taint_reasons(model_metadata, rationale)
+        base_weight = confidence_weight(confidence)
         normalized.append(
             {
                 "id": idx + 1,
@@ -249,7 +289,9 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "decision": decision,
                 "winner_side": winner_side,
                 "confidence": confidence,
-                "weight": confidence_weight(confidence),
+                "tainted": bool(taint_reasons),
+                "taint_reasons": taint_reasons,
+                "weight": round(base_weight * (TAINT_WEIGHT_FACTOR if taint_reasons else 1.0), 6),
                 "rationale": rationale,
                 "criterion_notes": criterion_notes,
                 "decision_basis": decision_basis,
@@ -264,10 +306,7 @@ def load_judgments(path: Path, rows_by_id: dict[str, dict]) -> tuple[dict, list[
                 "superseded_by_escalation": bool(model_metadata.get("superseded_by_escalation", False)),
             }
         )
-    normalized = dedupe_by_precedence(normalized, key_fn=lambda item: item["pair_key"])
-    for idx, item in enumerate(normalized, start=1):
-        item["id"] = idx
-    return payload if isinstance(payload, dict) else {}, normalized
+    return normalized
 
 
 def pair_key(left: str, right: str) -> str:
@@ -275,7 +314,7 @@ def pair_key(left: str, right: str) -> str:
     return f"{ordered[0]}::{ordered[1]}"
 
 
-def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict, dict, dict]:
+def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict, dict, dict, dict]:
     rows_by_id = {row["student_id"]: row for row in rows}
     comparisons = {}
     per_student = {
@@ -291,6 +330,7 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
         for sid in rows_by_id
     }
     directional = defaultdict(float)
+    directional_hard = defaultdict(float)
     for judgment in judgments:
         higher, lower = judgment["pair"]
         key = judgment["pair_key"]
@@ -324,6 +364,8 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
                 "cautions_applied": judgment.get("cautions_applied", []),
                 "decision_checks": judgment.get("decision_checks", {}),
                 "adjudication_source": judgment.get("adjudication_source", "cheap_pairwise"),
+                "tainted": bool(judgment.get("tainted")),
+                "taint_reasons": list(judgment.get("taint_reasons", [])),
                 "model_metadata": judgment["model_metadata"],
             }
         )
@@ -336,6 +378,8 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
             if bucket in per_student[sid]:
                 per_student[sid][bucket] += 1
         directional[(judgment["winner"], judgment["loser"])] += judgment["weight"]
+        if not judgment.get("tainted"):
+            directional_hard[(judgment["winner"], judgment["loser"])] += judgment["weight"]
 
     comparison_list = []
     for key in sorted(comparisons, key=lambda item: (rows_by_id[comparisons[item]["pair"][0]]["seed_rank"], rows_by_id[comparisons[item]["pair"][1]]["seed_rank"])):
@@ -373,7 +417,70 @@ def build_pairwise_matrix(rows: list[dict], judgments: list[dict]) -> tuple[dict
             for (winner, loser), weight in sorted(directional.items())
         },
     }
-    return matrix, per_student, dict(directional)
+    return matrix, per_student, dict(directional), dict(directional_hard)
+
+
+def load_cohort_confidence_signals(path: Path | None) -> dict:
+    """Optional cohort-confidence signals used to size seed trust.
+
+    Missing file → empty signals → full seed trust (legacy behavior)."""
+    if path is None:
+        return {"present": False}
+    payload = load_json(path)
+    if not isinstance(payload, dict) or not payload:
+        return {"present": False}
+    inputs = payload.get("decision_inputs", {}) if isinstance(payload.get("decision_inputs"), dict) else {}
+    return {
+        "present": True,
+        "calibration_type": str(inputs.get("calibration_type", "") or "").strip().lower(),
+        "scope_familiarity": str(inputs.get("scope_familiarity_label", "") or "").strip().lower(),
+        "mean_assessor_sd": num(inputs.get("mean_assessor_sd"), None),
+    }
+
+
+def compute_seed_reliability(signals: dict, judgments: list[dict]) -> tuple[float, dict]:
+    """How much the seed order (pass-1 consensus) deserves to anchor the rerank.
+
+    Seeds earn trust from validated calibration and familiar scopes; they lose
+    trust when the pairwise evidence itself contradicts them often (swap rate)
+    or assessor disagreement is high. Distinct from per-student stability
+    penalties, which measure *evidence* noise — this measures *seed* quality.
+    """
+    detail = {
+        "mode": "adaptive",
+        "signals_present": bool(signals.get("present")),
+        "calibration_type": signals.get("calibration_type", ""),
+        "scope_familiarity": signals.get("scope_familiarity", ""),
+    }
+    reliability = 1.0
+    if signals.get("calibration_type") in {"synthetic", "bootstrap"}:
+        reliability *= 0.45
+        detail["synthetic_calibration_penalty"] = 0.45
+    if signals.get("scope_familiarity") == "novel":
+        reliability *= 0.75
+        detail["novel_scope_penalty"] = 0.75
+    swap_count = sum(1 for j in judgments if j.get("decision") == "SWAP")
+    swap_rate = swap_count / len(judgments) if judgments else 0.0
+    detail["judgment_swap_rate"] = round(swap_rate, 4)
+    if len(judgments) >= 10 and swap_rate > 0.20:
+        swap_penalty = min(1.0, (swap_rate - 0.20) / 0.30)
+        reliability *= 1.0 - (0.5 * swap_penalty)
+        detail["swap_penalty_factor"] = round(1.0 - (0.5 * swap_penalty), 4)
+    mean_sd = signals.get("mean_assessor_sd")
+    if isinstance(mean_sd, (int, float)) and mean_sd is not None and mean_sd > 4.0:
+        sd_factor = max(0.3, 1.0 - ((float(mean_sd) - 4.0) / 8.0))
+        reliability *= sd_factor
+        detail["assessor_sd_factor"] = round(sd_factor, 4)
+    reliability = max(0.05, min(1.0, reliability))
+    detail["seed_reliability"] = round(reliability, 4)
+    # Waiving seed-anchored constraints (locks, caps, rescue) is reserved for
+    # scopes whose seeds are explicitly unvalidated; evidence disagreement
+    # alone softens parameters but never voids protections.
+    detail["seeds_unvalidated"] = bool(
+        signals.get("calibration_type") in {"synthetic", "bootstrap"}
+        or signals.get("scope_familiarity") == "novel"
+    )
+    return reliability, detail
 
 
 def build_prior_scores(rows: list[dict]) -> dict[str, float]:
@@ -692,6 +799,8 @@ def protected_committee_direct_edges(judgments: list[dict]) -> list[dict]:
     for judgment in judgments:
         if judgment.get("adjudication_source") != "committee_edge":
             continue
+        if judgment.get("tainted"):
+            continue
         winner = str(judgment.get("winner") or "").strip()
         loser = str(judgment.get("loser") or "").strip()
         if not winner or not loser or winner == loser:
@@ -781,6 +890,26 @@ def add_edge(
     return True
 
 
+def crossing_block_flags(row: dict) -> list[str]:
+    """Flags that disqualify a paper from overriding a level lock upward."""
+    flags_text = " ".join(
+        str(row.get(key, "") or "") for key in ("flags", "_flags", "uncertainty_flags")
+    ).lower()
+    markers = ("incomplete", "off_prompt", "off-prompt", "scaffold", "truncated", "missing_text")
+    blocked = sorted({marker for marker in markers if marker in flags_text})
+    if row.get("_draft_completion_floor_applied"):
+        blocked.append("draft_completion_floor")
+    return blocked
+
+
+def net_support_map(direction: dict[tuple[str, str], float]) -> dict[str, float]:
+    net = defaultdict(float)
+    for (winner, loser), weight in direction.items():
+        net[winner] += weight
+        net[loser] -= weight
+    return dict(net)
+
+
 def build_constraints(
     rows: list[dict],
     raw_scores: dict[str, float],
@@ -792,6 +921,9 @@ def build_constraints(
     max_cross_rubric_gap: float,
     min_crossing_margin: float,
     hard_evidence_margin: float,
+    direction_hard: dict[tuple[str, str], float] | None = None,
+    seed_reliability: float = 1.0,
+    seed_anchor_waivers: bool = False,
 ) -> tuple[dict[str, set[str]], dict[str, int], dict]:
     rows_by_id = {row["student_id"]: row for row in rows}
     student_ids = [row["student_id"] for row in rows]
@@ -802,6 +934,9 @@ def build_constraints(
     allowed_crossings = []
     blocked_crossings = []
     overridden_crossings = []
+    if direction_hard is None:
+        direction_hard = direction
+    net_support = net_support_map(direction_hard)
 
     for judgment in protected_committee_direct_edges(judgments or []):
         winner = str(judgment.get("winner") or "").strip()
@@ -842,6 +977,29 @@ def build_constraints(
             if not add_edge(adjacency, indegree, added_edges, complete["student_id"], incomplete["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
 
+    # Seed-anchored protections (collapse rescue, displacement caps) presume
+    # the seed order is meaningful. When seeds have not earned trust, an edge
+    # that contradicts the evidence-fitted score order re-imposes the very
+    # noise the fit corrected — waive those edges instead.
+    def seed_edge_waived(src: str, dst: str, kind: str, detail: dict) -> bool:
+        if not seed_anchor_waivers or float(seed_reliability) >= 0.7:
+            return False
+        if float(raw_scores.get(src, 0.0)) >= float(raw_scores.get(dst, 0.0)):
+            return False
+        dropped_edges.append(
+            {
+                "kind": kind,
+                "src": src,
+                "dst": dst,
+                "detail": {
+                    **detail,
+                    "score_gap": round(float(raw_scores.get(dst, 0.0)) - float(raw_scores.get(src, 0.0)), 6),
+                },
+                "reason": "seed_anchor_waived_low_seed_trust",
+            }
+        )
+        return True
+
     for row in sorted(rows, key=lambda item: int(item["seed_rank"])):
         sid = row["student_id"]
         cap_info = caps.get(sid, {})
@@ -853,18 +1011,38 @@ def build_constraints(
             if oid == sid:
                 continue
             if int(other["seed_rank"]) < best_rank:
+                detail = {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]}
+                if seed_edge_waived(oid, sid, "severe_collapse_rescue_cap_up", detail):
+                    continue
                 note = {
                     "kind": "severe_collapse_rescue_cap_up",
                     "src": oid,
                     "dst": sid,
-                    "detail": {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]},
+                    "detail": detail,
                 }
                 if not add_edge(adjacency, indegree, added_edges, oid, sid, note):
                     dropped_edges.append({**note, "reason": "cycle_avoided"})
 
+    # Hard precedence edges require corroborated evidence. A single unopposed
+    # cheap read has an 18-43% flip risk on close pairs; it informs the score
+    # fit but must not become an absolute constraint. Corroboration: the pair
+    # was judged more than once, or an adjudicated (committee/escalated)
+    # source decided it, or the clean margin is only reachable by multiple
+    # same-direction reads. Strongest evidence inserts first so cycle
+    # resolution drops the weakest contradicted edges, deterministically.
+    pair_evidence: dict[tuple[str, str], dict] = {}
+    for judgment in judgments or []:
+        token = tuple(sorted((judgment["winner"], judgment["loser"])))
+        info = pair_evidence.setdefault(token, {"clean_count": 0, "adjudicated": False})
+        if not judgment.get("tainted"):
+            info["clean_count"] += 1
+        if judgment.get("adjudication_source") in {"committee_edge", "escalated_adjudication"}:
+            info["adjudicated"] = True
+
+    candidate_edges = []
     seen_pairs = set()
-    for (winner, loser), weight in sorted(direction.items()):
-        reverse = direct_weight(direction, loser, winner)
+    for (winner, loser), weight in sorted(direction_hard.items()):
+        reverse = direct_weight(direction_hard, loser, winner)
         margin = weight - reverse
         pair_token = tuple(sorted((winner, loser)))
         if pair_token in seen_pairs:
@@ -872,15 +1050,53 @@ def build_constraints(
         seen_pairs.add(pair_token)
         if abs(margin) < float(hard_evidence_margin):
             continue
+        evidence = pair_evidence.get(pair_token, {"clean_count": 0, "adjudicated": False})
+        corroborated = (
+            evidence["clean_count"] >= 2
+            or evidence["adjudicated"]
+            or abs(margin) >= 2.0 * float(hard_evidence_margin)
+        )
+        if not corroborated:
+            dropped_edges.append(
+                {
+                    "kind": "strong_pairwise_evidence",
+                    "src": winner if margin > 0 else loser,
+                    "dst": loser if margin > 0 else winner,
+                    "detail": {"margin": round(abs(margin), 6), "clean_count": evidence["clean_count"]},
+                    "reason": "single_uncorroborated_read",
+                }
+            )
+            continue
         src, dst = (winner, loser) if margin > 0 else (loser, winner)
+        src_row = rows_by_id.get(src, {})
+        dst_row = rows_by_id.get(dst, {})
+        if (
+            float(src_row.get("_level_order", 0.0) or 0.0) < float(dst_row.get("_level_order", 0.0) or 0.0)
+            and crossing_block_flags(src_row)
+        ):
+            dropped_edges.append(
+                {
+                    "kind": "strong_pairwise_evidence",
+                    "src": src,
+                    "dst": dst,
+                    "detail": {"margin": round(abs(margin), 6), "guard_flags": crossing_block_flags(src_row)},
+                    "reason": "flagged_winner_band_crossing_guard",
+                }
+            )
+            continue
+        candidate_edges.append((abs(margin), src, dst, evidence))
+
+    for margin_abs, src, dst, evidence in sorted(candidate_edges, key=lambda item: (-item[0], item[1], item[2])):
         note = {
             "kind": "strong_pairwise_evidence",
             "src": src,
             "dst": dst,
             "detail": {
-                "forward_weight": round(direct_weight(direction, src, dst), 6),
-                "reverse_weight": round(direct_weight(direction, dst, src), 6),
-                "margin": round(abs(margin), 6),
+                "forward_weight": round(direct_weight(direction_hard, src, dst), 6),
+                "reverse_weight": round(direct_weight(direction_hard, dst, src), 6),
+                "margin": round(margin_abs, 6),
+                "clean_count": evidence["clean_count"],
+                "adjudicated": evidence["adjudicated"],
             },
         }
         if not add_edge(adjacency, indegree, added_edges, src, dst, note):
@@ -912,21 +1128,51 @@ def build_constraints(
                 allowed_crossings.append(detail)
                 continue
             blocked_crossings.append(detail)
-            reverse_margin = direct_weight(direction, lower["student_id"], higher["student_id"]) - direct_weight(direction, higher["student_id"], lower["student_id"])
+            # P0-1: direct pairwise evidence may override a level lock, but
+            # only clean (untainted) judgments count, and never for papers
+            # carrying completion/off-prompt/scaffold flags.
+            reverse_margin = direct_weight(direction_hard, lower["student_id"], higher["student_id"]) - direct_weight(direction_hard, higher["student_id"], lower["student_id"])
+            net_support_margin = float(net_support.get(lower["student_id"], 0.0)) - float(net_support.get(higher["student_id"], 0.0))
+            guard_flags = crossing_block_flags(lower)
             direct_pairwise_override = (
                 int(detail.get("level_gap", 99)) <= 1
                 and abs(float(detail.get("rubric_gap", 999.0))) <= max(float(max_cross_rubric_gap), 2.0) + 4.0
                 and reverse_margin >= float(hard_evidence_margin)
+                and not guard_flags
             )
             if direct_pairwise_override:
                 overridden_crossings.append(
                     {
                         **detail,
                         "reason": "direct_high_confidence_pairwise_override",
+                        "override_reason": "pairwise_override_level_lock",
+                        "direct_pairwise_margin": round(reverse_margin, 6),
+                        "net_support_margin": round(net_support_margin, 6),
                         "reverse_margin": round(reverse_margin, 6),
                     }
                 )
                 continue
+            if guard_flags and reverse_margin >= float(hard_evidence_margin):
+                detail["override_blocked_by_guard_flags"] = guard_flags
+            # Bands are derived from pass-1 seeds. When seeds have not earned
+            # trust (synthetic calibration, novel scope, contradicted by the
+            # evidence), a band difference alone is a hypothesis, not a
+            # constraint: lock only when direct evidence affirms the band
+            # order. Students with no direct contact keep their seed order
+            # through the prior anyway.
+            if seed_anchor_waivers and float(seed_reliability) < 0.7:
+                affirmative_margin = direct_weight(direction_hard, higher["student_id"], lower["student_id"]) - direct_weight(direction_hard, lower["student_id"], higher["student_id"])
+                if affirmative_margin < float(hard_evidence_margin) / 2.0:
+                    dropped_edges.append(
+                        {
+                            "kind": "level_lock",
+                            "src": higher["student_id"],
+                            "dst": lower["student_id"],
+                            "detail": {**detail, "affirmative_margin": round(affirmative_margin, 6)},
+                            "reason": "level_lock_waived_low_seed_trust",
+                        }
+                    )
+                    continue
             note = {"kind": "level_lock", "src": higher["student_id"], "dst": lower["student_id"], "detail": detail}
             if not add_edge(adjacency, indegree, added_edges, higher["student_id"], lower["student_id"], note):
                 dropped_edges.append({**note, "reason": "cycle_avoided"})
@@ -941,20 +1187,26 @@ def build_constraints(
             if oid == sid:
                 continue
             if int(other["seed_rank"]) < best_rank:
+                detail = {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]}
+                if seed_edge_waived(oid, sid, "displacement_cap_up", detail):
+                    continue
                 note = {
                     "kind": "displacement_cap_up",
                     "src": oid,
                     "dst": sid,
-                    "detail": {"seed_rank": row["seed_rank"], "best_rank": best_rank, "cap": cap_info["cap"]},
+                    "detail": detail,
                 }
                 if not add_edge(adjacency, indegree, added_edges, oid, sid, note):
                     dropped_edges.append({**note, "reason": "cycle_avoided"})
             elif int(other["seed_rank"]) > worst_rank:
+                detail = {"seed_rank": row["seed_rank"], "worst_rank": worst_rank, "cap": cap_info["cap"]}
+                if seed_edge_waived(sid, oid, "displacement_cap_down", detail):
+                    continue
                 note = {
                     "kind": "displacement_cap_down",
                     "src": sid,
                     "dst": oid,
-                    "detail": {"seed_rank": row["seed_rank"], "worst_rank": worst_rank, "cap": cap_info["cap"]},
+                    "detail": detail,
                 }
                 if not add_edge(adjacency, indegree, added_edges, sid, oid, note):
                     dropped_edges.append({**note, "reason": "cycle_avoided"})
@@ -1224,6 +1476,8 @@ def run_global_rerank(
     max_cross_rubric_gap: float,
     min_crossing_margin: float,
     hard_evidence_margin: float,
+    cohort_confidence_path: Path | None = None,
+    seed_trust_mode: str = "adaptive",
 ) -> dict:
     config = load_json(config_path)
     rows = load_seed_rows(scores_path, config if isinstance(config, dict) else {})
@@ -1231,7 +1485,42 @@ def run_global_rerank(
         raise ValueError(f"No seed ranking rows found in {scores_path}")
     rows_by_id = {row["student_id"]: row for row in rows}
     raw_judgment_payload, judgments = load_judgments(judgments_path, rows_by_id)
-    matrix, per_student, directional = build_pairwise_matrix(rows, judgments)
+    anchor_judgment_count = 0
+    if str(os.environ.get("ANCHOR_CALIBRATION_ACTIVE", "") or "").strip().lower() in {"1", "true", "yes"}:
+        # Teacher anchor adjudications enter the rerank as committee-grade
+        # evidence: the teacher read the anchor papers and ordered them.
+        calibration_path = scores_path.parent / "cohort_anchor_calibration.json"
+        calibration = load_json(calibration_path)
+        raw_anchor_items = calibration.get("anchor_pairwise_judgments", []) if isinstance(calibration, dict) else []
+        if raw_anchor_items:
+            anchor_judgments = load_judgments_from_items(raw_anchor_items, rows_by_id, id_offset=len(judgments))
+            judgments.extend(anchor_judgments)
+            judgments = dedupe_by_precedence(judgments, key_fn=lambda item: item["pair_key"])
+            anchor_judgment_count = len(anchor_judgments)
+    matrix, per_student, directional, directional_hard = build_pairwise_matrix(rows, judgments)
+
+    # Seed trust: anchor to pass-1 seeds in proportion to how much they have
+    # earned it. Calibrated familiar scopes keep full anchoring; synthetic
+    # bootstrap scopes with evidence that contradicts seeds release it.
+    if str(seed_trust_mode or "adaptive").strip().lower() == "fixed":
+        seed_rel, seed_rel_detail = 1.0, {"mode": "fixed", "seed_reliability": 1.0}
+    else:
+        signals = load_cohort_confidence_signals(cohort_confidence_path)
+        seed_rel, seed_rel_detail = compute_seed_reliability(signals, judgments)
+    effective_regularization = float(regularization) * (0.15 + (0.85 * seed_rel))
+    effective_min_crossing_margin = float(min_crossing_margin) * (0.35 + (0.65 * seed_rel))
+    cap_scale = 1.0 + (2.5 * (1.0 - seed_rel))
+    effective_low_cap = max(int(low_confidence_max_displacement), int(round(low_confidence_max_displacement * cap_scale)))
+    effective_medium_cap = max(int(medium_confidence_max_displacement), int(round(medium_confidence_max_displacement * cap_scale)))
+    seed_rel_detail.update(
+        {
+            "effective_regularization": round(effective_regularization, 6),
+            "effective_min_crossing_margin": round(effective_min_crossing_margin, 6),
+            "effective_low_cap": effective_low_cap,
+            "effective_medium_cap": effective_medium_cap,
+            "cap_scale": round(cap_scale, 4),
+        }
+    )
     boundary_conflicts, conflict_summary = pairwise_conflict_stats(
         rows,
         matrix.get("comparisons", []),
@@ -1270,13 +1559,13 @@ def run_global_rerank(
         judgments,
         iterations=iterations,
         learning_rate=learning_rate,
-        regularization=regularization,
+        regularization=effective_regularization,
     )
     caps = compute_displacement_caps(
         rows,
         per_student,
-        low_cap=low_confidence_max_displacement,
-        medium_cap=medium_confidence_max_displacement,
+        low_cap=effective_low_cap,
+        medium_cap=effective_medium_cap,
         high_cap=high_confidence_max_displacement,
     )
     adjacency, indegree, constraint_meta = build_constraints(
@@ -1287,8 +1576,11 @@ def run_global_rerank(
         judgments,
         max_cross_level_gap=max_cross_level_gap,
         max_cross_rubric_gap=max_cross_rubric_gap,
-        min_crossing_margin=min_crossing_margin,
+        min_crossing_margin=effective_min_crossing_margin,
         hard_evidence_margin=hard_evidence_margin,
+        direction_hard=directional_hard,
+        seed_reliability=seed_rel,
+        seed_anchor_waivers=bool(seed_rel_detail.get("seeds_unvalidated")),
     )
     final_order = weighted_topological_order(rows, raw_scores, prior_scores, adjacency, indegree)
     final_rows, score_rows = build_final_rows(
@@ -1304,6 +1596,15 @@ def run_global_rerank(
     )
     final_rank_map = {row["student_id"]: int(row["final_rank"]) for row in final_rows}
     agreement = pairwise_agreement(final_rank_map, judgments)
+    tainted_judgments = [j for j in judgments if j.get("tainted")]
+    top_pack_ids = {sid for sid, rank in final_rank_map.items() if rank <= 10}
+    tainted_top_pack_pairs = sorted(
+        {
+            j["pair_key"]
+            for j in tainted_judgments
+            if j["pair"][0] in top_pack_ids or j["pair"][1] in top_pack_ids
+        }
+    )
     direct_edges = direct_edge_diagnostics(final_rank_map, judgments, constraint_meta)
     swap_count = sum(1 for judgment in judgments if judgment.get("decision") == "SWAP")
     low_confidence_count = sum(1 for judgment in judgments if judgment.get("confidence") == "low")
@@ -1373,7 +1674,13 @@ def run_global_rerank(
             "high_confidence_direct_edge_violations": direct_edges["high_confidence_direct_edge_violation_count"],
             "committee_direct_edge_violations": direct_edges["committee_direct_edge_violation_count"],
             "direct_edge_weighted_violation_rate": direct_edges["direct_edge_weighted_violation_rate"],
+            "pairwise_repair_tainted_rate": round(len(tainted_judgments) / len(judgments), 6) if judgments else 0.0,
+            "tainted_judgment_count": len(tainted_judgments),
+            "tainted_top_pack_pairs": tainted_top_pack_pairs,
+            "overridden_crossings": len(constraint_meta["overridden_crossings"]),
+            "anchor_judgments_injected": anchor_judgment_count,
         },
+        "seed_trust": seed_rel_detail,
         "constraints": constraint_meta,
         "direct_edge_diagnostics": direct_edges,
         "movements": movements,
@@ -1431,6 +1738,13 @@ def main() -> int:
     parser.add_argument("--max-cross-rubric-gap", type=float, default=2.0, help="Maximum rubric gap allowed for a boundary crossing")
     parser.add_argument("--min-crossing-margin", type=float, default=1.5, help="Minimum direct evidence margin required for a boundary crossing")
     parser.add_argument("--hard-evidence-margin", type=float, default=1.5, help="Minimum direct evidence margin to add a hard pairwise precedence edge")
+    parser.add_argument("--cohort-confidence", default="outputs/cohort_confidence.json", help="Cohort confidence JSON used to size seed trust (optional)")
+    parser.add_argument(
+        "--seed-trust-mode",
+        default=os.environ.get("RERANK_SEED_TRUST_MODE", "adaptive"),
+        choices=["adaptive", "fixed"],
+        help="adaptive: anchor to seeds in proportion to earned reliability; fixed: legacy full seed trust",
+    )
     args = parser.parse_args()
 
     try:
@@ -1454,6 +1768,8 @@ def main() -> int:
             max_cross_rubric_gap=args.max_cross_rubric_gap,
             min_crossing_margin=args.min_crossing_margin,
             hard_evidence_margin=args.hard_evidence_margin,
+            cohort_confidence_path=Path(args.cohort_confidence) if args.cohort_confidence else None,
+            seed_trust_mode=args.seed_trust_mode,
         )
     except ValueError as exc:
         print(exc)

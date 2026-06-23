@@ -51,6 +51,10 @@ def test_build_dashboard_data(tmp_path, monkeypatch):
     assert payload["students"][0]["display_name"] == "Jordan Lee"
     assert payload["curve_top"] == "92"
     assert payload["students"][0]["feedback_text"] == "Star 1"
+    assert payload["students"][0]["rubric_claims"]
+    assert payload["students"][0]["criterion_summary"]["claim_count"] >= 1
+    assert payload["instructional_summary"]["teacher_message"]
+    assert payload["data_posture"]["status"] == "local_private_workspace"
 
 
 def test_build_dashboard_helpers(tmp_path):
@@ -158,7 +162,11 @@ def test_build_dashboard_data_empty_feedback_and_cost_report(tmp_path, monkeypat
     assert bdd.main() == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["cost_report"]["grand_total"] == 1.2345
-    assert payload["students"][0]["feedback_text"] == ""
+    assert "### Star 1" in payload["students"][0]["feedback_text"]
+    assert "## One Wish" in payload["students"][0]["feedback_text"]
+    assert payload["students"][0]["feedback_generated"] is True
+    assert payload["students"][0]["rubric_claims"][0]["evidence"][0]["hash"]
+    assert payload["instructional_summary"]["misconceptions"]
     assert payload["distribution"]["cohort_size"] == 1
     assert payload["distribution"]["level_counts"]["2"] == 1
 
@@ -277,6 +285,8 @@ def test_build_dashboard_data_surfaces_uncertainty_and_review_context(tmp_path, 
     assert payload["local_teacher_prior"]["active"] is True
     assert payload["review_delta"]["summary"]["rank_movement_count"] == 1
     assert payload["review_draft"]["review_state"] == "draft"
+    assert student["rubric_claims"]
+    assert student["criterion_summary"]["teacher_read_required"] is True
     assert payload["rubric_manifest"]["rubric_family"] == "rubric_a"
     assert payload["rubric_verification"]["status"] == "warning"
     assert payload["uncertainty_summary"]["counts"]["boundary_cases"] == 1
